@@ -786,7 +786,7 @@ html, body {
 .debug-panel {
   position: fixed;
   top: 8px;
-  left: 8px;
+  right: 8px;
   z-index: 9999;
   width: 260px;
   max-width: calc(100vw - 16px);
@@ -799,8 +799,12 @@ html, body {
   pointer-events: auto;
 }
 .debug-panel.hidden { display: none; }
-/* 折り畳み時はアイコン＋トグルだけのコンパクト表示 */
-.debug-panel.collapsed { width: auto; }
+/* 折り畳み時はアイコン＋トグルだけのコンパクト表示。さらに下にずらして
+   ダンジョンHUDの🎒メニューボタンと被らないようにする */
+.debug-panel.collapsed {
+  top: 70px;
+  width: auto;
+}
 .debug-panel.collapsed .debug-panel-label { display: none; }
 .debug-panel.collapsed .debug-panel-header { padding: 4px 8px; }
 
