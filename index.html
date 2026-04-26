@@ -116,6 +116,29 @@
     </div>
   </div>
 
+  <!-- ダンジョン入場前確認モーダル -->
+  <div id="pre-dungeon-modal" class="pre-dungeon-modal hidden">
+    <div class="pre-dungeon-box">
+      <div class="pre-dungeon-title">🚪 潜入確認</div>
+
+      <section class="pre-dungeon-section">
+        <div class="pre-dungeon-section-title">ダンジョン</div>
+        <div id="pre-dungeon-info"></div>
+      </section>
+
+      <section class="pre-dungeon-section">
+        <div class="pre-dungeon-section-title">プレイヤーの状態</div>
+        <div id="pre-dungeon-player"></div>
+      </section>
+
+      <div class="pre-dungeon-actions">
+        <button id="btn-pre-menu"    class="btn-secondary">🎒 メニュー</button>
+        <button id="btn-pre-cancel"  class="btn-back">戻る</button>
+        <button id="btn-pre-confirm" class="btn-primary">潜入する</button>
+      </div>
+    </div>
+  </div>
+
   <!-- メニューモーダル（マップ・ダンジョンの両方から開く。screen 非依存に body 直下） -->
   <div id="menu-modal" class="menu-modal hidden">
     <div class="menu-modal-header">

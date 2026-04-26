@@ -480,11 +480,71 @@ html, body {
 #result-title { font-size: 28px; font-weight: bold; }
 #result-body  { font-size: 15px; color: var(--muted); line-height: 1.6; }
 
+/* ── 入場前確認モーダル ── */
+.pre-dungeon-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 4500;
+  background: rgba(0,0,0,0.78);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.pre-dungeon-modal.hidden { display: none; }
+
+.pre-dungeon-box {
+  background: var(--surface2);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 380px;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.pre-dungeon-title {
+  font-size: 17px;
+  font-weight: bold;
+  text-align: center;
+  color: var(--accent);
+}
+.pre-dungeon-section {
+  background: rgba(255,255,255,0.04);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.pre-dungeon-section-title {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.pre-dungeon-info-line { font-size: 13px; line-height: 1.7; }
+.pre-dungeon-info-line .label { color: var(--muted); margin-right: 6px; }
+.pre-dungeon-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 4px;
+}
+.pre-dungeon-actions .btn-secondary { grid-column: 1 / -1; }
+.pre-dungeon-actions .btn-back,
+.pre-dungeon-actions .btn-primary {
+  width: 100%;
+  padding: 12px;
+  font-size: 14px;
+}
+
 /* ── MENU MODAL（マップ画面のメニュー） ── */
 .menu-modal {
   position: fixed;
   inset: 0;
-  z-index: 5000;
+  z-index: 5500;
   background: var(--bg);
   display: flex;
   flex-direction: column;

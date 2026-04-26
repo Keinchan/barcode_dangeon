@@ -37,9 +37,67 @@ function show(name) {
 // ─────────────────────────────────────────────
 // マップ画面（位置ベース固定湧き）
 // ─────────────────────────────────────────────
+let pendingDungeon = null;
+
 initMap({
-  onEnter:   d => enterDungeon(d),
+  onEnter:   d => requestEnterDungeon(d),
   isCleared: seed => clearedSet.has(seed),
+});
+
+// 入場前モーダル
+function requestEnterDungeon(d) {
+  pendingDungeon = d;
+  showPreDungeonModal(d);
+}
+
+function showPreDungeonModal(d) {
+  const stars = '⭐'.repeat(d.difficulty);
+  const cleared = clearedSet.has(d.seed) ? '<span style="color:#4caf50">✅ 攻略済み</span> ' : '';
+  document.getElementById('pre-dungeon-info').innerHTML =
+    `<div class="pre-dungeon-info-line"><span class="label">名称</span><b>${d.name}</b></div>` +
+    `<div class="pre-dungeon-info-line"><span class="label">難易度</span>${stars} / B${d.floors}F</div>` +
+    `<div class="pre-dungeon-info-line"><span class="label">レアリティ</span>` +
+      `<span style="color:${d.rarityBase.color};font-weight:bold">${d.rarityBase.name}</span></div>` +
+    `<div class="pre-dungeon-info-line"><span class="label">属性</span>${d.element}</div>` +
+    (cleared ? `<div class="pre-dungeon-info-line">${cleared}（再戦可）</div>` : '');
+
+  const w = player.weapon;
+  const a = player.armor;
+  const wLine = w
+    ? `<div class="pre-dungeon-info-line">⚔️ <span style="color:${w.rarityColor}">${w.name}</span> ATK+${w.atkBonus}` +
+      (w.skill?.name ? ` <span style="color:#888">(${w.skill.name})</span>` : '') + `</div>`
+    : '<div class="pre-dungeon-info-line" style="color:#888">⚔️ 武器なし</div>';
+  const aLine = a
+    ? `<div class="pre-dungeon-info-line">🛡️ <span style="color:${a.rarityColor}">${a.name}</span> DEF+${a.defBonus}` +
+      (a.skill?.name ? ` <span style="color:#888">(${a.skill.name})</span>` : '') + `</div>`
+    : '<div class="pre-dungeon-info-line" style="color:#888">🛡️ 防具なし</div>';
+
+  document.getElementById('pre-dungeon-player').innerHTML =
+    `<div class="pre-dungeon-info-line">HP: <b style="color:#4caf50">${player.maxHp}/${player.maxHp}</b>` +
+      ` <span style="color:#888">（入場時に全回復）</span></div>` +
+    `<div class="pre-dungeon-info-line">ATK ${player.atk}　DEF ${player.def}</div>` +
+    wLine + aLine +
+    `<div class="pre-dungeon-info-line"><span class="label">持ち物</span>${player.inventory.length}/8 個</div>`;
+
+  document.getElementById('pre-dungeon-modal').classList.remove('hidden');
+}
+
+document.getElementById('btn-pre-confirm').addEventListener('click', () => {
+  if (!pendingDungeon) return;
+  const d = pendingDungeon;
+  pendingDungeon = null;
+  document.getElementById('pre-dungeon-modal').classList.add('hidden');
+  enterDungeon(d);
+});
+
+document.getElementById('btn-pre-cancel').addEventListener('click', () => {
+  pendingDungeon = null;
+  document.getElementById('pre-dungeon-modal').classList.add('hidden');
+});
+
+document.getElementById('btn-pre-menu').addEventListener('click', () => {
+  // メニューを上に重ねて開く（pendingDungeon は維持）
+  openMenu();
 });
 
 document.getElementById('btn-scan').addEventListener('click', () => {
@@ -52,6 +110,8 @@ document.getElementById('btn-menu').addEventListener('click', () => {
 });
 document.getElementById('btn-menu-close').addEventListener('click', () => {
   document.getElementById('menu-modal').classList.add('hidden');
+  // 入場前モーダルが裏にあれば、装備変更を反映するため再描画
+  if (pendingDungeon) showPreDungeonModal(pendingDungeon);
 });
 
 // ダンジョン画面のメニューボタン
