@@ -123,6 +123,49 @@
     </div>
   </div>
 
+  <!-- デバッグパネル（?debug=1 で表示） -->
+  <div id="debug-panel" class="debug-panel hidden">
+    <div class="debug-panel-header">
+      <span>🛠 DEBUG</span>
+      <button id="debug-toggle" class="debug-mini-btn" title="折り畳み">−</button>
+    </div>
+    <div id="debug-panel-body" class="debug-panel-body">
+      <fieldset class="debug-section">
+        <legend>📷 モックスキャン</legend>
+        <input id="debug-scan-text" type="text" placeholder="バーコード文字列 (8〜13桁)" value="4901234567890" />
+        <select id="debug-scan-format">
+          <option value="EAN_13">EAN_13 / JAN-13</option>
+          <option value="EAN_8">EAN_8 / JAN-8</option>
+          <option value="UPC_A">UPC_A</option>
+          <option value="CODE_128">CODE_128（レシート系）</option>
+          <option value="ITF">ITF（書籍系）</option>
+        </select>
+        <button id="debug-mock-scan" class="debug-action">スキャン実行</button>
+      </fieldset>
+
+      <fieldset class="debug-section">
+        <legend>📍 モックGPS</legend>
+        <div class="debug-row">
+          <input id="debug-gps-lat" type="number" step="0.0001" placeholder="lat"   value="35.6762" />
+          <input id="debug-gps-lng" type="number" step="0.0001" placeholder="lng"   value="139.6503" />
+        </div>
+        <div class="debug-row">
+          <button id="debug-set-gps"  class="debug-action">この座標に移動</button>
+          <button id="debug-clear-gps" class="debug-action ghost">解除</button>
+        </div>
+        <div id="debug-gps-status" class="debug-meta">実GPSを使用中</div>
+      </fieldset>
+
+      <fieldset class="debug-section">
+        <legend>⚙️ オプション</legend>
+        <label class="debug-row">
+          <input id="debug-bypass" type="checkbox" />
+          <span>入場距離(80m)を無視</span>
+        </label>
+      </fieldset>
+    </div>
+  </div>
+
   <script type="module" src="src/main.js"></script>
 </body>
 </html>

@@ -1,5 +1,6 @@
 import { BrowserMultiFormatReader } from '@zxing/browser';
 import { BarcodeFormat, DecodeHintType } from '@zxing/library';
+import { getDebugState } from './debug.js';
 
 let reader   = null;
 let controls = null;
@@ -79,6 +80,10 @@ export function stopScanner() {
 }
 
 export function getPosition() {
+  // デバッグ：モックGPSが設定されていればそれを返す
+  const mock = getDebugState().mockGps;
+  if (mock) return Promise.resolve({ lat: mock.lat, lng: mock.lng });
+
   return new Promise(resolve => {
     if (!navigator.geolocation) {
       resolve({ lat: 35.6762, lng: 139.6503 }); // 東京デフォルト

@@ -422,6 +422,116 @@ html, body {
 #result-title { font-size: 28px; font-weight: bold; }
 #result-body  { font-size: 15px; color: var(--muted); line-height: 1.6; }
 
+/* ── DEBUG PANEL ── */
+.debug-panel {
+  position: fixed;
+  top: 8px;
+  right: 8px;
+  z-index: 9999;
+  width: 260px;
+  max-width: calc(100vw - 16px);
+  background: rgba(20, 20, 30, 0.92);
+  border: 1px solid #ff6b35;
+  border-radius: 8px;
+  font-size: 11px;
+  color: #fff;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  pointer-events: auto;
+}
+.debug-panel.hidden { display: none; }
+
+.debug-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 10px;
+  background: #ff6b35;
+  border-radius: 7px 7px 0 0;
+  font-weight: bold;
+  font-size: 12px;
+  cursor: move;
+}
+
+.debug-mini-btn {
+  background: rgba(255,255,255,0.2);
+  color: #fff;
+  border: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.debug-panel-body {
+  padding: 8px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.debug-panel-body.collapsed { display: none; }
+
+.debug-section {
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 6px;
+  padding: 6px 8px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.debug-section legend {
+  font-size: 10px;
+  color: #ff6b35;
+  padding: 0 4px;
+}
+.debug-section input[type="text"],
+.debug-section input[type="number"],
+.debug-section select {
+  width: 100%;
+  background: rgba(0,0,0,0.4);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 11px;
+  font-family: inherit;
+}
+.debug-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.debug-row input { flex: 1; min-width: 0; }
+.debug-row label, .debug-row span { font-size: 11px; }
+
+.debug-action {
+  flex: 1;
+  background: #ff6b35;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 6px;
+  font-size: 11px;
+  font-weight: bold;
+  cursor: pointer;
+}
+.debug-action:active { transform: scale(0.97); }
+.debug-action.ghost {
+  background: transparent;
+  border: 1px solid #ff6b35;
+  color: #ff6b35;
+  flex: 0 0 auto;
+}
+
+.debug-meta {
+  font-size: 10px;
+  color: #aaa;
+  margin-top: 2px;
+}
+
 /* ── LEAFLET overrides ── */
 .player-marker-icon { background: none !important; border: none !important; }
 .dungeon-map-icon {

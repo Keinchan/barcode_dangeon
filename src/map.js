@@ -5,6 +5,7 @@ import {
   distanceMeters,
   ENTER_RADIUS,
 } from './generator.js';
+import { getDebugState } from './debug.js';
 
 let map          = null;
 let playerMarker = null;
@@ -92,7 +93,9 @@ function _addDungeonPin(dungeon) {
       marker.bindPopup(`<b>${dungeon.name}</b><br>位置情報を取得中...`).openPopup();
       return;
     }
-    const inRange    = isWithinEnterRadius(playerPos.lat, playerPos.lng, dungeon);
+    const dbg        = getDebugState();
+    const inRange    = dbg.bypassEnterRadius
+                        || isWithinEnterRadius(playerPos.lat, playerPos.lng, dungeon);
     const dist       = Math.round(distanceMeters(playerPos.lat, playerPos.lng, dungeon.lat, dungeon.lng));
     const clearedNow = isClearedCb?.(dungeon.seed) ?? false;
 
@@ -142,4 +145,10 @@ export function refreshPin(seed) {
 
 export function getPlayerPos() {
   return playerPos;
+}
+
+// デバッグ用：プレイヤー位置を任意座標に強制設定（地図中心も移動）
+export function setPlayerPosition(lat, lng) {
+  _setPlayer(lat, lng);
+  if (map) map.setView([lat, lng], 16);
 }

@@ -1,9 +1,16 @@
-import { initMap, refreshPin } from './map.js';
-import { startScanner, stopScanner, getPosition } from './scanner.js';
+import { initMap, refreshPin, setPlayerPosition } from './map.js';
+import { startScanner, stopScanner, getPosition, categoryOfFormat } from './scanner.js';
 import { createPlayer } from './generator.js';
 import { generateItemFromBarcode, rarityFromDigit, bumpRarity } from './items.js';
 import { Dungeon } from './dungeon.js';
 import { Battle } from './battle.js';
+import {
+  DEBUG,
+  setMockGps,
+  clearMockGps,
+  setBypassEnterRadius,
+  getDebugState,
+} from './debug.js';
 
 // ── 状態 ──
 let screen       = 'map';
@@ -404,3 +411,59 @@ function showResult(isWin) {
 document.getElementById('btn-result-back').addEventListener('click', () => {
   show('map');
 });
+
+// ─────────────────────────────────────────────
+// デバッグパネル（?debug=1 で有効）
+// ─────────────────────────────────────────────
+if (DEBUG) {
+  const panel = document.getElementById('debug-panel');
+  panel.classList.remove('hidden');
+
+  // 折り畳み
+  document.getElementById('debug-toggle').addEventListener('click', () => {
+    const body = document.getElementById('debug-panel-body');
+    const btn  = document.getElementById('debug-toggle');
+    const collapsed = body.classList.toggle('collapsed');
+    btn.textContent = collapsed ? '+' : '−';
+  });
+
+  // モックスキャン
+  document.getElementById('debug-mock-scan').addEventListener('click', () => {
+    const text   = document.getElementById('debug-scan-text').value.trim();
+    const format = document.getElementById('debug-scan-format').value;
+    if (!/^\d{8,20}$/.test(text)) {
+      alert('バーコードは数字8〜20桁で入力してください');
+      return;
+    }
+    stopScanner();
+    const category = categoryOfFormat(format);
+    const scanResult = { text, format, category };
+    const item = _itemFromScan(scanResult);
+    pendingItem = item;
+    show('scanner');
+    _showItemResult(item, scanResult);
+  });
+
+  // モックGPS
+  document.getElementById('debug-set-gps').addEventListener('click', () => {
+    const lat = document.getElementById('debug-gps-lat').value;
+    const lng = document.getElementById('debug-gps-lng').value;
+    if (!setMockGps(lat, lng)) {
+      alert('緯度経度の入力が不正です');
+      return;
+    }
+    const m = getDebugState().mockGps;
+    setPlayerPosition(m.lat, m.lng);
+    document.getElementById('debug-gps-status').textContent =
+      `モック中: ${m.lat.toFixed(5)}, ${m.lng.toFixed(5)}`;
+  });
+  document.getElementById('debug-clear-gps').addEventListener('click', () => {
+    clearMockGps();
+    document.getElementById('debug-gps-status').textContent = '実GPSを使用中（次回のGPS更新で反映）';
+  });
+
+  // 入場距離バイパス
+  document.getElementById('debug-bypass').addEventListener('change', e => {
+    setBypassEnterRadius(e.target.checked);
+  });
+}
