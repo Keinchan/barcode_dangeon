@@ -158,6 +158,12 @@ function _acquireItem(item) {
 // ダンジョン
 // ─────────────────────────────────────────────
 function enterDungeon(data) {
+  // 戦闘UIを必ずリセット（デバッグ操作で途中離脱した場合の保険）
+  combatActive = false;
+  battle       = null;
+  document.getElementById('combat-panel').classList.add('hidden');
+  document.getElementById('dungeon-footer').classList.remove('hidden');
+
   dungeonData  = data;
   // 入場前スナップショット（敗北時ロールバック）
   entrySnapshot = {
@@ -448,6 +454,14 @@ if (DEBUG) {
 
   // モックスキャン
   document.getElementById('debug-mock-scan').addEventListener('click', () => {
+    if (combatActive) {
+      alert('戦闘中はスキャンできません（戦闘を終わらせてください）');
+      return;
+    }
+    if (screen === 'dungeon') {
+      alert('ダンジョン内ではスキャンできません（マップに戻ってから）');
+      return;
+    }
     const text   = document.getElementById('debug-scan-text').value.trim();
     const format = document.getElementById('debug-scan-format').value;
     if (!/^\d{8,20}$/.test(text)) {
