@@ -32,6 +32,112 @@ html, body {
 }
 .screen.active { display: flex; }
 
+/* ── タイトル画面（ログイン） ── */
+#screen-title {
+  background: var(--bg);
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  overflow-y: auto;
+}
+.title-box {
+  width: 100%;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.title-logo {
+  font-size: 22px;
+  font-weight: bold;
+  text-align: center;
+  text-shadow: 0 0 12px var(--primary);
+  margin-bottom: 6px;
+  letter-spacing: 1px;
+}
+.title-section {
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.title-section-label {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 4px;
+}
+.title-section input[type="text"] {
+  background: rgba(0,0,0,0.4);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: inherit;
+}
+.title-save-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.title-save-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 8px;
+}
+.title-save-info {
+  flex: 1;
+  min-width: 0;
+}
+.title-save-name { font-size: 14px; font-weight: bold; }
+.title-save-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.title-save-load {
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: bold;
+  cursor: pointer;
+}
+.title-save-delete {
+  background: transparent;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  padding: 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.title-empty {
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+  padding: 8px;
+}
+
+/* メニューのログアウトボタン */
+.menu-logout-btn {
+  width: 100%;
+  background: transparent;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: bold;
+  cursor: pointer;
+}
+.menu-logout-btn:active { background: var(--danger); color: #fff; }
+
 /* ── MAP ── */
 #map { flex: 1; }
 

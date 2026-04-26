@@ -1,4 +1,4 @@
-import { initMap, refreshPin, setPlayerPosition } from './map.js';
+import { initMap, refreshPin, setPlayerPosition, invalidateMapSize } from './map.js';
 import { startScanner, stopScanner, getPosition, categoryOfFormat } from './scanner.js';
 import {
   createPlayer,
@@ -17,6 +17,10 @@ import { Dungeon } from './dungeon.js';
 import { Battle } from './battle.js';
 import { showFloatingDamage } from './ui.js';
 import {
+  listUsers, getCurrentUser, setCurrentUser,
+  loadSave, saveData, deleteSave, clearAllSaves,
+} from './save.js';
+import {
   DEBUG,
   setMockGps,
   clearMockGps,
@@ -28,13 +32,14 @@ import {
 } from './debug.js';
 
 // ── 状態 ──
-let screen       = 'map';
+let screen       = 'title';
 let player       = createPlayer();      // セッション通して維持
 let dungeonData  = null;
 let dungeon      = null;
 let currentFloor = 1;
 let battle       = null;
 let combatActive = false;               // 戦闘中フラグ（インライン化のため screen は dungeon のまま）
+let currentUser  = null;                // ログイン中のユーザー名
 const clearedSet = new Set();
 
 // ダンジョン入場時のスナップショット（敗北時ロールバック用）
@@ -47,6 +52,11 @@ function show(name) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById('screen-' + name).classList.add('active');
   screen = name;
+  // マップを表示する時は Leaflet のサイズキャッシュを更新（非表示中に初期化されると
+  // タイル配置がズレて、クリック座標と表示位置が不一致になり地図が勝手に動いて見える）
+  if (name === 'map') {
+    requestAnimationFrame(() => invalidateMapSize());
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -196,6 +206,7 @@ function openMenu() {
 // メニュー（装備・持ち物管理）
 // ─────────────────────────────────────────────
 function refreshMenu() {
+  document.getElementById('menu-username').textContent = currentUser ? `(${currentUser})` : '(未ログイン)';
   document.getElementById('menu-lv').textContent  = player.level;
   document.getElementById('menu-hp').textContent  = `${player.hp}/${player.maxHp}`;
   document.getElementById('menu-atk').textContent = player.atk;
@@ -280,6 +291,7 @@ function _onUnequipClick(slot) {
       _unequipDirect(slot);
       refreshHUD();
       refreshMenu();
+      autoSave();
     });
     return;
   }
@@ -354,6 +366,7 @@ document.getElementById('btn-swap-unequip').addEventListener('click', () => {
   document.getElementById('swap-modal').classList.add('hidden');
   refreshHUD();
   refreshMenu();
+  autoSave();
 });
 
 document.getElementById('btn-swap-cancel').addEventListener('click', () => {
@@ -406,6 +419,7 @@ function _renderInventoryRow(item, idx) {
     if (!confirm(`${item.name} を廃棄しますか？`)) return;
     player.inventory.splice(idx, 1);
     refreshMenu();
+    autoSave();
   });
   return div;
 }
@@ -460,6 +474,7 @@ function _usePotionFromInventory(idx) {
   }
   refreshHUD();
   refreshMenu();
+  autoSave();
 }
 
 function _equipFromInventory(idx) {
@@ -478,6 +493,7 @@ function _equipFromInventory(idx) {
   }
   refreshHUD();
   refreshMenu();
+  autoSave();
 }
 
 // ─────────────────────────────────────────────
@@ -559,6 +575,7 @@ document.getElementById('btn-keep-item').addEventListener('click', () => {
   pendingItem = null;
   alert(msg);
   show('map');
+  autoSave();
 });
 
 // 装備自動切替＋インベントリ追加。戻り値: 通知メッセージ
@@ -610,6 +627,7 @@ function enterDungeon(data) {
   currentFloor = 1;
   loadFloor(1);
   show('dungeon');
+  autoSave();
 }
 
 function loadFloor(floor) {
@@ -652,6 +670,7 @@ function gainXp(amount) {
   }
   refreshHUD();
   if (!document.getElementById('menu-modal').classList.contains('hidden')) refreshMenu();
+  autoSave();
 }
 
 // モンスター撃破時のXP量
@@ -780,6 +799,7 @@ function pickupItem(item) {
 
   refreshHUD();
   dungeon.render(document.getElementById('dungeon-canvas'));
+  autoSave();
 }
 
 // D-パッド（8方向＋待機）
@@ -980,6 +1000,7 @@ function dungeonClear() {
   clearedSet.add(dungeonData.seed);
   refreshPin(dungeonData.seed);
   showResult(true);
+  autoSave();
 }
 
 function showResult(isWin) {
@@ -1000,11 +1021,140 @@ function showResult(isWin) {
   document.getElementById('result-body').textContent  = isWin
     ? `${dungeonData.name} を踏破した！\n（再挑戦可）`
     : 'ダンジョンで力尽きた...\nこのダンジョンで拾ったものは失われた';
+  autoSave();
 }
 
 document.getElementById('btn-result-back').addEventListener('click', () => {
   show('map');
+  autoSave();
 });
+
+// ─────────────────────────────────────────────
+// ログイン / セーブ
+// ─────────────────────────────────────────────
+function autoSave() {
+  if (!currentUser) return;
+  saveData(currentUser, {
+    player: {
+      level: player.level,
+      xp: player.xp,
+      hp: player.hp,
+      maxHp: player.maxHp,
+      atkBase: player.atkBase,
+      defBase: player.defBase,
+      atk: player.atk,
+      def: player.def,
+      weapon: player.weapon,
+      armor: player.armor,
+      inventory: player.inventory,
+    },
+    clearedSeeds: Array.from(clearedSet),
+    savedAt: Date.now(),
+  });
+  _updateDebugSaveStatus();
+}
+
+function _applySave(data) {
+  if (!data || !data.player) return;
+  // フィールドの取り残しを防ぐため初期化してから上書き
+  player = createPlayer();
+  Object.assign(player, data.player);
+  clearedSet.clear();
+  if (Array.isArray(data.clearedSeeds)) {
+    for (const s of data.clearedSeeds) clearedSet.add(s);
+  }
+  refreshHUD();
+}
+
+function loginAs(username, isNew) {
+  currentUser = username;
+  setCurrentUser(username);
+
+  if (isNew) {
+    player = createPlayer();
+    clearedSet.clear();
+    autoSave();
+  } else {
+    const data = loadSave(username);
+    if (data) _applySave(data);
+    else { player = createPlayer(); clearedSet.clear(); }
+  }
+  show('map');
+  _updateDebugSaveStatus();
+}
+
+function renderTitle() {
+  const list = document.getElementById('title-save-list');
+  const users = listUsers();
+  if (users.length === 0) {
+    list.innerHTML = '<div class="title-empty">セーブデータがありません</div>';
+    return;
+  }
+  list.innerHTML = '';
+  for (const name of users) {
+    const data = loadSave(name);
+    const lv = data?.player?.level ?? 1;
+    const inv = data?.player?.inventory?.length ?? 0;
+    const at  = data?.savedAt ? new Date(data.savedAt).toLocaleString('ja-JP', { dateStyle: 'short', timeStyle: 'short' }) : '';
+    const row = document.createElement('div');
+    row.className = 'title-save-row';
+    row.innerHTML = `
+      <div class="title-save-info">
+        <div class="title-save-name">${name}</div>
+        <div class="title-save-meta">Lv${lv}・持ち物${inv}個 ${at ? '/ ' + at : ''}</div>
+      </div>
+      <button class="title-save-load">続きから</button>
+      <button class="title-save-delete" title="削除">🗑</button>
+    `;
+    row.querySelector('.title-save-load').addEventListener('click', () => loginAs(name, false));
+    row.querySelector('.title-save-delete').addEventListener('click', () => {
+      if (!confirm(`${name} のセーブを削除します。よろしいですか？`)) return;
+      deleteSave(name);
+      renderTitle();
+    });
+    list.appendChild(row);
+  }
+}
+
+document.getElementById('btn-title-newgame').addEventListener('click', () => {
+  const input = document.getElementById('title-username-input');
+  const name = (input.value || '').trim();
+  if (!name) { alert('ユーザー名を入力してください'); return; }
+  if (listUsers().includes(name)) {
+    if (!confirm(`「${name}」は既存のセーブを上書きします。続けますか？`)) return;
+  }
+  input.value = '';
+  loginAs(name, true);
+});
+
+document.getElementById('btn-logout').addEventListener('click', () => {
+  if (!confirm('ログアウトしますか？（セーブ済みデータは残ります）')) return;
+  autoSave();
+  document.getElementById('menu-modal').classList.add('hidden');
+  setCurrentUser(null);
+  currentUser = null;
+  player = createPlayer();
+  clearedSet.clear();
+  renderTitle();
+  show('title');
+  _updateDebugSaveStatus();
+});
+
+// ページを離れる時に保険として最後の保存
+window.addEventListener('beforeunload', () => {
+  autoSave();
+});
+
+// 起動時：自動ログイン or タイトル表示
+(function bootLogin() {
+  const cur = getCurrentUser();
+  if (cur && loadSave(cur)) {
+    loginAs(cur, false);
+  } else {
+    renderTitle();
+    show('title');
+  }
+})();
 
 // ─────────────────────────────────────────────
 // デバッグパネル（?debug=1 で有効）
@@ -1218,5 +1368,37 @@ if (DEBUG) {
     player.hp = player.maxHp;
     refreshHUD();
     if (!document.getElementById('menu-modal').classList.contains('hidden')) refreshMenu();
+    autoSave();
   });
+
+  // セーブ強制
+  document.getElementById('debug-save-now').addEventListener('click', () => {
+    if (!currentUser) { alert('未ログインです'); return; }
+    autoSave();
+    alert(`セーブしました (${currentUser})`);
+  });
+
+  // 全データ消去
+  document.getElementById('debug-clear-all').addEventListener('click', () => {
+    if (!confirm('全てのセーブデータを消去します。元に戻せません')) return;
+    clearAllSaves();
+    currentUser = null;
+    player = createPlayer();
+    clearedSet.clear();
+    document.getElementById('menu-modal').classList.add('hidden');
+    renderTitle();
+    show('title');
+    _updateDebugSaveStatus();
+  });
+}
+
+// デバッグパネルのセーブ状態表示
+function _updateDebugSaveStatus() {
+  const el = document.getElementById('debug-save-status');
+  if (!el) return;
+  if (currentUser) {
+    el.textContent = `ログイン中: ${currentUser}`;
+  } else {
+    el.textContent = '未ログイン';
+  }
 }

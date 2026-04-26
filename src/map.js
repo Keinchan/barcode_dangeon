@@ -163,6 +163,11 @@ export function getPlayerPos() {
   return playerPos;
 }
 
+// 画面切替などで #map のサイズが変わった時に Leaflet 内部のサイズキャッシュを更新
+export function invalidateMapSize() {
+  if (map) map.invalidateSize();
+}
+
 // デバッグ用：プレイヤー位置を任意座標に強制設定（地図中心も移動）
 export function setPlayerPosition(lat, lng) {
   _setPlayer(lat, lng);

@@ -11,8 +11,26 @@
 </head>
 <body>
 
+  <!-- タイトル画面（ログイン） -->
+  <div id="screen-title" class="screen active">
+    <div class="title-box">
+      <div class="title-logo">⚔️ バーコードダンジョン</div>
+
+      <div class="title-section" id="title-existing-saves">
+        <div class="title-section-label">続きから</div>
+        <div id="title-save-list" class="title-save-list"></div>
+      </div>
+
+      <div class="title-section">
+        <div class="title-section-label">新規プレイ</div>
+        <input id="title-username-input" type="text" placeholder="ユーザー名（20文字まで）" maxlength="20" />
+        <button id="btn-title-newgame" class="btn-primary">新しく始める</button>
+      </div>
+    </div>
+  </div>
+
   <!-- マップ画面 -->
-  <div id="screen-map" class="screen active">
+  <div id="screen-map" class="screen">
     <div id="map"></div>
     <div class="map-hud">
       <div class="hud-title">⚔️ バーコードダンジョン</div>
@@ -193,6 +211,11 @@
         <div class="menu-section-title">持ち物 <span id="menu-inv-count" class="menu-section-meta"></span></div>
         <div id="menu-inventory"></div>
       </section>
+
+      <section class="menu-section">
+        <div class="menu-section-title">アカウント <span id="menu-username" class="menu-section-meta"></span></div>
+        <button id="btn-logout" class="menu-logout-btn">🚪 ログアウト</button>
+      </section>
     </div>
 
     <!-- 装備交換モーダル（メニューに重ねるサブモーダル） -->
@@ -278,6 +301,15 @@
           <span>敵撃破で必ずドロップ</span>
         </label>
         <button id="debug-kill-adj" class="debug-action ghost">隣接敵を撃破(ドロップ判定込)</button>
+      </fieldset>
+
+      <fieldset class="debug-section">
+        <legend>💾 セーブ</legend>
+        <div class="debug-row">
+          <button id="debug-save-now"   class="debug-action">セーブ強制</button>
+          <button id="debug-clear-all"  class="debug-action ghost">全データ消去</button>
+        </div>
+        <div id="debug-save-status" class="debug-meta">未ログイン</div>
       </fieldset>
 
       <fieldset class="debug-section">
