@@ -5,13 +5,13 @@ import { Dungeon } from './dungeon.js';
 import { Battle } from './battle.js';
 
 // ── 状態 ──
-let screen        = 'map';
-let player        = createPlayer();
-let dungeonData   = null;
-let dungeon       = null;
-let currentFloor  = 1;
-let battle        = null;
-const clearedSet  = new Set();
+let screen       = 'map';
+let player       = createPlayer();
+let dungeonData  = null;
+let dungeon      = null;
+let currentFloor = 1;
+let battle       = null;
+const clearedSet = new Set();
 
 // ── 画面切替 ──
 function show(name) {
@@ -35,7 +35,6 @@ document.getElementById('btn-scan').addEventListener('click', () => {
 // ─────────────────────────────────────────────
 async function launchScanner() {
   document.getElementById('scan-result').classList.add('hidden');
-
   try {
     await startScanner(async barcode => {
       stopScanner();
@@ -44,7 +43,7 @@ async function launchScanner() {
       showDungeonPreview(dungeonData);
     });
   } catch (e) {
-    alert('カメラを起動できません。\nHTTPS 環境か、カメラの許可を確認してください。\n\n' + e.message);
+    alert('カメラを起動できません。HTTPS環境か、カメラの許可を確認してください。\n\n' + e.message);
     show('map');
   }
 }
@@ -53,9 +52,11 @@ function showDungeonPreview(d) {
   document.getElementById('dungeon-preview').innerHTML =
     `<h3>${d.name}</h3>` +
     `<p>テーマ　：${d.theme.name}</p>` +
+    `<p>属性　　：${d.element}</p>` +
     `<p>フロア　：B${d.floors}F</p>` +
     `<p>難易度　：${'⭐'.repeat(d.difficulty)}</p>` +
-    `<p style="font-size:11px;margin-top:6px;color:#666">コード：${d.barcode}</p>`;
+    `<p>レアリティ：<span style="color:${d.rarityBase.color}">${d.rarityBase.name}</span></p>` +
+    `<p style="font-size:11px;color:#666;margin-top:6px">コード：${d.barcode}</p>`;
   document.getElementById('scan-result').classList.remove('hidden');
 }
 
@@ -86,17 +87,19 @@ function enterDungeon(data) {
 function loadFloor(floor) {
   currentFloor = floor;
   dungeon = new Dungeon(dungeonData, floor);
-
   document.getElementById('dungeon-title').textContent = dungeonData.name;
   document.getElementById('floor-label').textContent   = `B${floor}F`;
-  updatePlayerHp();
+  refreshHUD();
   dungeonLog(`B${floor}F に入った`);
-
   dungeon.render(document.getElementById('dungeon-canvas'));
 }
 
-function updatePlayerHp() {
+function refreshHUD() {
   document.getElementById('player-hp').textContent = `HP: ${player.hp}/${player.maxHp}`;
+
+  const wName = player.weapon ? `⚔️${player.weapon.atkBonus}` : '⚔️ー';
+  const aName = player.armor  ? `🛡️${player.armor.defBonus}`  : '🛡️ー';
+  document.getElementById('equip-display').textContent = `${wName}　${aName}`;
 }
 
 function dungeonLog(msg) {
@@ -106,20 +109,21 @@ function dungeonLog(msg) {
   if (lines.length > 4) lines[lines.length - 1].remove();
 }
 
-// 移動処理
+// ── 移動 ──
 function move(dx, dy) {
   if (!dungeon || screen !== 'dungeon') return;
-
   const nx = dungeon.playerPos.x + dx;
   const ny = dungeon.playerPos.y + dy;
-
   if (!dungeon.canWalk(nx, ny)) return;
 
-  // モンスターに隣接したらバトル
   const mob = dungeon.monsterAt(nx, ny);
   if (mob) { startBattle(mob); return; }
 
   dungeon.playerPos = { x: nx, y: ny };
+
+  // アイテム自動ピックアップ
+  const floorItem = dungeon.itemAt(nx, ny);
+  if (floorItem) pickupItem(floorItem);
 
   // 階段チェック
   if (dungeon.atStairs(nx, ny)) {
@@ -135,11 +139,50 @@ function move(dx, dy) {
   dungeon.render(document.getElementById('dungeon-canvas'));
 }
 
+function pickupItem(item) {
+  if (player.inventory.length >= 8) {
+    dungeonLog(`🎒 満杯！ ${item.name} を拾えなかった`);
+    return;
+  }
+  dungeon.removeFloorItem(item);
+
+  // 武器・防具は自動装備（今より強ければ）
+  if (item.type === 'weapon') {
+    if (!player.weapon || item.atkBonus > player.weapon.atkBonus) {
+      const old = player.weapon;
+      player.weapon = item;
+      player.atk    = player.atkBase + item.atkBonus;
+      dungeonLog(`⚔️ ${item.name} を装備！ ATK+${item.atkBonus}`);
+      if (old) player.inventory.push(old); // 外した装備はインベントリへ
+    } else {
+      player.inventory.push(item);
+      dungeonLog(`🎒 ${item.name} を拾った`);
+    }
+  } else if (item.type === 'armor') {
+    if (!player.armor || item.defBonus > player.armor.defBonus) {
+      const old = player.armor;
+      player.armor = item;
+      player.def   = player.defBase + item.defBonus;
+      dungeonLog(`🛡️ ${item.name} を装備！ DEF+${item.defBonus}`);
+      if (old) player.inventory.push(old);
+    } else {
+      player.inventory.push(item);
+      dungeonLog(`🎒 ${item.name} を拾った`);
+    }
+  } else {
+    player.inventory.push(item);
+    dungeonLog(`🎒 ${item.name} を拾った`);
+  }
+
+  refreshHUD();
+  dungeon.render(document.getElementById('dungeon-canvas'));
+}
+
 // D-パッド
 document.querySelectorAll('.dpad-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     const map = { up:[0,-1], down:[0,1], left:[-1,0], right:[1,0], wait:[0,0] };
-    const d = map[btn.dataset.dir];
+    const d   = map[btn.dataset.dir];
     if (d) move(...d);
   });
 });
@@ -154,9 +197,9 @@ document.addEventListener('keydown', e => {
   if (map[e.key]) { e.preventDefault(); move(...map[e.key]); }
 });
 
-// スワイプ操作（モバイル）
+// スワイプ（モバイル）
 let touchStart = null;
-const canvas = document.getElementById('dungeon-canvas');
+const canvas   = document.getElementById('dungeon-canvas');
 canvas.addEventListener('touchstart', e => {
   touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
 }, { passive: true });
@@ -164,10 +207,9 @@ canvas.addEventListener('touchend', e => {
   if (!touchStart) return;
   const dx = e.changedTouches[0].clientX - touchStart.x;
   const dy = e.changedTouches[0].clientY - touchStart.y;
-  const ax = Math.abs(dx), ay = Math.abs(dy);
-  if (Math.max(ax, ay) < 20) return;
-  if (ax > ay) move(dx > 0 ? 1 : -1, 0);
-  else         move(0, dy > 0 ? 1 : -1);
+  if (Math.max(Math.abs(dx), Math.abs(dy)) < 20) return;
+  if (Math.abs(dx) > Math.abs(dy)) move(dx > 0 ? 1 : -1, 0);
+  else                              move(0, dy > 0 ? 1 : -1);
   touchStart = null;
 }, { passive: true });
 
@@ -177,8 +219,10 @@ canvas.addEventListener('touchend', e => {
 function startBattle(mob) {
   show('battle');
   battle = new Battle(player, mob, (result, defeated) => {
-    player.hp = battle.player.hp;
-    updatePlayerHp();
+    player.hp  = battle.player.hp;
+    player.atk = battle.player.atk;
+    player.def = battle.player.def;
+    refreshHUD();
 
     if (result === 'win') {
       dungeon.removeMonster(defeated);
@@ -204,12 +248,52 @@ function startBattle(mob) {
 document.getElementById('btn-attack').addEventListener('click', () => battle?.attack());
 document.getElementById('btn-skill' ).addEventListener('click', () => battle?.skill());
 document.getElementById('btn-run'   ).addEventListener('click', () => battle?.run());
-document.getElementById('btn-item'  ).addEventListener('click', () => {
-  battle?.log('🎒 アイテムはまだ持っていない');
+
+// アイテムボタン → モーダル表示
+document.getElementById('btn-item').addEventListener('click', () => {
+  showItemModal();
 });
 
+document.getElementById('btn-item-cancel').addEventListener('click', () => {
+  document.getElementById('item-modal').classList.add('hidden');
+});
+
+function showItemModal() {
+  const usable = player.inventory.filter(it => it.type === 'potion' || it.type === 'scroll');
+  const list   = document.getElementById('item-list');
+
+  if (player.inventory.length === 0) {
+    list.innerHTML = '<div style="text-align:center;color:#888;padding:12px">アイテムを持っていない</div>';
+  } else {
+    list.innerHTML = player.inventory.map((it, idx) => {
+      const canUse = it.type === 'potion' || it.type === 'scroll';
+      return `
+        <div class="item-row${canUse ? '' : ' disabled'}" data-idx="${idx}">
+          <span class="item-emoji">${it.emoji}</span>
+          <div class="item-info">
+            <div class="item-name">${it.name}</div>
+            <div class="item-desc">${it.desc}</div>
+          </div>
+          <span class="item-rarity" style="color:${it.rarityColor}">${it.rarity}</span>
+        </div>`;
+    }).join('');
+
+    list.querySelectorAll('.item-row:not(.disabled)').forEach(row => {
+      row.addEventListener('click', () => {
+        const idx  = parseInt(row.dataset.idx, 10);
+        const item = player.inventory[idx];
+        player.inventory.splice(idx, 1);
+        document.getElementById('item-modal').classList.add('hidden');
+        battle.useItem(item);
+      });
+    });
+  }
+
+  document.getElementById('item-modal').classList.remove('hidden');
+}
+
 // ─────────────────────────────────────────────
-// ダンジョンクリア / ゲームオーバー
+// クリア / ゲームオーバー
 // ─────────────────────────────────────────────
 function dungeonClear() {
   clearedSet.add(dungeonData.seed);

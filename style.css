@@ -230,8 +230,12 @@ html, body {
 .dpad-btn:active { background: var(--primary); }
 .dpad-wait { font-size: 12px; }
 
+/* ── DUNGEON HUD 追加 ── */
+.dungeon-right-hud { text-align: right; }
+.equip-display { font-size: 11px; color: var(--muted); margin-top: 3px; }
+
 /* ── BATTLE ── */
-#screen-battle { background: var(--bg); }
+#screen-battle { background: var(--bg); position: relative; }
 
 .battle-area {
   flex: 1;
@@ -246,6 +250,14 @@ html, body {
   border-radius: 16px;
   padding: 16px;
   text-align: center;
+}
+
+.enemy-meta {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  font-size: 12px;
+  margin-bottom: 6px;
 }
 
 #enemy-name {
@@ -301,6 +313,61 @@ html, body {
   transition: background .1s;
 }
 .btn-battle:active { background: var(--primary); }
+
+/* ── ITEM MODAL ── */
+.modal {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.75);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 100;
+  padding: 16px;
+}
+.modal.hidden { display: none; }
+
+.modal-box {
+  background: var(--surface2);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 20px 20px 16px 16px;
+  width: 100%;
+  max-width: 400px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 70vh;
+}
+
+.modal-title {
+  font-size: 16px;
+  font-weight: bold;
+  text-align: center;
+  margin-bottom: 4px;
+}
+
+#item-list { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; }
+
+.item-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background .1s;
+}
+.item-row:active { background: var(--primary); }
+.item-row.disabled { opacity: 0.35; pointer-events: none; }
+
+.item-emoji  { font-size: 22px; flex-shrink: 0; }
+.item-info   { flex: 1; }
+.item-name   { font-size: 14px; font-weight: bold; }
+.item-desc   { font-size: 12px; color: var(--muted); }
+.item-rarity { font-size: 11px; font-weight: bold; }
 
 /* ── RESULT ── */
 #screen-result {
