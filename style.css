@@ -251,95 +251,95 @@ html, body {
 .dungeon-right-hud { text-align: right; }
 .equip-display { font-size: 11px; color: var(--muted); margin-top: 3px; }
 
-/* ── COMBAT PANEL（ダンジョン画面に統合） ── */
+/* ── COMBAT PANEL（ダンジョン画面に統合・スマホで収まるよう密度を下げる） ── */
 .combat-panel {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px 14px 14px;
+  gap: 6px;
+  padding: 8px 12px 10px;
   background: var(--surface);
   flex-shrink: 0;
-  max-height: 55vh;
+  max-height: 50vh;
   overflow-y: auto;
 }
 .combat-panel.hidden { display: none; }
 
 .combat-enemy {
   background: rgba(0,0,0,0.25);
-  border-radius: 10px;
-  padding: 8px 10px;
+  border-radius: 8px;
+  padding: 6px 8px;
 }
 .combat-enemy-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
-.enemy-sprite-mini { font-size: 32px; flex-shrink: 0; }
+.enemy-sprite-mini { font-size: 26px; flex-shrink: 0; }
 .combat-enemy-text { flex: 1; min-width: 0; }
-.combat-enemy-name { font-size: 16px; font-weight: bold; }
+.combat-enemy-name { font-size: 14px; font-weight: bold; }
 .enemy-meta {
   display: flex;
   gap: 8px;
-  font-size: 11px;
-  margin-top: 2px;
+  font-size: 10px;
+  margin-top: 1px;
 }
 
 .hp-bar-wrap {
-  height: 10px;
+  height: 8px;
   background: rgba(255,255,255,0.1);
-  border-radius: 5px;
+  border-radius: 4px;
   overflow: hidden;
-  margin: 6px 0 4px;
+  margin: 4px 0 2px;
 }
 .hp-bar {
   height: 100%;
-  border-radius: 5px;
+  border-radius: 4px;
   background: var(--success);
   transition: width .3s, background .3s;
 }
 
-#enemy-stat-text { font-size: 11px; color: var(--muted); }
+#enemy-stat-text { font-size: 10px; color: var(--muted); }
 
 .combat-player {
   background: rgba(124,77,255,0.08);
   border: 1px solid rgba(124,77,255,0.25);
-  border-radius: 10px;
-  padding: 6px 10px;
+  border-radius: 8px;
+  padding: 4px 8px;
 }
 .combat-player-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: bold;
 }
 #battle-player-hp { color: var(--success); }
 
 .battle-log {
   background: rgba(0,0,0,0.25);
-  border-radius: 8px;
-  padding: 6px 10px;
-  font-size: 12px;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
   overflow-y: auto;
-  min-height: 50px;
-  max-height: 90px;
-  line-height: 1.5;
+  min-height: 32px;
+  max-height: 60px;
+  line-height: 1.4;
 }
 .battle-log p { padding: 1px 0; }
 
 .battle-buttons {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 6px;
+  gap: 5px;
   flex-shrink: 0;
 }
 .btn-battle {
   background: rgba(255,255,255,0.05);
   color: #fff;
   border: 1px solid rgba(255,255,255,0.15);
-  padding: 10px;
-  border-radius: 8px;
-  font-size: 13px;
+  padding: 8px;
+  border-radius: 6px;
+  font-size: 12px;
   cursor: pointer;
   transition: background .1s;
 }

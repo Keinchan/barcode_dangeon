@@ -328,18 +328,29 @@ function startBattle(mob) {
         dungeonClear();
       } else {
         dungeonLog(`${defeated.name} を倒した！`);
-        dungeon.render(document.getElementById('dungeon-canvas'));
+        // フッターが探索パネルに戻ったので canvas を再サイズ
+        requestAnimationFrame(() => dungeon.render(document.getElementById('dungeon-canvas')));
       }
     } else if (result === 'lose') {
       showResult(false);
     } else if (result === 'run') {
       dungeonLog('逃げた！');
-      dungeon.render(document.getElementById('dungeon-canvas'));
+      requestAnimationFrame(() => dungeon.render(document.getElementById('dungeon-canvas')));
     }
   });
   document.getElementById('battle-log').innerHTML = '';
   battle.updateUI();
+
+  // 戦闘パネルが表示・レイアウト確定された後に canvas を再サイズして再描画
+  requestAnimationFrame(() => dungeon.render(document.getElementById('dungeon-canvas')));
 }
+
+// 画面サイズ変動時にも canvas を追従させる
+window.addEventListener('resize', () => {
+  if (dungeon && screen === 'dungeon') {
+    dungeon.render(document.getElementById('dungeon-canvas'));
+  }
+});
 
 document.getElementById('btn-attack').addEventListener('click', () => battle?.attack());
 document.getElementById('btn-skill' ).addEventListener('click', () => battle?.skill());
