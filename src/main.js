@@ -64,11 +64,11 @@ function showPreDungeonModal(d) {
   const w = player.weapon;
   const a = player.armor;
   const wLine = w
-    ? `<div class="pre-dungeon-info-line">⚔️ <span style="color:${w.rarityColor}">${w.name}</span> ATK+${w.atkBonus}` +
+    ? `<div class="pre-dungeon-info-line">${w.emoji} <span style="color:${w.rarityColor}">${w.name}</span> ATK+${w.atkBonus}` +
       (w.skill?.name ? ` <span style="color:#888">(${w.skill.name})</span>` : '') + `</div>`
     : '<div class="pre-dungeon-info-line" style="color:#888">⚔️ 武器なし</div>';
   const aLine = a
-    ? `<div class="pre-dungeon-info-line">🛡️ <span style="color:${a.rarityColor}">${a.name}</span> DEF+${a.defBonus}` +
+    ? `<div class="pre-dungeon-info-line">${a.emoji} <span style="color:${a.rarityColor}">${a.name}</span> DEF+${a.defBonus}` +
       (a.skill?.name ? ` <span style="color:#888">(${a.skill.name})</span>` : '') + `</div>`
     : '<div class="pre-dungeon-info-line" style="color:#888">🛡️ 防具なし</div>';
 
@@ -497,8 +497,8 @@ function loadFloor(floor) {
 
 function refreshHUD() {
   document.getElementById('player-hp').textContent = `HP: ${player.hp}/${player.maxHp}`;
-  const wName = player.weapon ? `⚔️${player.weapon.atkBonus}` : '⚔️ー';
-  const aName = player.armor  ? `🛡️${player.armor.defBonus}`  : '🛡️ー';
+  const wName = player.weapon ? `${player.weapon.emoji} +${player.weapon.atkBonus}` : '⚔️ ー';
+  const aName = player.armor  ? `${player.armor.emoji} +${player.armor.defBonus}`  : '🛡️ ー';
   document.getElementById('equip-display').textContent = `${wName}　${aName}`;
 }
 
