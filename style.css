@@ -363,13 +363,26 @@ html, body {
   background: rgba(255,255,255,0.05);
   color: #fff;
   border: 1px solid rgba(255,255,255,0.15);
-  padding: 8px;
+  padding: 8px 8px 6px;
   border-radius: 6px;
   font-size: 12px;
+  font-weight: bold;
   cursor: pointer;
   transition: background .1s;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  line-height: 1.2;
+  min-height: 44px;
 }
 .btn-battle:active { background: var(--primary); }
+.btn-battle-sub {
+  font-size: 9px;
+  font-weight: normal;
+  color: var(--muted);
+}
+.btn-battle:active .btn-battle-sub { color: rgba(255,255,255,0.85); }
 
 /* 戦闘中はフッター(D-pad/探索ログ)を隠す */
 .dungeon-footer.hidden { display: none; }
@@ -539,6 +552,62 @@ html, body {
   padding: 8px;
   text-align: center;
 }
+
+/* ── 装備交換モーダル（メニュー画面の上に重ねるサブモーダル） ── */
+.swap-modal {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  padding: 16px;
+}
+.swap-modal.hidden { display: none; }
+
+.swap-modal-box {
+  background: var(--surface2);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 14px;
+  padding: 16px;
+  width: 100%;
+  max-width: 380px;
+  max-height: 80vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.swap-modal-title {
+  font-size: 14px;
+  font-weight: bold;
+  text-align: center;
+  margin-bottom: 4px;
+}
+.swap-modal-label {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.swap-modal-arrow {
+  text-align: center;
+  font-size: 18px;
+  color: var(--primary);
+  margin: 4px 0;
+}
+.swap-modal-current,
+.swap-modal-candidates {
+  background: rgba(255,255,255,0.04);
+  padding: 8px;
+  border-radius: 8px;
+}
+.swap-modal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.swap-modal-actions .btn-back { flex: 1; text-align: center; }
 
 /* ── DEBUG PANEL ── */
 .debug-panel {

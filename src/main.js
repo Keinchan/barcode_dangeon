@@ -110,23 +110,101 @@ function _renderEquippedRow(item, slot) {
     </div>
   `;
   div.querySelector('.menu-action-btn').addEventListener('click', () => {
+    _onUnequipClick(slot);
+  });
+  return div;
+}
+
+// 装備外し：同スロットの候補がある場合は交換モーダル、無ければ単に外す
+function _onUnequipClick(slot) {
+  const candidates = player.inventory
+    .map((it, idx) => ({ it, idx }))
+    .filter(({ it }) => it.type === slot);
+
+  if (candidates.length === 0) {
     if (player.inventory.length >= 8) {
       alert('持ち物が満杯のため外せません。先に何か廃棄してください');
       return;
     }
-    if (slot === 'weapon') {
-      player.inventory.push(player.weapon);
-      player.weapon = null;
-      player.atk    = player.atkBase;
-    } else {
-      player.inventory.push(player.armor);
-      player.armor  = null;
-      player.def    = player.defBase;
-    }
+    _unequipDirect(slot);
     refreshMenu();
+    return;
+  }
+
+  _showSwapModal(slot, candidates);
+}
+
+function _unequipDirect(slot) {
+  if (slot === 'weapon' && player.weapon) {
+    player.inventory.push(player.weapon);
+    player.weapon = null;
+    player.atk    = player.atkBase;
+  } else if (slot === 'armor' && player.armor) {
+    player.inventory.push(player.armor);
+    player.armor  = null;
+    player.def    = player.defBase;
+  }
+}
+
+function _showSwapModal(slot, candidates) {
+  const cur = slot === 'weapon' ? player.weapon : player.armor;
+  const swapModal = document.getElementById('swap-modal');
+  swapModal.dataset.slot = slot;
+
+  // 現在装備
+  const curEl = document.getElementById('swap-current');
+  curEl.innerHTML = '';
+  curEl.appendChild(_renderSwapRow(cur, null));
+
+  // 候補
+  const cEl = document.getElementById('swap-candidates');
+  cEl.innerHTML = '';
+  candidates.forEach(({ it, idx }) => {
+    cEl.appendChild(_renderSwapRow(it, idx));
   });
+
+  swapModal.classList.remove('hidden');
+}
+
+function _renderSwapRow(item, swapIdx) {
+  const div = document.createElement('div');
+  div.className = 'menu-row';
+  const skillHtml = item.skill?.name
+    ? `<div class="menu-row-skill">✨ ${item.skill.name}</div>` : '';
+  div.innerHTML = `
+    <div class="menu-row-emoji">${item.emoji}</div>
+    <div class="menu-row-info">
+      <div class="menu-row-name" style="color:${item.rarityColor}">${item.name}</div>
+      <div class="menu-row-stat">${_statLine(item)} / ${item.rarity}</div>
+      ${skillHtml}
+    </div>
+    ${swapIdx !== null
+      ? `<div class="menu-row-actions"><button class="menu-action-btn">これに装備</button></div>`
+      : ''}
+  `;
+  if (swapIdx !== null) {
+    div.querySelector('.menu-action-btn').addEventListener('click', () => {
+      _equipFromInventory(swapIdx);
+      document.getElementById('swap-modal').classList.add('hidden');
+    });
+  }
   return div;
 }
+
+document.getElementById('btn-swap-unequip').addEventListener('click', () => {
+  const slot = document.getElementById('swap-modal').dataset.slot;
+  if (player.inventory.length >= 8) {
+    alert('持ち物が満杯のため外せません');
+    return;
+  }
+  _unequipDirect(slot);
+  document.getElementById('swap-modal').classList.add('hidden');
+  refreshMenu();
+});
+
+document.getElementById('btn-swap-cancel').addEventListener('click', () => {
+  document.getElementById('swap-modal').classList.add('hidden');
+});
 
 function _renderInventoryRow(item, idx) {
   const div = document.createElement('div');
