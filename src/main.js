@@ -933,10 +933,12 @@ if (DEBUG) {
   const panel = document.getElementById('debug-panel');
   panel.classList.remove('hidden');
 
-  // 折り畳み
+  // 折り畳み（panel 自体にも collapsed を付けて幅を縮める）
   document.getElementById('debug-toggle').addEventListener('click', () => {
-    const body = document.getElementById('debug-panel-body');
-    const btn  = document.getElementById('debug-toggle');
+    const panel = document.getElementById('debug-panel');
+    const body  = document.getElementById('debug-panel-body');
+    const btn   = document.getElementById('debug-toggle');
+    panel.classList.toggle('collapsed');
     const collapsed = body.classList.toggle('collapsed');
     btn.textContent = collapsed ? '+' : '−';
   });
@@ -1069,14 +1071,25 @@ if (DEBUG) {
   const RARITY_NAMES = ['コモン', 'レア', 'エピック', 'レジェンド'];
 
   function debugAddItem(type) {
-    if (player.inventory.length >= 8) {
-      alert('インベントリ満杯です（先に廃棄）');
-      return;
-    }
     const rarity = RARITY_NAMES[Math.floor(Math.random() * RARITY_NAMES.length)];
     const code   = DEBUG_ITEM_CODES[type][rarity];
     const item   = generateItemFromBarcode(code);
-    player.inventory.push(item);
+
+    // 何も装備していない場合は自動装備（インベントリには入れない）
+    if (item.type === 'weapon' && !player.weapon) {
+      player.weapon = item;
+      player.atk    = player.atkBase + item.atkBonus;
+    } else if (item.type === 'armor' && !player.armor) {
+      player.armor  = item;
+      player.def    = player.defBase + item.defBonus;
+    } else {
+      if (player.inventory.length >= 8) {
+        alert('インベントリ満杯です（先に廃棄）');
+        return;
+      }
+      player.inventory.push(item);
+    }
+    refreshHUD();
     if (!document.getElementById('menu-modal').classList.contains('hidden')) refreshMenu();
   }
 
