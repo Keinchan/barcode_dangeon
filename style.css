@@ -82,6 +82,32 @@ html, body {
   cursor: pointer;
 }
 
+.btn-secondary {
+  background: var(--surface);
+  color: #fff;
+  border: 1px solid var(--primary);
+  padding: 14px 20px;
+  border-radius: 30px;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: transform .1s, background .1s;
+  flex: 1;
+}
+.btn-secondary:active { transform: scale(0.96); background: rgba(124,77,255,0.2); }
+
+.hud-button-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  max-width: 380px;
+}
+.hud-button-row .btn-primary {
+  padding: 14px 20px;
+  font-size: 14px;
+  flex: 2;
+}
+
 /* ── SCANNER ── */
 #screen-scanner { background: #000; }
 
@@ -189,6 +215,7 @@ html, body {
   padding: 10px 16px;
   background: var(--surface);
   flex-shrink: 0;
+  gap: 6px;
 }
 
 #dungeon-title { font-size: 13px; color: var(--muted); }
@@ -248,8 +275,26 @@ html, body {
 .dpad-wait { font-size: 12px; }
 
 /* ── DUNGEON HUD 追加 ── */
-.dungeon-right-hud { text-align: right; }
+.dungeon-right-hud { text-align: right; flex: 1; }
 .equip-display { font-size: 11px; color: var(--muted); margin-top: 3px; }
+
+.btn-icon-menu {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.15);
+  color: #fff;
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  font-size: 18px;
+  cursor: pointer;
+  margin-left: 10px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.btn-icon-menu:active { background: var(--primary); }
+.btn-icon-menu:disabled { opacity: 0.35; cursor: not-allowed; }
 
 /* ── COMBAT PANEL（ダンジョン画面に統合・スマホで収まるよう密度を下げる） ── */
 .combat-panel {
@@ -337,13 +382,26 @@ html, body {
   background: rgba(255,255,255,0.05);
   color: #fff;
   border: 1px solid rgba(255,255,255,0.15);
-  padding: 8px;
+  padding: 8px 8px 6px;
   border-radius: 6px;
   font-size: 12px;
+  font-weight: bold;
   cursor: pointer;
   transition: background .1s;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  line-height: 1.2;
+  min-height: 44px;
 }
 .btn-battle:active { background: var(--primary); }
+.btn-battle-sub {
+  font-size: 9px;
+  font-weight: normal;
+  color: var(--muted);
+}
+.btn-battle:active .btn-battle-sub { color: rgba(255,255,255,0.85); }
 
 /* 戦闘中はフッター(D-pad/探索ログ)を隠す */
 .dungeon-footer.hidden { display: none; }
@@ -421,6 +479,214 @@ html, body {
 #result-icon  { font-size: 64px; }
 #result-title { font-size: 28px; font-weight: bold; }
 #result-body  { font-size: 15px; color: var(--muted); line-height: 1.6; }
+
+/* ── 入場前確認モーダル ── */
+.pre-dungeon-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 4500;
+  background: rgba(0,0,0,0.78);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.pre-dungeon-modal.hidden { display: none; }
+
+.pre-dungeon-box {
+  background: var(--surface2);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 380px;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.pre-dungeon-title {
+  font-size: 17px;
+  font-weight: bold;
+  text-align: center;
+  color: var(--accent);
+}
+.pre-dungeon-section {
+  background: rgba(255,255,255,0.04);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.pre-dungeon-section-title {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.pre-dungeon-info-line { font-size: 13px; line-height: 1.7; }
+.pre-dungeon-info-line .label { color: var(--muted); margin-right: 6px; }
+.pre-dungeon-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 4px;
+}
+.pre-dungeon-actions .btn-secondary { grid-column: 1 / -1; }
+.pre-dungeon-actions .btn-back,
+.pre-dungeon-actions .btn-primary {
+  width: 100%;
+  padding: 12px;
+  font-size: 14px;
+}
+
+/* ── MENU MODAL（マップ画面のメニュー） ── */
+.menu-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 5500;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+}
+.menu-modal.hidden { display: none; }
+
+.menu-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  background: var(--surface);
+  flex-shrink: 0;
+}
+.menu-modal-title { font-size: 16px; font-weight: bold; }
+
+.menu-modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.menu-section {
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.menu-section-title {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.menu-section-meta { color: var(--muted); font-weight: normal; }
+
+.menu-stats {
+  display: flex;
+  justify-content: space-between;
+  font-size: 14px;
+  font-weight: bold;
+  gap: 12px;
+}
+.menu-stats div { flex: 1; text-align: center; }
+.menu-stats span { color: var(--success); }
+
+.menu-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 8px;
+  margin-bottom: 6px;
+}
+.menu-row:last-child { margin-bottom: 0; }
+.menu-row-emoji { font-size: 22px; flex-shrink: 0; }
+.menu-row-info { flex: 1; min-width: 0; }
+.menu-row-name { font-size: 13px; font-weight: bold; }
+.menu-row-stat { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.menu-row-skill { font-size: 11px; color: var(--primary); margin-top: 2px; }
+.menu-row-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+.menu-action-btn {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.15);
+  color: #fff;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: bold;
+  cursor: pointer;
+}
+.menu-action-btn:active { background: var(--primary); }
+.menu-action-btn.danger { border-color: var(--danger); color: var(--danger); }
+.menu-action-btn.danger:active { background: var(--danger); color: #fff; }
+
+.menu-empty {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 8px;
+  text-align: center;
+}
+
+/* ── 装備交換モーダル（メニュー画面の上に重ねるサブモーダル） ── */
+.swap-modal {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  padding: 16px;
+}
+.swap-modal.hidden { display: none; }
+
+.swap-modal-box {
+  background: var(--surface2);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 14px;
+  padding: 16px;
+  width: 100%;
+  max-width: 380px;
+  max-height: 80vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.swap-modal-title {
+  font-size: 14px;
+  font-weight: bold;
+  text-align: center;
+  margin-bottom: 4px;
+}
+.swap-modal-label {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.swap-modal-arrow {
+  text-align: center;
+  font-size: 18px;
+  color: var(--primary);
+  margin: 4px 0;
+}
+.swap-modal-current,
+.swap-modal-candidates {
+  background: rgba(255,255,255,0.04);
+  padding: 8px;
+  border-radius: 8px;
+}
+.swap-modal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.swap-modal-actions .btn-back { flex: 1; text-align: center; }
 
 /* ── DEBUG PANEL ── */
 .debug-panel {

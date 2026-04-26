@@ -37,15 +37,321 @@ function show(name) {
 // ─────────────────────────────────────────────
 // マップ画面（位置ベース固定湧き）
 // ─────────────────────────────────────────────
+let pendingDungeon = null;
+
 initMap({
-  onEnter:   d => enterDungeon(d),
+  onEnter:   d => requestEnterDungeon(d),
   isCleared: seed => clearedSet.has(seed),
+});
+
+// 入場前モーダル
+function requestEnterDungeon(d) {
+  pendingDungeon = d;
+  showPreDungeonModal(d);
+}
+
+function showPreDungeonModal(d) {
+  const stars = '⭐'.repeat(d.difficulty);
+  const cleared = clearedSet.has(d.seed) ? '<span style="color:#4caf50">✅ 攻略済み</span> ' : '';
+  document.getElementById('pre-dungeon-info').innerHTML =
+    `<div class="pre-dungeon-info-line"><span class="label">名称</span><b>${d.name}</b></div>` +
+    `<div class="pre-dungeon-info-line"><span class="label">難易度</span>${stars} / B${d.floors}F</div>` +
+    `<div class="pre-dungeon-info-line"><span class="label">レアリティ</span>` +
+      `<span style="color:${d.rarityBase.color};font-weight:bold">${d.rarityBase.name}</span></div>` +
+    `<div class="pre-dungeon-info-line"><span class="label">属性</span>${d.element}</div>` +
+    (cleared ? `<div class="pre-dungeon-info-line">${cleared}（再戦可）</div>` : '');
+
+  const w = player.weapon;
+  const a = player.armor;
+  const wLine = w
+    ? `<div class="pre-dungeon-info-line">${w.emoji} <span style="color:${w.rarityColor}">${w.name}</span> ATK+${w.atkBonus}` +
+      (w.skill?.name ? ` <span style="color:#888">(${w.skill.name})</span>` : '') + `</div>`
+    : '<div class="pre-dungeon-info-line" style="color:#888">⚔️ 武器なし</div>';
+  const aLine = a
+    ? `<div class="pre-dungeon-info-line">${a.emoji} <span style="color:${a.rarityColor}">${a.name}</span> DEF+${a.defBonus}` +
+      (a.skill?.name ? ` <span style="color:#888">(${a.skill.name})</span>` : '') + `</div>`
+    : '<div class="pre-dungeon-info-line" style="color:#888">🛡️ 防具なし</div>';
+
+  document.getElementById('pre-dungeon-player').innerHTML =
+    `<div class="pre-dungeon-info-line">HP: <b style="color:#4caf50">${player.maxHp}/${player.maxHp}</b>` +
+      ` <span style="color:#888">（入場時に全回復）</span></div>` +
+    `<div class="pre-dungeon-info-line">ATK ${player.atk}　DEF ${player.def}</div>` +
+    wLine + aLine +
+    `<div class="pre-dungeon-info-line"><span class="label">持ち物</span>${player.inventory.length}/8 個</div>`;
+
+  document.getElementById('pre-dungeon-modal').classList.remove('hidden');
+}
+
+document.getElementById('btn-pre-confirm').addEventListener('click', () => {
+  if (!pendingDungeon) return;
+  const d = pendingDungeon;
+  pendingDungeon = null;
+  document.getElementById('pre-dungeon-modal').classList.add('hidden');
+  enterDungeon(d);
+});
+
+document.getElementById('btn-pre-cancel').addEventListener('click', () => {
+  pendingDungeon = null;
+  document.getElementById('pre-dungeon-modal').classList.add('hidden');
+});
+
+document.getElementById('btn-pre-menu').addEventListener('click', () => {
+  // メニューを上に重ねて開く（pendingDungeon は維持）
+  openMenu();
 });
 
 document.getElementById('btn-scan').addEventListener('click', () => {
   show('scanner');
   launchScanner();
 });
+
+document.getElementById('btn-menu').addEventListener('click', () => {
+  openMenu();
+});
+document.getElementById('btn-menu-close').addEventListener('click', () => {
+  document.getElementById('menu-modal').classList.add('hidden');
+  // 入場前モーダルが裏にあれば、装備変更を反映するため再描画
+  if (pendingDungeon) showPreDungeonModal(pendingDungeon);
+});
+
+// ダンジョン画面のメニューボタン
+const btnDungeonMenu = document.getElementById('btn-dungeon-menu');
+btnDungeonMenu.addEventListener('click', () => {
+  if (combatActive) {
+    alert('戦闘中はメニューを開けません');
+    return;
+  }
+  openMenu();
+});
+
+function openMenu() {
+  refreshMenu();
+  document.getElementById('menu-modal').classList.remove('hidden');
+}
+
+// ─────────────────────────────────────────────
+// メニュー（装備・持ち物管理）
+// ─────────────────────────────────────────────
+function refreshMenu() {
+  document.getElementById('menu-hp').textContent  = `${player.hp}/${player.maxHp}`;
+  document.getElementById('menu-atk').textContent = player.atk;
+  document.getElementById('menu-def').textContent = player.def;
+
+  // 装備中
+  const eq = document.getElementById('menu-equipment');
+  eq.innerHTML = '';
+  if (player.weapon) eq.appendChild(_renderEquippedRow(player.weapon, 'weapon'));
+  if (player.armor)  eq.appendChild(_renderEquippedRow(player.armor,  'armor'));
+  if (!player.weapon && !player.armor) {
+    eq.innerHTML = '<div class="menu-empty">装備なし</div>';
+  }
+
+  // 持ち物
+  const inv = document.getElementById('menu-inventory');
+  document.getElementById('menu-inv-count').textContent = `(${player.inventory.length}/8)`;
+  inv.innerHTML = '';
+  if (player.inventory.length === 0) {
+    inv.innerHTML = '<div class="menu-empty">持ち物なし</div>';
+  } else {
+    player.inventory.forEach((item, idx) => {
+      inv.appendChild(_renderInventoryRow(item, idx));
+    });
+  }
+}
+
+function _statLine(item) {
+  if (item.type === 'weapon') return `ATK +${item.atkBonus}（${item.element}属性）`;
+  if (item.type === 'armor')  return `DEF +${item.defBonus}（${item.element}属性）`;
+  if (item.type === 'potion') return `HP +${item.heal} 回復`;
+  if (item.type === 'scroll') return `${item.element}属性 ${item.dmg}ダメージ`;
+  return '';
+}
+
+function _renderEquippedRow(item, slot) {
+  const div = document.createElement('div');
+  div.className = 'menu-row';
+  const skillHtml = item.skill?.name
+    ? `<div class="menu-row-skill">✨ ${item.skill.name}: ${item.skill.desc}</div>` : '';
+  div.innerHTML = `
+    <div class="menu-row-emoji">${item.emoji}</div>
+    <div class="menu-row-info">
+      <div class="menu-row-name" style="color:${item.rarityColor}">${item.name}</div>
+      <div class="menu-row-stat">${_statLine(item)} / ${item.rarity}</div>
+      ${skillHtml}
+    </div>
+    <div class="menu-row-actions">
+      <button class="menu-action-btn">外す</button>
+    </div>
+  `;
+  div.querySelector('.menu-action-btn').addEventListener('click', () => {
+    _onUnequipClick(slot);
+  });
+  return div;
+}
+
+// 装備外し：同スロットの候補がある場合は交換モーダル、無ければ単に外す
+function _onUnequipClick(slot) {
+  const candidates = player.inventory
+    .map((it, idx) => ({ it, idx }))
+    .filter(({ it }) => it.type === slot);
+
+  if (candidates.length === 0) {
+    if (player.inventory.length >= 8) {
+      alert('持ち物が満杯のため外せません。先に何か廃棄してください');
+      return;
+    }
+    _unequipDirect(slot);
+    refreshHUD();
+    refreshMenu();
+    return;
+  }
+
+  _showSwapModal(slot, candidates);
+}
+
+function _unequipDirect(slot) {
+  if (slot === 'weapon' && player.weapon) {
+    player.inventory.push(player.weapon);
+    player.weapon = null;
+    player.atk    = player.atkBase;
+  } else if (slot === 'armor' && player.armor) {
+    player.inventory.push(player.armor);
+    player.armor  = null;
+    player.def    = player.defBase;
+  }
+}
+
+function _showSwapModal(slot, candidates) {
+  const cur = slot === 'weapon' ? player.weapon : player.armor;
+  const swapModal = document.getElementById('swap-modal');
+  swapModal.dataset.slot = slot;
+
+  // 現在装備
+  const curEl = document.getElementById('swap-current');
+  curEl.innerHTML = '';
+  curEl.appendChild(_renderSwapRow(cur, null));
+
+  // 候補
+  const cEl = document.getElementById('swap-candidates');
+  cEl.innerHTML = '';
+  candidates.forEach(({ it, idx }) => {
+    cEl.appendChild(_renderSwapRow(it, idx));
+  });
+
+  swapModal.classList.remove('hidden');
+}
+
+function _renderSwapRow(item, swapIdx) {
+  const div = document.createElement('div');
+  div.className = 'menu-row';
+  const skillHtml = item.skill?.name
+    ? `<div class="menu-row-skill">✨ ${item.skill.name}</div>` : '';
+  div.innerHTML = `
+    <div class="menu-row-emoji">${item.emoji}</div>
+    <div class="menu-row-info">
+      <div class="menu-row-name" style="color:${item.rarityColor}">${item.name}</div>
+      <div class="menu-row-stat">${_statLine(item)} / ${item.rarity}</div>
+      ${skillHtml}
+    </div>
+    ${swapIdx !== null
+      ? `<div class="menu-row-actions"><button class="menu-action-btn">これに装備</button></div>`
+      : ''}
+  `;
+  if (swapIdx !== null) {
+    div.querySelector('.menu-action-btn').addEventListener('click', () => {
+      _equipFromInventory(swapIdx);
+      document.getElementById('swap-modal').classList.add('hidden');
+    });
+  }
+  return div;
+}
+
+document.getElementById('btn-swap-unequip').addEventListener('click', () => {
+  const slot = document.getElementById('swap-modal').dataset.slot;
+  if (player.inventory.length >= 8) {
+    alert('持ち物が満杯のため外せません');
+    return;
+  }
+  _unequipDirect(slot);
+  document.getElementById('swap-modal').classList.add('hidden');
+  refreshHUD();
+  refreshMenu();
+});
+
+document.getElementById('btn-swap-cancel').addEventListener('click', () => {
+  document.getElementById('swap-modal').classList.add('hidden');
+});
+
+function _renderInventoryRow(item, idx) {
+  const div = document.createElement('div');
+  div.className = 'menu-row';
+  const skillHtml = item.skill?.name
+    ? `<div class="menu-row-skill">✨ ${item.skill.name}</div>` : '';
+  const isEquippable = item.type === 'weapon' || item.type === 'armor';
+  // 探索中は回復薬を使える（戦闘中はバトル側のアイテムボタン経由なのでここでは出さない）
+  const isUsableHere = item.type === 'potion' && screen === 'dungeon' && !combatActive;
+  div.innerHTML = `
+    <div class="menu-row-emoji">${item.emoji}</div>
+    <div class="menu-row-info">
+      <div class="menu-row-name" style="color:${item.rarityColor}">${item.name}</div>
+      <div class="menu-row-stat">${_statLine(item)} / ${item.rarity}</div>
+      ${skillHtml}
+    </div>
+    <div class="menu-row-actions">
+      ${isUsableHere ? '<button class="menu-action-btn use">使う</button>' : ''}
+      ${isEquippable ? '<button class="menu-action-btn equip">装備</button>' : ''}
+      <button class="menu-action-btn danger discard">廃棄</button>
+    </div>
+  `;
+  if (isUsableHere) {
+    div.querySelector('.use').addEventListener('click', () => _usePotionFromInventory(idx));
+  }
+  if (isEquippable) {
+    div.querySelector('.equip').addEventListener('click', () => _equipFromInventory(idx));
+  }
+  div.querySelector('.discard').addEventListener('click', () => {
+    if (!confirm(`${item.name} を廃棄しますか？`)) return;
+    player.inventory.splice(idx, 1);
+    refreshMenu();
+  });
+  return div;
+}
+
+function _usePotionFromInventory(idx) {
+  const item = player.inventory[idx];
+  if (!item || item.type !== 'potion') return;
+  if (player.hp >= player.maxHp) {
+    alert('HPが満タンです');
+    return;
+  }
+  const before = player.hp;
+  player.hp = Math.min(player.maxHp, player.hp + item.heal);
+  const actual = player.hp - before;
+  player.inventory.splice(idx, 1);
+  if (typeof dungeonLog === 'function' && screen === 'dungeon') {
+    dungeonLog(`🧪 ${item.name} を使用！ HPが${actual}回復した`);
+  }
+  refreshHUD();
+  refreshMenu();
+}
+
+function _equipFromInventory(idx) {
+  const item = player.inventory[idx];
+  if (!item) return;
+  // 入れ替え：まず取り出す
+  player.inventory.splice(idx, 1);
+  if (item.type === 'weapon') {
+    if (player.weapon) player.inventory.push(player.weapon);
+    player.weapon = item;
+    player.atk    = player.atkBase + item.atkBonus;
+  } else if (item.type === 'armor') {
+    if (player.armor) player.inventory.push(player.armor);
+    player.armor  = item;
+    player.def    = player.defBase + item.defBonus;
+  }
+  refreshHUD();
+  refreshMenu();
+}
 
 // ─────────────────────────────────────────────
 // スキャン → アイテム獲得
@@ -191,8 +497,8 @@ function loadFloor(floor) {
 
 function refreshHUD() {
   document.getElementById('player-hp').textContent = `HP: ${player.hp}/${player.maxHp}`;
-  const wName = player.weapon ? `⚔️${player.weapon.atkBonus}` : '⚔️ー';
-  const aName = player.armor  ? `🛡️${player.armor.defBonus}`  : '🛡️ー';
+  const wName = player.weapon ? `${player.weapon.emoji} +${player.weapon.atkBonus}` : '⚔️ ー';
+  const aName = player.armor  ? `${player.armor.emoji} +${player.armor.defBonus}`  : '🛡️ ー';
   document.getElementById('equip-display').textContent = `${wName}　${aName}`;
 }
 
@@ -498,5 +804,61 @@ if (DEBUG) {
   // 入場距離バイパス
   document.getElementById('debug-bypass').addEventListener('change', e => {
     setBypassEnterRadius(e.target.checked);
+  });
+
+  // インベントリ操作（バーコードを type / rarity 確定の組合せで決め打ち）
+  const DEBUG_ITEM_CODES = {
+    weapon: {
+      コモン:     '0000000000000',
+      レア:       '1000000000007',
+      エピック:   '0000000000008',
+      レジェンド: '3000000000009',
+    },
+    armor: {
+      コモン:     '0000000000001',
+      レア:       '0000000000005',
+      エピック:   '1000000000008',
+      レジェンド: '0000000000009',
+    },
+    potion: {
+      コモン:     '0000000000002',
+      レア:       '1000000000005',
+      エピック:   '2000000000008',
+      レジェンド: '1000000000009',
+    },
+    scroll: {
+      コモン:     '0000000000003',
+      レア:       '0000000000007',
+      エピック:   '3000000000008',
+      レジェンド: '2000000000009',
+    },
+  };
+  const RARITY_NAMES = ['コモン', 'レア', 'エピック', 'レジェンド'];
+
+  function debugAddItem(type) {
+    if (player.inventory.length >= 8) {
+      alert('インベントリ満杯です（先に廃棄）');
+      return;
+    }
+    const rarity = RARITY_NAMES[Math.floor(Math.random() * RARITY_NAMES.length)];
+    const code   = DEBUG_ITEM_CODES[type][rarity];
+    const item   = generateItemFromBarcode(code);
+    player.inventory.push(item);
+    if (!document.getElementById('menu-modal').classList.contains('hidden')) refreshMenu();
+  }
+
+  document.getElementById('debug-add-weapon').addEventListener('click', () => debugAddItem('weapon'));
+  document.getElementById('debug-add-armor' ).addEventListener('click', () => debugAddItem('armor'));
+  document.getElementById('debug-add-potion').addEventListener('click', () => debugAddItem('potion'));
+  document.getElementById('debug-add-scroll').addEventListener('click', () => debugAddItem('scroll'));
+
+  document.getElementById('debug-clear-inv').addEventListener('click', () => {
+    if (!confirm('インベントリと装備を全廃棄します')) return;
+    player.inventory = [];
+    player.weapon = null;
+    player.armor  = null;
+    player.atk    = player.atkBase;
+    player.def    = player.defBase;
+    if (!document.getElementById('menu-modal').classList.contains('hidden')) refreshMenu();
   });
 }

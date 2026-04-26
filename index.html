@@ -16,7 +16,10 @@
     <div id="map"></div>
     <div class="map-hud">
       <div class="hud-title">⚔️ バーコードダンジョン</div>
-      <button id="btn-scan" class="btn-primary">📷 バーコードをスキャン</button>
+      <div class="hud-button-row">
+        <button id="btn-scan" class="btn-primary">📷 スキャン</button>
+        <button id="btn-menu" class="btn-secondary">🎒 メニュー</button>
+      </div>
     </div>
   </div>
 
@@ -51,6 +54,7 @@
         <div id="player-hp" class="hp-text">HP: 35/35</div>
         <div id="equip-display" class="equip-display">⚔️ー　🛡️ー</div>
       </div>
+      <button id="btn-dungeon-menu" class="btn-icon-menu" title="メニュー">🎒</button>
     </div>
     <canvas id="dungeon-canvas"></canvas>
 
@@ -112,6 +116,75 @@
     </div>
   </div>
 
+  <!-- ダンジョン入場前確認モーダル -->
+  <div id="pre-dungeon-modal" class="pre-dungeon-modal hidden">
+    <div class="pre-dungeon-box">
+      <div class="pre-dungeon-title">🚪 潜入確認</div>
+
+      <section class="pre-dungeon-section">
+        <div class="pre-dungeon-section-title">ダンジョン</div>
+        <div id="pre-dungeon-info"></div>
+      </section>
+
+      <section class="pre-dungeon-section">
+        <div class="pre-dungeon-section-title">プレイヤーの状態</div>
+        <div id="pre-dungeon-player"></div>
+      </section>
+
+      <div class="pre-dungeon-actions">
+        <button id="btn-pre-menu"    class="btn-secondary">🎒 メニュー</button>
+        <button id="btn-pre-cancel"  class="btn-back">戻る</button>
+        <button id="btn-pre-confirm" class="btn-primary">潜入する</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- メニューモーダル（マップ・ダンジョンの両方から開く。screen 非依存に body 直下） -->
+  <div id="menu-modal" class="menu-modal hidden">
+    <div class="menu-modal-header">
+      <button id="btn-menu-close" class="btn-back">← 閉じる</button>
+      <span class="menu-modal-title">メニュー</span>
+    </div>
+    <div class="menu-modal-body">
+      <section class="menu-section">
+        <div class="menu-section-title">🧙 ステータス</div>
+        <div class="menu-stats">
+          <div>HP <span id="menu-hp">35/35</span></div>
+          <div>ATK <span id="menu-atk">9</span></div>
+          <div>DEF <span id="menu-def">3</span></div>
+        </div>
+      </section>
+      <section class="menu-section">
+        <div class="menu-section-title">装備中</div>
+        <div id="menu-equipment"></div>
+      </section>
+      <section class="menu-section">
+        <div class="menu-section-title">持ち物 <span id="menu-inv-count" class="menu-section-meta"></span></div>
+        <div id="menu-inventory"></div>
+      </section>
+    </div>
+
+    <!-- 装備交換モーダル（メニューに重ねるサブモーダル） -->
+    <div id="swap-modal" class="swap-modal hidden">
+      <div class="swap-modal-box">
+        <div class="swap-modal-title">装備を交換</div>
+        <div class="swap-modal-current">
+          <div class="swap-modal-label">現在装備中</div>
+          <div id="swap-current"></div>
+        </div>
+        <div class="swap-modal-arrow">↕</div>
+        <div class="swap-modal-candidates">
+          <div class="swap-modal-label">交換候補</div>
+          <div id="swap-candidates"></div>
+        </div>
+        <div class="swap-modal-actions">
+          <button id="btn-swap-unequip" class="btn-back">外して持ち物に</button>
+          <button id="btn-swap-cancel"  class="btn-back">キャンセル</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- リザルト画面 -->
   <div id="screen-result" class="screen">
     <div class="result-box">
@@ -161,6 +234,19 @@
           <input id="debug-bypass" type="checkbox" />
           <span>入場距離(80m)を無視</span>
         </label>
+      </fieldset>
+
+      <fieldset class="debug-section">
+        <legend>🎒 インベントリ操作</legend>
+        <div class="debug-row">
+          <button id="debug-add-weapon" class="debug-action">⚔️武器</button>
+          <button id="debug-add-armor"  class="debug-action">🛡️防具</button>
+        </div>
+        <div class="debug-row">
+          <button id="debug-add-potion" class="debug-action">🧪薬</button>
+          <button id="debug-add-scroll" class="debug-action">📜巻物</button>
+        </div>
+        <button id="debug-clear-inv" class="debug-action ghost">全廃棄(装備も)</button>
       </fieldset>
     </div>
   </div>

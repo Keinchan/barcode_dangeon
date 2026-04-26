@@ -47,6 +47,38 @@ export class Battle {
       bpBar.style.width      = ppct + '%';
       bpBar.style.background = ppct > 50 ? '#4caf50' : ppct > 25 ? '#ffc107' : '#f44336';
     }
+
+    // 行動ボタンに対敵での期待ダメージなどの内容を表示
+    const baseDmg  = Math.max(1, this.player.atk - this.monster.def);
+    const skillDmg = Math.floor(baseDmg * 2);
+
+    const atkBtn = document.getElementById('btn-attack');
+    if (atkBtn) {
+      atkBtn.innerHTML =
+        `⚔️ こうげき<span class="btn-battle-sub">約${baseDmg}ダメージ（ATK ${this.player.atk}）</span>`;
+    }
+
+    const skillBtn = document.getElementById('btn-skill');
+    const wSkill = this.player.weapon?.skill;
+    if (skillBtn) {
+      const skillName = (wSkill && wSkill.kind !== 'none') ? wSkill.name : '必殺';
+      skillBtn.innerHTML =
+        `✨ ${skillName}<span class="btn-battle-sub">約${skillDmg}ダメージ（×2）</span>`;
+    }
+
+    const itemBtn = document.getElementById('btn-item');
+    if (itemBtn) {
+      const usable = this.player.inventory?.filter(it => it.type === 'potion' || it.type === 'scroll').length ?? 0;
+      itemBtn.innerHTML =
+        `🎒 アイテム<span class="btn-battle-sub">使用可 ${usable}個</span>`;
+    }
+
+    const runBtn = document.getElementById('btn-run');
+    if (runBtn) {
+      runBtn.innerHTML = this.monster.isBoss
+        ? `🏃 にげる<span class="btn-battle-sub">ボスからは逃げられない</span>`
+        : `🏃 にげる<span class="btn-battle-sub">成功率55%</span>`;
+    }
   }
 
   // ── プレイヤーアクション ──
