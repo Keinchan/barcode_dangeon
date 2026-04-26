@@ -11,12 +11,14 @@ let map          = null;
 let playerMarker = null;
 let playerPos    = null;                 // { lat, lng }
 const renderedPins = new Map();          // seed -> { marker, dungeon }
-let onEnterCb   = null;
-let isClearedCb = null;
+let onEnterCb    = null;
+let isClearedCb  = null;
+let difficultyCb = null;
 
-export function initMap({ onEnter, isCleared } = {}) {
-  onEnterCb   = onEnter   ?? null;
-  isClearedCb = isCleared ?? null;
+export function initMap({ onEnter, isCleared, difficulty } = {}) {
+  onEnterCb    = onEnter    ?? null;
+  isClearedCb  = isCleared  ?? null;
+  difficultyCb = difficulty ?? null;
 
   map = L.map('map', { zoomControl: false })
     .setView([35.6762, 139.6503], 16);
@@ -88,11 +90,17 @@ function _buildPopupHtml(dungeon) {
   const dist       = Math.round(distanceMeters(playerPos.lat, playerPos.lng, dungeon.lat, dungeon.lng));
   const clearedNow = isClearedCb?.(dungeon.seed) ?? false;
 
+  const diff = difficultyCb?.(dungeon);
+  const diffLine = diff
+    ? `<div style="margin-top:2px">推奨: <b style="color:${diff.color}">${diff.label}</b></div>`
+    : '';
+
   return (
     `<div><b>${dungeon.name}</b></div>` +
     `<div>難易度: ${'⭐'.repeat(dungeon.difficulty)} / B${dungeon.floors}F</div>` +
     `<div style="color:${dungeon.rarityBase.color};font-weight:bold">${dungeon.rarityBase.name}</div>` +
     `<div style="font-size:11px;color:#888">${dungeon.element}属性</div>` +
+    diffLine +
     (clearedNow ? '<div style="color:#4caf50;margin-top:4px">✅ 攻略済み（再戦可）</div>' : '') +
     (inRange
       ? `<button class="popup-enter-btn" data-seed="${dungeon.seed}" `
