@@ -401,6 +401,11 @@ html, body {
   min-height: 44px;
 }
 .btn-battle:active { background: var(--primary); }
+.btn-battle:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.btn-battle:disabled:active { background: rgba(255,255,255,0.05); }
 .btn-battle-sub {
   font-size: 9px;
   font-weight: normal;

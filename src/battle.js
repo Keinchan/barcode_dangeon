@@ -53,16 +53,17 @@ export class Battle {
     const baseDmg  = Math.max(1, this.player.atk - this.monster.def);
     const skillDmg = Math.floor(baseDmg * 2);
 
+    // 通常攻撃は廃止（魔法攻撃のみ仕様）→ ボタンは使用不可で残す
     const atkBtn = document.getElementById('btn-attack');
     if (atkBtn) {
-      atkBtn.innerHTML =
-        `⚔️ こうげき<span class="btn-battle-sub">約${baseDmg}ダメージ（ATK ${this.player.atk}）</span>`;
+      atkBtn.innerHTML = `⚔️ こうげき<span class="btn-battle-sub">使用不可（魔法のみ）</span>`;
+      atkBtn.disabled = true;
     }
 
     const skillBtn = document.getElementById('btn-skill');
     const wSkill = this.player.weapon?.skill;
     if (skillBtn) {
-      const skillName = (wSkill && wSkill.kind !== 'none') ? wSkill.name : '必殺';
+      const skillName = (wSkill && wSkill.kind !== 'none') ? wSkill.name : '魔法攻撃';
       skillBtn.innerHTML =
         `✨ ${skillName}<span class="btn-battle-sub">約${skillDmg}ダメージ（×2）</span>`;
     }
@@ -85,12 +86,8 @@ export class Battle {
   // ── プレイヤーアクション ──
 
   attack() {
-    if (this._busy) return;
-    const dmg = this._calcDmg(this.player.atk, this.monster.def, 1.0);
-    this.monster.hp = Math.max(0, this.monster.hp - dmg);
-    this.log(`⚔️ こうげき！ ${dmg} ダメージ！`);
-    this.updateUI();
-    this._checkEnemyDead() || this._enemyTurn();
+    // 通常攻撃は廃止：魔法攻撃のみ。誤クリックされてもなにも起きない
+    return;
   }
 
   skill() {
@@ -148,23 +145,21 @@ export class Battle {
   _enemyTurn() {
     this._busy = true;
     setTimeout(() => {
-      // スキルチャージ蓄積
+      // スキルチャージ蓄積。3ターンで属性スキル、それ以外は基本魔法攻撃
       this.monster.skillCharge = (this.monster.skillCharge ?? 0) + 1;
-
-      // 3ターンでスキル発動
       if (this.monster.skillCharge >= 3) {
         this.monster.skillCharge = 0;
         this._useEnemySkill();
       } else {
-        this._enemyNormalAttack();
+        this._enemyMagicAttack();
       }
     }, 550);
   }
 
-  _enemyNormalAttack() {
+  _enemyMagicAttack() {
     const dmg = this._calcDmg(this.monster.atk, this.player.def);
     this.player.hp = Math.max(0, this.player.hp - dmg);
-    this.log(`💥 ${this.monster.name} の攻撃！ ${dmg} ダメージ！`);
+    this.log(`✨ ${this.monster.name} の魔法攻撃！ ${dmg} ダメージ！`);
     showFloatingDamage(dmg);
     this.updateUI();
     this._checkPlayerDead();
@@ -172,7 +167,7 @@ export class Battle {
 
   _useEnemySkill() {
     const sk = this.monster.skill;
-    if (!sk) { this._enemyNormalAttack(); return; }
+    if (!sk) { this._enemyMagicAttack(); return; }
 
     if (sk.healSelf > 0) {
       // 自己回復スキル（光属性）

@@ -609,12 +609,10 @@ function move(dx, dy) {
       const sideX = dungeon.canWalk(px + dx, py);
       const sideY = dungeon.canWalk(px, py + dy);
       if (!sideX || !sideY) {
-        // 壁の角を抜けられない。先に敵がいれば魔法攻撃の選択肢
+        // 壁の角越しに敵がいれば、戦闘パネルを開く（壁越しの戦闘＝魔法のみ）
         const mob = dungeon.monsterAt(nx, ny);
         if (mob && dungeon.canWalk(nx, ny)) {
-          if (confirm(`壁の向こうの ${mob.name} に魔法で攻撃する？`)) {
-            _magicStrike(mob);
-          }
+          startBattle(mob);
         }
         return;
       }
@@ -648,8 +646,8 @@ function move(dx, dy) {
 function _runEnemyTurn() {
   const result = dungeon.tickEnemies(player);
   for (const ev of result.events) {
-    if (ev.type === 'attack') {
-      dungeonLog(`💢 ${ev.mob.name} の攻撃！ ${ev.dmg} ダメージ`);
+    if (ev.type === 'magic') {
+      dungeonLog(`✨ ${ev.mob.name} の魔法攻撃！ ${ev.dmg} ダメージ`);
     }
   }
   if (result.totalDmg > 0) {
@@ -662,35 +660,6 @@ function _runEnemyTurn() {
     }
   }
   dungeon.render(document.getElementById('dungeon-canvas'));
-}
-
-// 壁貫通の魔法攻撃（角の壁で塞がれた敵への遠距離一撃）
-function _magicStrike(mob) {
-  const base = Math.max(1, player.atk - mob.def);
-  const roll = 1 + Math.floor(Math.random() * Math.ceil(base * 0.4));
-  const dmg  = Math.floor((base + roll) * 1.2); // 通常より少し強め
-  mob.hp = Math.max(0, mob.hp - dmg);
-  dungeonLog(`✨ 魔法で ${mob.name} に ${dmg} ダメージ`);
-
-  if (mob.hp <= 0) {
-    dungeon.removeMonster(mob);
-    const drop = _rollMonsterDrop(mob);
-    if (drop) {
-      drop.x = mob.x;
-      drop.y = mob.y;
-      dungeon.floorItems.push(drop);
-      dungeonLog(`💎 ${mob.name} は ${drop.name} を落とした！`);
-    } else {
-      dungeonLog(`${mob.name} を撃破`);
-    }
-    if (mob.isBoss) {
-      dungeonClear();
-      return;
-    }
-  }
-
-  // 1ターン消費 → 敵ターン
-  _runEnemyTurn();
 }
 
 function pickupItem(item) {
