@@ -183,8 +183,39 @@ export function generateFloorItems(dungeonData, floor, rooms) {
   return items;
 }
 
+// ── レベリング設定 ──
+export const MAX_LEVEL      = 100;
+export const HP_PER_LEVEL   = 15;
+export const ATK_PER_LEVEL  = 2;
+export const DEF_PER_LEVEL  = 1;
+
+// 指定レベルへの「次のレベル到達に必要なXP」
+export function xpRequiredForLevel(level) {
+  return level * 20;
+}
+
+// レベル基準のステータス算出
+export function statsForLevel(level) {
+  return {
+    maxHp:   35 + (level - 1) * HP_PER_LEVEL,
+    atkBase:  9 + (level - 1) * ATK_PER_LEVEL,
+    defBase:  3 + (level - 1) * DEF_PER_LEVEL,
+  };
+}
+
+// プレイヤーのステータスをレベル基準で再計算（装備のbonusを足し直す）
+export function applyLevelStats(player) {
+  const s = statsForLevel(player.level);
+  player.maxHp   = s.maxHp;
+  player.atkBase = s.atkBase;
+  player.defBase = s.defBase;
+  player.atk     = player.atkBase + (player.weapon?.atkBonus ?? 0);
+  player.def     = player.defBase + (player.armor?.defBonus  ?? 0);
+}
+
 export function createPlayer() {
   return {
+    level: 1, xp: 0,
     hp: 35, maxHp: 35,
     atkBase: 9, defBase: 3,
     atk: 9, def: 3,

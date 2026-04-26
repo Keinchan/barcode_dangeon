@@ -51,7 +51,10 @@
         <div id="floor-label">B1F</div>
       </div>
       <div class="dungeon-right-hud">
-        <div id="player-hp" class="hp-text">HP: 35/35</div>
+        <div class="dungeon-hp-row">
+          <span id="player-lv" class="lv-text">Lv1</span>
+          <span id="player-hp" class="hp-text">HP: 35/35</span>
+        </div>
         <div id="equip-display" class="equip-display">⚔️ー　🛡️ー</div>
       </div>
       <button id="btn-dungeon-menu" class="btn-icon-menu" title="メニュー">🎒</button>
@@ -169,9 +172,14 @@
       <section class="menu-section">
         <div class="menu-section-title">🧙 ステータス</div>
         <div class="menu-stats">
+          <div>Lv <span id="menu-lv">1</span></div>
           <div>HP <span id="menu-hp">35/35</span></div>
           <div>ATK <span id="menu-atk">9</span></div>
           <div>DEF <span id="menu-def">3</span></div>
+        </div>
+        <div class="menu-xp-section">
+          <div class="menu-xp-text">XP <span id="menu-xp-current">0</span> / <span id="menu-xp-next">20</span></div>
+          <div class="menu-xp-bar-wrap"><div id="menu-xp-bar" class="menu-xp-bar"></div></div>
         </div>
       </section>
       <section class="menu-section">
@@ -267,6 +275,15 @@
           <span>敵撃破で必ずドロップ</span>
         </label>
         <button id="debug-kill-adj" class="debug-action ghost">隣接敵を撃破(ドロップ判定込)</button>
+      </fieldset>
+
+      <fieldset class="debug-section">
+        <legend>📈 レベル</legend>
+        <div class="debug-row">
+          <button id="debug-lv-up"    class="debug-action">Lv +1</button>
+          <button id="debug-lv-max"   class="debug-action">Lv 100</button>
+        </div>
+        <button id="debug-lv-reset" class="debug-action ghost">Lv 1 にリセット</button>
       </fieldset>
 
       <fieldset class="debug-section">

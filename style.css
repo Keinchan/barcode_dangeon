@@ -282,6 +282,17 @@ html, body {
 /* ── DUNGEON HUD 追加 ── */
 .dungeon-right-hud { text-align: right; flex: 1; }
 .equip-display { font-size: 11px; color: var(--muted); margin-top: 3px; }
+.dungeon-hp-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: baseline;
+  gap: 8px;
+}
+.lv-text {
+  font-size: 13px;
+  color: #ffc107;
+  font-weight: bold;
+}
 
 .btn-icon-menu {
   background: rgba(255,255,255,0.08);
@@ -597,12 +608,32 @@ html, body {
 .menu-stats {
   display: flex;
   justify-content: space-between;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: bold;
-  gap: 12px;
+  gap: 8px;
 }
 .menu-stats div { flex: 1; text-align: center; }
 .menu-stats span { color: var(--success); }
+
+.menu-xp-section { margin-top: 8px; }
+.menu-xp-text {
+  font-size: 11px;
+  color: var(--muted);
+  text-align: right;
+  margin-bottom: 4px;
+}
+.menu-xp-bar-wrap {
+  height: 6px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.menu-xp-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #ffc107, #ff9800);
+  width: 0%;
+  transition: width .3s;
+}
 
 .menu-row {
   display: flex;
