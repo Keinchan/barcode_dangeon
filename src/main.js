@@ -612,7 +612,7 @@ function move(dx, dy) {
         // 壁の角越しに敵がいれば、戦闘パネルを開く（壁越しの戦闘＝魔法のみ）
         const mob = dungeon.monsterAt(nx, ny);
         if (mob && dungeon.canWalk(nx, ny)) {
-          startBattle(mob);
+          startBattle(mob, { wallPiercing: true });
         }
         return;
       }
@@ -769,7 +769,7 @@ canvas.addEventListener('touchend', e => {
 // ─────────────────────────────────────────────
 // バトル
 // ─────────────────────────────────────────────
-function startBattle(mob) {
+function startBattle(mob, opts = {}) {
   // 戦闘モードに切替（screen は dungeon のままインライン化）
   combatActive = true;
   document.getElementById('dungeon-footer').classList.add('hidden');
@@ -810,7 +810,7 @@ function startBattle(mob) {
       dungeonLog('逃げた！');
       requestAnimationFrame(() => dungeon.render(document.getElementById('dungeon-canvas')));
     }
-  });
+  }, opts);
   document.getElementById('battle-log').innerHTML = '';
   battle.updateUI();
 

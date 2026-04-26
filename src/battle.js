@@ -2,12 +2,14 @@ import { applyItem } from './items.js';
 import { showFloatingDamage } from './ui.js';
 
 export class Battle {
-  constructor(player, monster, onEnd) {
-    this.player  = { ...player };
-    this.monster = { ...monster };
-    this.onEnd   = onEnd;
-    this._log    = [];
-    this._busy   = false;
+  constructor(player, monster, onEnd, opts = {}) {
+    this.player       = { ...player };
+    this.monster      = { ...monster };
+    this.onEnd        = onEnd;
+    this._log         = [];
+    this._busy        = false;
+    // 壁越し戦闘フラグ: true なら通常こうげき不可、敵も魔法のみ
+    this.wallPiercing = !!opts.wallPiercing;
   }
 
   log(msg) {
@@ -53,17 +55,22 @@ export class Battle {
     const baseDmg  = Math.max(1, this.player.atk - this.monster.def);
     const skillDmg = Math.floor(baseDmg * 2);
 
-    // 通常攻撃は廃止（魔法攻撃のみ仕様）→ ボタンは使用不可で残す
+    // 通常攻撃: 壁越し戦闘では使用不可、通常戦闘では使用可
     const atkBtn = document.getElementById('btn-attack');
     if (atkBtn) {
-      atkBtn.innerHTML = `⚔️ こうげき<span class="btn-battle-sub">使用不可（魔法のみ）</span>`;
-      atkBtn.disabled = true;
+      if (this.wallPiercing) {
+        atkBtn.innerHTML = `⚔️ こうげき<span class="btn-battle-sub">使用不可（壁越しは魔法のみ）</span>`;
+        atkBtn.disabled = true;
+      } else {
+        atkBtn.innerHTML = `⚔️ こうげき<span class="btn-battle-sub">約${baseDmg}ダメージ（ATK ${this.player.atk}）</span>`;
+        atkBtn.disabled = false;
+      }
     }
 
     const skillBtn = document.getElementById('btn-skill');
     const wSkill = this.player.weapon?.skill;
     if (skillBtn) {
-      const skillName = (wSkill && wSkill.kind !== 'none') ? wSkill.name : '魔法攻撃';
+      const skillName = (wSkill && wSkill.kind !== 'none') ? wSkill.name : (this.wallPiercing ? '魔法攻撃' : 'スキル');
       skillBtn.innerHTML =
         `✨ ${skillName}<span class="btn-battle-sub">約${skillDmg}ダメージ（×2）</span>`;
     }
@@ -86,8 +93,13 @@ export class Battle {
   // ── プレイヤーアクション ──
 
   attack() {
-    // 通常攻撃は廃止：魔法攻撃のみ。誤クリックされてもなにも起きない
-    return;
+    if (this._busy) return;
+    if (this.wallPiercing) return;  // 壁越し戦闘では通常攻撃不可
+    const dmg = this._calcDmg(this.player.atk, this.monster.def, 1.0);
+    this.monster.hp = Math.max(0, this.monster.hp - dmg);
+    this.log(`⚔️ こうげき！ ${dmg} ダメージ！`);
+    this.updateUI();
+    this._checkEnemyDead() || this._enemyTurn();
   }
 
   skill() {
@@ -145,21 +157,23 @@ export class Battle {
   _enemyTurn() {
     this._busy = true;
     setTimeout(() => {
-      // スキルチャージ蓄積。3ターンで属性スキル、それ以外は基本魔法攻撃
+      // スキルチャージ蓄積。3ターンで属性スキル、それ以外は基本攻撃
       this.monster.skillCharge = (this.monster.skillCharge ?? 0) + 1;
       if (this.monster.skillCharge >= 3) {
         this.monster.skillCharge = 0;
         this._useEnemySkill();
       } else {
-        this._enemyMagicAttack();
+        this._enemyBasicAttack();
       }
     }, 550);
   }
 
-  _enemyMagicAttack() {
+  // 壁越し戦闘では魔法ナラティブ、通常戦闘は物理ナラティブ。ダメージ計算は同一
+  _enemyBasicAttack() {
     const dmg = this._calcDmg(this.monster.atk, this.player.def);
     this.player.hp = Math.max(0, this.player.hp - dmg);
-    this.log(`✨ ${this.monster.name} の魔法攻撃！ ${dmg} ダメージ！`);
+    const label = this.wallPiercing ? '✨ 魔法攻撃' : '💥 攻撃';
+    this.log(`${label} ${this.monster.name} の一撃！ ${dmg} ダメージ！`);
     showFloatingDamage(dmg);
     this.updateUI();
     this._checkPlayerDead();
@@ -167,7 +181,7 @@ export class Battle {
 
   _useEnemySkill() {
     const sk = this.monster.skill;
-    if (!sk) { this._enemyMagicAttack(); return; }
+    if (!sk) { this._enemyBasicAttack(); return; }
 
     if (sk.healSelf > 0) {
       // 自己回復スキル（光属性）
