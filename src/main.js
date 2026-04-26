@@ -9,6 +9,8 @@ import {
   setMockGps,
   clearMockGps,
   setBypassEnterRadius,
+  setDisableEnemyAI,
+  setRevealAll,
   getDebugState,
 } from './debug.js';
 
@@ -512,26 +514,46 @@ function dungeonLog(msg) {
 // ── 移動 ──
 function move(dx, dy) {
   if (!dungeon || screen !== 'dungeon' || combatActive) return;
-  const nx = dungeon.playerPos.x + dx;
-  const ny = dungeon.playerPos.y + dy;
-  if (!dungeon.canWalk(nx, ny)) return;
 
-  const mob = dungeon.monsterAt(nx, ny);
-  if (mob) { startBattle(mob); return; }
+  // 移動 or 待機の処理
+  if (dx !== 0 || dy !== 0) {
+    const nx = dungeon.playerPos.x + dx;
+    const ny = dungeon.playerPos.y + dy;
+    if (!dungeon.canWalk(nx, ny)) return;
 
-  dungeon.playerPos = { x: nx, y: ny };
+    const mob = dungeon.monsterAt(nx, ny);
+    if (mob) { startBattle(mob); return; }   // 戦闘パネル発動 → 敵ターン無し
 
-  const floorItem = dungeon.itemAt(nx, ny);
-  if (floorItem) pickupItem(floorItem);
+    dungeon.playerPos = { x: nx, y: ny };
 
-  if (dungeon.atStairs(nx, ny)) {
-    if (currentFloor >= dungeonData.floors) {
-      dungeonClear();
-    } else {
-      dungeonLog(`B${currentFloor + 1}F へ降りた`);
-      loadFloor(currentFloor + 1);
+    const floorItem = dungeon.itemAt(nx, ny);
+    if (floorItem) pickupItem(floorItem);
+
+    if (dungeon.atStairs(nx, ny)) {
+      if (currentFloor >= dungeonData.floors) {
+        dungeonClear();
+      } else {
+        dungeonLog(`B${currentFloor + 1}F へ降りた`);
+        loadFloor(currentFloor + 1);
+      }
+      return;
     }
-    return;
+  }
+
+  // 敵ターン（プレイヤーが移動 or 待機した時に実行）
+  const result = dungeon.tickEnemies(player);
+  for (const ev of result.events) {
+    if (ev.type === 'attack') {
+      dungeonLog(`💢 ${ev.mob.name} の攻撃！ ${ev.dmg} ダメージ`);
+    }
+  }
+  if (result.totalDmg > 0) {
+    player.hp = Math.max(0, player.hp - result.totalDmg);
+    refreshHUD();
+    if (player.hp <= 0) {
+      showResult(false);
+      return;
+    }
   }
 
   dungeon.render(document.getElementById('dungeon-canvas'));
@@ -804,6 +826,19 @@ if (DEBUG) {
   // 入場距離バイパス
   document.getElementById('debug-bypass').addEventListener('change', e => {
     setBypassEnterRadius(e.target.checked);
+  });
+
+  // 敵AI停止
+  document.getElementById('debug-disable-ai').addEventListener('change', e => {
+    setDisableEnemyAI(e.target.checked);
+  });
+
+  // ダンジョン全可視化（切り替え時に再描画）
+  document.getElementById('debug-reveal').addEventListener('change', e => {
+    setRevealAll(e.target.checked);
+    if (dungeon && screen === 'dungeon') {
+      dungeon.render(document.getElementById('dungeon-canvas'));
+    }
   });
 
   // インベントリ操作（バーコードを type / rarity 確定の組合せで決め打ち）

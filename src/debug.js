@@ -4,6 +4,8 @@ export const DEBUG = new URLSearchParams(location.search).has('debug');
 const state = {
   mockGps: null,             // { lat, lng } セット中ならその座標を実GPSの代わりに使う
   bypassEnterRadius: false,  // ダンジョン入場の80m制限を無視
+  disableEnemyAI: false,     // 敵のAIターンをスキップ
+  revealAll: false,          // ダンジョン全マスを可視化
 };
 
 export function getDebugState() {
@@ -26,4 +28,12 @@ export function clearMockGps() {
 
 export function setBypassEnterRadius(v) {
   state.bypassEnterRadius = !!v;
+}
+
+export function setDisableEnemyAI(v) {
+  state.disableEnemyAI = !!v;
+}
+
+export function setRevealAll(v) {
+  state.revealAll = !!v;
 }

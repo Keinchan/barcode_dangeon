@@ -1,5 +1,6 @@
 import { createRNG, hashString } from './rng.js';
 import { generateMonster, generateFloorItems } from './generator.js';
+import { getDebugState } from './debug.js';
 
 const W = 21;
 const H = 19;
@@ -7,16 +8,18 @@ const T = { WALL: 0, FLOOR: 1, STAIRS: 2 };
 
 export class Dungeon {
   constructor(dungeonData, floor) {
-    this.data      = dungeonData;
-    this.floor     = floor;
-    this.isFinal   = floor === dungeonData.floors;
-    this.rng       = createRNG(hashString(`${dungeonData.seed}:${floor}`));
-    this.grid      = [];
-    this.monsters  = [];
-    this.floorItems = [];  // 床に落ちているアイテム
-    this.rooms     = [];
-    this.playerPos = { x: 2, y: 2 };
-    this.stairsPos = null;
+    this.data       = dungeonData;
+    this.floor      = floor;
+    this.isFinal    = floor === dungeonData.floors;
+    this.rng        = createRNG(hashString(`${dungeonData.seed}:${floor}`));
+    this.grid       = [];
+    this.monsters   = [];
+    this.floorItems = [];
+    this.rooms      = [];
+    this.playerPos  = { x: 2, y: 2 };
+    this.stairsPos  = null;
+    this.discovered = Array.from({ length: H }, () => new Uint8Array(W));
+    this.visible    = new Set();
     this._build();
   }
 
@@ -30,16 +33,13 @@ export class Dungeon {
       this._corridor(this._center(rooms[i]), this._center(rooms[i + 1]));
     }
 
-    // プレイヤー開始位置
     const c0 = this._center(rooms[0]);
     this.playerPos = { x: c0.x, y: c0.y };
 
-    // 階段
     const cl = this._center(rooms[rooms.length - 1]);
     this.stairsPos = { x: cl.x, y: cl.y };
     this.grid[cl.y][cl.x] = T.STAIRS;
 
-    // モンスター配置
     rooms.slice(1).forEach((room, i) => {
       const isLast  = i === rooms.length - 2;
       const isFinal = this.isFinal;
@@ -63,7 +63,6 @@ export class Dungeon {
       }
     });
 
-    // アイテム配置
     this.floorItems = generateFloorItems(this.data, this.floor, rooms);
   }
 
@@ -118,12 +117,142 @@ export class Dungeon {
     return this.stairsPos && x === this.stairsPos.x && y === this.stairsPos.y;
   }
 
+  // ── 視界システム ──
+  roomAt(x, y) {
+    return this.rooms.find(r => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
+  }
+
+  computeVisible(px, py) {
+    const vis = new Set();
+    const add = (x, y) => {
+      if (x >= 0 && x < W && y >= 0 && y < H) vis.add(`${x},${y}`);
+    };
+
+    add(px, py);
+    // 8近傍は常時可視
+    for (let dy = -1; dy <= 1; dy++)
+      for (let dx = -1; dx <= 1; dx++)
+        add(px + dx, py + dy);
+
+    // 同じ部屋全体
+    const room = this.roomAt(px, py);
+    if (room) {
+      for (let y = room.y; y < room.y + room.h; y++)
+        for (let x = room.x; x < room.x + room.w; x++)
+          add(x, y);
+    }
+
+    // 4方向のレイ（壁で停止、通路一直線可視）
+    for (const [dx, dy] of [[1,0], [-1,0], [0,1], [0,-1]]) {
+      let x = px, y = py;
+      while (true) {
+        x += dx; y += dy;
+        if (x < 0 || x >= W || y < 0 || y >= H) break;
+        if (this.grid[y][x] === T.WALL) break;
+        add(x, y);
+      }
+    }
+
+    return vis;
+  }
+
+  refreshVisibility() {
+    this.visible = this.computeVisible(this.playerPos.x, this.playerPos.y);
+    for (const k of this.visible) {
+      const [x, y] = k.split(',').map(Number);
+      this.discovered[y][x] = 1;
+    }
+  }
+
+  // ── 敵AI（プレイヤー行動後に呼ぶ）──
+  // 戻り値: { events: [{type, mob, dmg}, ...], totalDmg }
+  tickEnemies(player) {
+    if (getDebugState().disableEnemyAI) return { events: [], totalDmg: 0 };
+
+    const events = [];
+    let totalDmg = 0;
+
+    for (const m of this.monsters) {
+      if (m.hp <= 0) continue;
+
+      const adx = Math.abs(m.x - this.playerPos.x);
+      const ady = Math.abs(m.y - this.playerPos.y);
+      const adjacent = adx <= 1 && ady <= 1 && !(adx === 0 && ady === 0);
+
+      if (adjacent) {
+        const base = Math.max(1, m.atk - player.def);
+        const roll = 1 + Math.floor(Math.random() * Math.ceil(base * 0.4));
+        const dmg  = base + roll;
+        events.push({ type: 'attack', mob: m, dmg });
+        totalDmg += dmg;
+        continue;
+      }
+
+      if (this._monsterSeesPlayer(m)) {
+        // 1マス追跡（差分の大きい軸を優先）
+        const dx = Math.sign(this.playerPos.x - m.x);
+        const dy = Math.sign(this.playerPos.y - m.y);
+        const dxLarger = adx >= ady;
+        const tryStep = (sx, sy) => {
+          if (sx === 0 && sy === 0) return false;
+          return this._canMonsterStep(m.x + sx, m.y + sy, m);
+        };
+        if (dxLarger) {
+          if      (tryStep(dx, 0)) m.x += dx;
+          else if (tryStep(0, dy)) m.y += dy;
+        } else {
+          if      (tryStep(0, dy)) m.y += dy;
+          else if (tryStep(dx, 0)) m.x += dx;
+        }
+      } else {
+        // 徘徊
+        if (Math.random() < 0.5) continue;
+        const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+        const [dx, dy] = dirs[Math.floor(Math.random() * 4)];
+        if (this._canMonsterStep(m.x + dx, m.y + dy, m)) {
+          m.x += dx; m.y += dy;
+        }
+      }
+    }
+
+    return { events, totalDmg };
+  }
+
+  _canMonsterStep(x, y, self) {
+    if (!this.canWalk(x, y)) return false;
+    if (this.playerPos.x === x && this.playerPos.y === y) return false;
+    const other = this._monsterAt(x, y);
+    return !other || other === self;
+  }
+
+  _monsterSeesPlayer(m) {
+    const r  = this.roomAt(m.x, m.y);
+    const pr = this.roomAt(this.playerPos.x, this.playerPos.y);
+    if (r && r === pr) return true;
+
+    if (m.x === this.playerPos.x) {
+      const y0 = Math.min(m.y, this.playerPos.y);
+      const y1 = Math.max(m.y, this.playerPos.y);
+      for (let y = y0 + 1; y < y1; y++) {
+        if (this.grid[y][m.x] === T.WALL) return false;
+      }
+      return true;
+    }
+    if (m.y === this.playerPos.y) {
+      const x0 = Math.min(m.x, this.playerPos.x);
+      const x1 = Math.max(m.x, this.playerPos.x);
+      for (let x = x0 + 1; x < x1; x++) {
+        if (this.grid[m.y][x] === T.WALL) return false;
+      }
+      return true;
+    }
+    return false;
+  }
+
   // ── Canvas 描画 ──
   render(canvas) {
     const VIEW = 11;
     const half = Math.floor(VIEW / 2);
-    // 実際のヘッダー/フッター高さを測定して canvas に必要な空間を確保。
-    // canvas は flex-shrink:0 なので flex の伸縮に巻き込まれない（測定は安定）。
     const header  = document.querySelector('#screen-dungeon .dungeon-header');
     const combat  = document.getElementById('combat-panel');
     const explore = document.getElementById('dungeon-footer');
@@ -142,11 +271,14 @@ export class Dungeon {
     canvas.style.width  = canvas.width  + 'px';
     canvas.style.height = canvas.height + 'px';
 
+    this.refreshVisibility();
+    const dbg       = getDebugState();
+    const revealAll = !!dbg.revealAll;
+
     const ctx   = canvas.getContext('2d');
     const { x: px, y: py } = this.playerPos;
     const theme = this.data.theme;
 
-    // タイル
     for (let dy = 0; dy < VIEW; dy++) {
       for (let dx = 0; dx < VIEW; dx++) {
         const wx = px - half + dx;
@@ -155,31 +287,42 @@ export class Dungeon {
         const sy = dy * ts;
 
         const outOfBounds = wx < 0 || wx >= W || wy < 0 || wy >= H;
-        ctx.fillStyle = (outOfBounds || this.grid[wy][wx] === T.WALL)
-          ? theme.wallColor
-          : theme.floorColor;
+        const isVisible    = revealAll || (!outOfBounds && this.visible.has(`${wx},${wy}`));
+        const isDiscovered = revealAll || (!outOfBounds && this.discovered[wy][wx] === 1);
+
+        if (outOfBounds || (!isVisible && !isDiscovered)) {
+          ctx.fillStyle = '#000';
+          ctx.fillRect(sx, sy, ts, ts);
+          continue;
+        }
+
+        const isWall = this.grid[wy][wx] === T.WALL;
+        ctx.fillStyle = isWall ? theme.wallColor : theme.floorColor;
+        if (!isVisible) ctx.globalAlpha = 0.35;
         ctx.fillRect(sx, sy, ts, ts);
+        ctx.globalAlpha = 1;
+
         ctx.strokeStyle = 'rgba(0,0,0,0.2)';
         ctx.strokeRect(sx, sy, ts, ts);
 
-        if (outOfBounds) continue;
-
-        const fs = Math.floor(ts * 0.65);
-        ctx.font = `${fs}px serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        const cx = sx + ts / 2;
-        const cy = sy + ts / 2;
-
-        if (this.grid[wy][wx] === T.STAIRS) ctx.fillText('🔽', cx, cy);
+        if (this.grid[wy][wx] === T.STAIRS) {
+          const fs = Math.floor(ts * 0.65);
+          ctx.font = `${fs}px serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          if (!isVisible) ctx.globalAlpha = 0.45;
+          ctx.fillText('🔽', sx + ts / 2, sy + ts / 2);
+          ctx.globalAlpha = 1;
+        }
       }
     }
 
-    // アイテム
+    // アイテム（現視野内のみ。既踏でも非表示にして「拾われたかも」のミスリードを避ける）
     for (const it of this.floorItems) {
       const dx = it.x - (px - half);
       const dy = it.y - (py - half);
       if (dx < 0 || dx >= VIEW || dy < 0 || dy >= VIEW) continue;
+      if (!revealAll && !this.visible.has(`${it.x},${it.y}`)) continue;
       const fs = Math.floor(ts * 0.6);
       ctx.font = `${fs}px serif`;
       ctx.textAlign = 'center';
@@ -187,12 +330,13 @@ export class Dungeon {
       ctx.fillText(it.emoji, dx * ts + ts / 2, dy * ts + ts / 2);
     }
 
-    // モンスター
+    // モンスター（現視野内のみ）
     for (const m of this.monsters) {
       if (m.hp <= 0) continue;
       const dx = m.x - (px - half);
       const dy = m.y - (py - half);
       if (dx < 0 || dx >= VIEW || dy < 0 || dy >= VIEW) continue;
+      if (!revealAll && !this.visible.has(`${m.x},${m.y}`)) continue;
       const fs = Math.floor(ts * 0.65);
       ctx.font = `${fs}px serif`;
       ctx.textAlign = 'center';
@@ -205,7 +349,6 @@ export class Dungeon {
         ctx.strokeRect(dx * ts + 2, dy * ts + 2, ts - 4, ts - 4);
         ctx.lineWidth = 1;
       } else {
-        // レアリティインジケーター（左上の小ドット）
         ctx.fillStyle = m.rarityColor ?? '#9e9e9e';
         ctx.beginPath();
         ctx.arc(dx * ts + 6, dy * ts + 6, 4, 0, Math.PI * 2);
