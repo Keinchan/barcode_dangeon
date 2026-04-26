@@ -4,11 +4,14 @@ import { createPlayer } from './generator.js';
 import { generateItemFromBarcode, rarityFromDigit, bumpRarity } from './items.js';
 import { Dungeon } from './dungeon.js';
 import { Battle } from './battle.js';
+import { showFloatingDamage } from './ui.js';
 import {
   DEBUG,
   setMockGps,
   clearMockGps,
   setBypassEnterRadius,
+  setDisableEnemyAI,
+  setRevealAll,
   getDebugState,
 } from './debug.js';
 
@@ -173,17 +176,16 @@ function _renderEquippedRow(item, slot) {
   const skillHtml = item.skill?.name
     ? `<div class="menu-row-skill">✨ ${item.skill.name}: ${item.skill.desc}</div>` : '';
   div.innerHTML = `
-    <div class="menu-row-emoji">${item.emoji}</div>
-    <div class="menu-row-info">
-      <div class="menu-row-name" style="color:${item.rarityColor}">${item.name}</div>
-      <div class="menu-row-stat">${_statLine(item)} / ${item.rarity}</div>
-      ${skillHtml}
-    </div>
-    <div class="menu-row-actions">
-      <button class="menu-action-btn">外す</button>
-    </div>
+    <button class="menu-row-main" data-action="unequip">
+      <div class="menu-row-emoji">${item.emoji}</div>
+      <div class="menu-row-info">
+        <div class="menu-row-name" style="color:${item.rarityColor}">${item.name}</div>
+        <div class="menu-row-stat">${_statLine(item)} / ${item.rarity}</div>
+        ${skillHtml}
+      </div>
+    </button>
   `;
-  div.querySelector('.menu-action-btn').addEventListener('click', () => {
+  div.querySelector('.menu-row-main').addEventListener('click', () => {
     _onUnequipClick(slot);
   });
   return div;
@@ -200,9 +202,12 @@ function _onUnequipClick(slot) {
       alert('持ち物が満杯のため外せません。先に何か廃棄してください');
       return;
     }
-    _unequipDirect(slot);
-    refreshHUD();
-    refreshMenu();
+    const cur = slot === 'weapon' ? player.weapon : player.armor;
+    showActionConfirm('装備を外して持ち物に入れますか？', cur, '外す', () => {
+      _unequipDirect(slot);
+      refreshHUD();
+      refreshMenu();
+    });
     return;
   }
 
@@ -288,26 +293,41 @@ function _renderInventoryRow(item, idx) {
   const skillHtml = item.skill?.name
     ? `<div class="menu-row-skill">✨ ${item.skill.name}</div>` : '';
   const isEquippable = item.type === 'weapon' || item.type === 'armor';
-  // 探索中は回復薬を使える（戦闘中はバトル側のアイテムボタン経由なのでここでは出さない）
   const isUsableHere = item.type === 'potion' && screen === 'dungeon' && !combatActive;
+  const hasMainAction = isEquippable || isUsableHere;
+  const action =
+    isEquippable ? 'equip' :
+    isUsableHere ? 'use' : 'none';
+
   div.innerHTML = `
-    <div class="menu-row-emoji">${item.emoji}</div>
-    <div class="menu-row-info">
-      <div class="menu-row-name" style="color:${item.rarityColor}">${item.name}</div>
-      <div class="menu-row-stat">${_statLine(item)} / ${item.rarity}</div>
-      ${skillHtml}
-    </div>
+    <button class="menu-row-main" data-action="${action}" ${hasMainAction ? '' : 'disabled'}>
+      <div class="menu-row-emoji">${item.emoji}</div>
+      <div class="menu-row-info">
+        <div class="menu-row-name" style="color:${item.rarityColor}">${item.name}</div>
+        <div class="menu-row-stat">${_statLine(item)} / ${item.rarity}</div>
+        ${skillHtml}
+      </div>
+    </button>
     <div class="menu-row-actions">
-      ${isUsableHere ? '<button class="menu-action-btn use">使う</button>' : ''}
-      ${isEquippable ? '<button class="menu-action-btn equip">装備</button>' : ''}
       <button class="menu-action-btn danger discard">廃棄</button>
     </div>
   `;
-  if (isUsableHere) {
-    div.querySelector('.use').addEventListener('click', () => _usePotionFromInventory(idx));
-  }
-  if (isEquippable) {
-    div.querySelector('.equip').addEventListener('click', () => _equipFromInventory(idx));
+  if (hasMainAction) {
+    div.querySelector('.menu-row-main').addEventListener('click', () => {
+      if (action === 'equip') {
+        showActionConfirm(`${item.name} を装備しますか？`, item, '装備する', () => {
+          _equipFromInventory(idx);
+        });
+      } else if (action === 'use') {
+        if (player.hp >= player.maxHp) {
+          alert('HPが満タンです');
+          return;
+        }
+        showActionConfirm(`${item.name} を使いますか？`, item, '使う', () => {
+          _usePotionFromInventory(idx);
+        });
+      }
+    });
   }
   div.querySelector('.discard').addEventListener('click', () => {
     if (!confirm(`${item.name} を廃棄しますか？`)) return;
@@ -316,6 +336,40 @@ function _renderInventoryRow(item, idx) {
   });
   return div;
 }
+
+// 汎用アクション確認モーダル
+let _pendingConfirmAction = null;
+function showActionConfirm(title, item, actionLabel, onConfirm) {
+  document.getElementById('confirm-title').textContent = title;
+  const skillHtml = item.skill?.name
+    ? `<div class="menu-row-skill">✨ ${item.skill.name}: ${item.skill.desc ?? ''}</div>` : '';
+  document.getElementById('confirm-detail').innerHTML = `
+    <div class="menu-row" style="cursor:default">
+      <div class="menu-row-main" style="background:transparent;cursor:default" disabled>
+        <div class="menu-row-emoji">${item.emoji}</div>
+        <div class="menu-row-info">
+          <div class="menu-row-name" style="color:${item.rarityColor}">${item.name}</div>
+          <div class="menu-row-stat">${_statLine(item)} / ${item.rarity}</div>
+          ${skillHtml}
+        </div>
+      </div>
+    </div>
+  `;
+  document.getElementById('btn-confirm-ok').textContent = actionLabel;
+  _pendingConfirmAction = onConfirm;
+  document.getElementById('action-confirm-modal').classList.remove('hidden');
+}
+
+document.getElementById('btn-confirm-ok').addEventListener('click', () => {
+  const fn = _pendingConfirmAction;
+  _pendingConfirmAction = null;
+  document.getElementById('action-confirm-modal').classList.add('hidden');
+  if (fn) fn();
+});
+document.getElementById('btn-confirm-cancel').addEventListener('click', () => {
+  _pendingConfirmAction = null;
+  document.getElementById('action-confirm-modal').classList.add('hidden');
+});
 
 function _usePotionFromInventory(idx) {
   const item = player.inventory[idx];
@@ -512,26 +566,47 @@ function dungeonLog(msg) {
 // ── 移動 ──
 function move(dx, dy) {
   if (!dungeon || screen !== 'dungeon' || combatActive) return;
-  const nx = dungeon.playerPos.x + dx;
-  const ny = dungeon.playerPos.y + dy;
-  if (!dungeon.canWalk(nx, ny)) return;
 
-  const mob = dungeon.monsterAt(nx, ny);
-  if (mob) { startBattle(mob); return; }
+  // 移動 or 待機の処理
+  if (dx !== 0 || dy !== 0) {
+    const nx = dungeon.playerPos.x + dx;
+    const ny = dungeon.playerPos.y + dy;
+    if (!dungeon.canWalk(nx, ny)) return;
 
-  dungeon.playerPos = { x: nx, y: ny };
+    const mob = dungeon.monsterAt(nx, ny);
+    if (mob) { startBattle(mob); return; }   // 戦闘パネル発動 → 敵ターン無し
 
-  const floorItem = dungeon.itemAt(nx, ny);
-  if (floorItem) pickupItem(floorItem);
+    dungeon.playerPos = { x: nx, y: ny };
 
-  if (dungeon.atStairs(nx, ny)) {
-    if (currentFloor >= dungeonData.floors) {
-      dungeonClear();
-    } else {
-      dungeonLog(`B${currentFloor + 1}F へ降りた`);
-      loadFloor(currentFloor + 1);
+    const floorItem = dungeon.itemAt(nx, ny);
+    if (floorItem) pickupItem(floorItem);
+
+    if (dungeon.atStairs(nx, ny)) {
+      if (currentFloor >= dungeonData.floors) {
+        dungeonClear();
+      } else {
+        dungeonLog(`B${currentFloor + 1}F へ降りた`);
+        loadFloor(currentFloor + 1);
+      }
+      return;
     }
-    return;
+  }
+
+  // 敵ターン（プレイヤーが移動 or 待機した時に実行）
+  const result = dungeon.tickEnemies(player);
+  for (const ev of result.events) {
+    if (ev.type === 'attack') {
+      dungeonLog(`💢 ${ev.mob.name} の攻撃！ ${ev.dmg} ダメージ`);
+    }
+  }
+  if (result.totalDmg > 0) {
+    player.hp = Math.max(0, player.hp - result.totalDmg);
+    showFloatingDamage(result.totalDmg);
+    refreshHUD();
+    if (player.hp <= 0) {
+      showResult(false);
+      return;
+    }
   }
 
   dungeon.render(document.getElementById('dungeon-canvas'));
@@ -804,6 +879,19 @@ if (DEBUG) {
   // 入場距離バイパス
   document.getElementById('debug-bypass').addEventListener('change', e => {
     setBypassEnterRadius(e.target.checked);
+  });
+
+  // 敵AI停止
+  document.getElementById('debug-disable-ai').addEventListener('change', e => {
+    setDisableEnemyAI(e.target.checked);
+  });
+
+  // ダンジョン全可視化（切り替え時に再描画）
+  document.getElementById('debug-reveal').addEventListener('change', e => {
+    setRevealAll(e.target.checked);
+    if (dungeon && screen === 'dungeon') {
+      dungeon.render(document.getElementById('dungeon-canvas'));
+    }
   });
 
   // インベントリ操作（バーコードを type / rarity 確定の組合せで決め打ち）

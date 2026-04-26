@@ -1,4 +1,5 @@
 import { applyItem } from './items.js';
+import { showFloatingDamage } from './ui.js';
 
 export class Battle {
   constructor(player, monster, onEnd) {
@@ -164,6 +165,7 @@ export class Battle {
     const dmg = this._calcDmg(this.monster.atk, this.player.def);
     this.player.hp = Math.max(0, this.player.hp - dmg);
     this.log(`💥 ${this.monster.name} の攻撃！ ${dmg} ダメージ！`);
+    showFloatingDamage(dmg);
     this.updateUI();
     this._checkPlayerDead();
   }
@@ -184,6 +186,7 @@ export class Battle {
       const dmg = this._calcDmg(this.monster.atk, this.player.def, sk.mult);
       this.player.hp = Math.max(0, this.player.hp - dmg);
       this.log(`☠️ ${this.monster.name} が「${sk.name}」を使った！ ${dmg} ダメージ＋毒！`);
+      showFloatingDamage(dmg);
       this.updateUI();
       this._checkPlayerDead();
     } else {
@@ -191,6 +194,7 @@ export class Battle {
       const dmg = this._calcDmg(this.monster.atk, this.player.def, sk.mult);
       this.player.hp = Math.max(0, this.player.hp - dmg);
       this.log(`🔥 ${this.monster.name} が「${sk.name}」を使った！ ${dmg} ダメージ！`);
+      showFloatingDamage(dmg);
       this.updateUI();
       this._checkPlayerDead();
     }
