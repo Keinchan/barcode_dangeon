@@ -1,4 +1,4 @@
-import { initMap, refreshPin, setPlayerPosition } from './map.js';
+import { initMap, refreshPin, setPlayerPosition, invalidateMapSize } from './map.js';
 import { startScanner, stopScanner, getPosition, categoryOfFormat } from './scanner.js';
 import {
   createPlayer,
@@ -52,6 +52,11 @@ function show(name) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById('screen-' + name).classList.add('active');
   screen = name;
+  // マップを表示する時は Leaflet のサイズキャッシュを更新（非表示中に初期化されると
+  // タイル配置がズレて、クリック座標と表示位置が不一致になり地図が勝手に動いて見える）
+  if (name === 'map') {
+    requestAnimationFrame(() => invalidateMapSize());
+  }
 }
 
 // ─────────────────────────────────────────────
