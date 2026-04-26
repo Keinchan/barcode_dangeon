@@ -11,14 +11,16 @@ let map          = null;
 let playerMarker = null;
 let playerPos    = null;                 // { lat, lng }
 const renderedPins = new Map();          // seed -> { marker, dungeon }
-let onEnterCb    = null;
-let isClearedCb  = null;
-let difficultyCb = null;
+let onEnterCb         = null;
+let isClearedCb       = null;
+let difficultyCb      = null;
+let recommendedLvCb   = null;
 
-export function initMap({ onEnter, isCleared, difficulty } = {}) {
-  onEnterCb    = onEnter    ?? null;
-  isClearedCb  = isCleared  ?? null;
-  difficultyCb = difficulty ?? null;
+export function initMap({ onEnter, isCleared, difficulty, recommendedLv } = {}) {
+  onEnterCb       = onEnter       ?? null;
+  isClearedCb     = isCleared     ?? null;
+  difficultyCb    = difficulty    ?? null;
+  recommendedLvCb = recommendedLv ?? null;
 
   map = L.map('map', { zoomControl: false })
     .setView([35.6762, 139.6503], 16);
@@ -90,9 +92,12 @@ function _buildPopupHtml(dungeon) {
   const dist       = Math.round(distanceMeters(playerPos.lat, playerPos.lng, dungeon.lat, dungeon.lng));
   const clearedNow = isClearedCb?.(dungeon.seed) ?? false;
 
-  const diff = difficultyCb?.(dungeon);
+  const diff   = difficultyCb?.(dungeon);
+  const recLv  = recommendedLvCb?.(dungeon);
   const diffLine = diff
-    ? `<div style="margin-top:2px">推奨: <b style="color:${diff.color}">${diff.label}</b></div>`
+    ? `<div style="margin-top:2px">評価: <b style="color:${diff.color}">${diff.label}</b>`
+      + (recLv != null ? ` <span style="color:#888;font-size:11px">(推奨Lv${recLv})</span>` : '')
+      + `</div>`
     : '';
 
   return (

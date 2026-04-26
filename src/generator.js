@@ -121,17 +121,47 @@ export function isWithinEnterRadius(playerLat, playerLng, dungeon) {
 export const ENTER_RADIUS = ENTER_RADIUS_M;
 
 // ──────────────────────────────────────────
-// バーコード → モンスター（既存のロジックを維持）
+// 敵レベル：レアリティベース＋フロア＋ボス補正
+// プレイヤーと同レベル同士なら互角になる設計
+// ──────────────────────────────────────────
+const RARITY_LEVEL_BASE = {
+  'コモン':     1,
+  'レア':       8,
+  'エピック':   25,
+  'レジェンド': 50,
+};
+const LEVEL_PER_FLOOR  = 5;
+const BOSS_LEVEL_BONUS = 5;
+
+export function enemyLevel(dungeonData, floor, isBoss) {
+  const base = RARITY_LEVEL_BASE[dungeonData.rarityBase.name] ?? 1;
+  const lvl  = base + (floor - 1) * LEVEL_PER_FLOOR + (isBoss ? BOSS_LEVEL_BONUS : 0);
+  return Math.max(1, Math.min(MAX_LEVEL, lvl));
+}
+
+// ──────────────────────────────────────────
+// バーコード → モンスター（レベル制度ベース）
 // ──────────────────────────────────────────
 export function generateMonster(dungeonData, floor, isBoss = false) {
   const key  = `${dungeonData.barcode}:${floor}:${isBoss}`;
   const rng  = createRNG(hashString(key));
 
-  const base        = MONSTER_POOL[dungeonData.monsterTypeIdx];
-  const element     = dungeonData.element;
-  const skill       = SKILLS[element];
-  const floorMult   = 1 + (floor - 1) * 0.35;
-  const bossMult    = isBoss ? 2.8 : 1;
+  const base    = MONSTER_POOL[dungeonData.monsterTypeIdx];
+  const element = dungeonData.element;
+  const skill   = SKILLS[element];
+
+  // レベル算出 → プレイヤーと共通の statsForLevel を流用
+  const lvl   = enemyLevel(dungeonData, floor, isBoss);
+  const stats = statsForLevel(lvl);
+
+  // 個体差ランダム化（85〜115%）。RNGはバーコード+フロア+ボスでseed済みで決定論的
+  const hpRoll  = 0.85 + rng() * 0.3;
+  const atkRoll = 0.85 + rng() * 0.3;
+  const defRoll = 0.85 + rng() * 0.3;
+
+  const hp  = Math.max(1, Math.floor(stats.maxHp   * hpRoll));
+  const atk = Math.max(1, Math.floor(stats.atkBase * atkRoll));
+  const def = Math.max(0, Math.floor(stats.defBase * defRoll));
 
   const baseRarityIdx = RARITIES.indexOf(dungeonData.rarityBase);
   const rarityIdx     = isBoss
@@ -139,21 +169,13 @@ export function generateMonster(dungeonData, floor, isBoss = false) {
     : baseRarityIdx;
   const rarity        = RARITIES[rarityIdx];
 
-  const digits = dungeonData.barcode.padStart(13, '0');
-  const rawHp  = 15 + (parseInt(digits.slice(2, 5), 10) % 40);
-  const rawAtk = 4  + (parseInt(digits.slice(5, 7), 10) % 12);
-  const rawDef = 1  + (parseInt(digits.slice(7, 9), 10) % 8);
-
-  const hp  = Math.floor((rawHp  + rng() * 10) * floorMult * bossMult * rarity.mult);
-  const atk = Math.floor((rawAtk + rng() * 4)  * floorMult * bossMult * rarity.mult);
-  const def = Math.floor((rawDef + rng() * 3)  * floorMult);
-
   const displayName = isBoss ? `👑 ${base.base}王` : base.base;
 
   return {
     base: base.base, emoji: base.emoji,
     isBoss,
     name: displayName,
+    level: lvl,
     rarity: rarity.name, rarityColor: rarity.color,
     element, skill,
     skillCharge: 0,
@@ -183,8 +205,39 @@ export function generateFloorItems(dungeonData, floor, rooms) {
   return items;
 }
 
+// ── レベリング設定 ──
+export const MAX_LEVEL      = 100;
+export const HP_PER_LEVEL   = 15;
+export const ATK_PER_LEVEL  = 2;
+export const DEF_PER_LEVEL  = 1;
+
+// 指定レベルへの「次のレベル到達に必要なXP」
+export function xpRequiredForLevel(level) {
+  return level * 20;
+}
+
+// レベル基準のステータス算出
+export function statsForLevel(level) {
+  return {
+    maxHp:   35 + (level - 1) * HP_PER_LEVEL,
+    atkBase:  9 + (level - 1) * ATK_PER_LEVEL,
+    defBase:  3 + (level - 1) * DEF_PER_LEVEL,
+  };
+}
+
+// プレイヤーのステータスをレベル基準で再計算（装備のbonusを足し直す）
+export function applyLevelStats(player) {
+  const s = statsForLevel(player.level);
+  player.maxHp   = s.maxHp;
+  player.atkBase = s.atkBase;
+  player.defBase = s.defBase;
+  player.atk     = player.atkBase + (player.weapon?.atkBonus ?? 0);
+  player.def     = player.defBase + (player.armor?.defBonus  ?? 0);
+}
+
 export function createPlayer() {
   return {
+    level: 1, xp: 0,
     hp: 35, maxHp: 35,
     atkBase: 9, defBase: 3,
     atk: 9, def: 3,

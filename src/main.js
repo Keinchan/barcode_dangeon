@@ -1,6 +1,16 @@
 import { initMap, refreshPin, setPlayerPosition } from './map.js';
 import { startScanner, stopScanner, getPosition, categoryOfFormat } from './scanner.js';
-import { createPlayer } from './generator.js';
+import {
+  createPlayer,
+  applyLevelStats,
+  xpRequiredForLevel,
+  statsForLevel,
+  enemyLevel,
+  MAX_LEVEL,
+  HP_PER_LEVEL,
+  ATK_PER_LEVEL,
+  DEF_PER_LEVEL,
+} from './generator.js';
 import { generateItemFromBarcode, rarityFromDigit, bumpRarity, RARITIES } from './items.js';
 import { hashString } from './rng.js';
 import { Dungeon } from './dungeon.js';
@@ -45,21 +55,21 @@ function show(name) {
 let pendingDungeon = null;
 
 initMap({
-  onEnter:    d => requestEnterDungeon(d),
-  isCleared:  seed => clearedSet.has(seed),
-  difficulty: d => assessDifficulty(d, player),
+  onEnter:       d => requestEnterDungeon(d),
+  isCleared:     seed => clearedSet.has(seed),
+  difficulty:    d => assessDifficulty(d, player),
+  recommendedLv: d => recommendedLevel(d),
 });
 
 // プレイヤーvsダンジョンの難易度評価
-// turnsToKill / turnsToDie の比から5段階のラベルを返す
+// 最終フロアのボスLvを基準に turnsToKill / turnsToDie の比から5段階のラベルを返す
+// （フロアが深いほどボスLvが高くなる→自動でフロア難易度も加味される）
 export function assessDifficulty(d, p) {
-  const digits = d.barcode.padStart(13, '0');
-  const avgFloorMult = 1 + (d.floors - 1) * 0.175;
-  const rarityMult = d.rarityBase.mult;
-
-  const mHp  = (15 + parseInt(digits.slice(2, 5), 10) % 40) * avgFloorMult * rarityMult;
-  const mAtk = (4  + parseInt(digits.slice(5, 7), 10) % 12) * avgFloorMult * rarityMult;
-  const mDef = (1  + parseInt(digits.slice(7, 9), 10) % 8 ) * avgFloorMult;
+  const bossLvl   = enemyLevel(d, d.floors, true);
+  const bossStats = statsForLevel(bossLvl);
+  const mHp  = bossStats.maxHp;
+  const mAtk = bossStats.atkBase;
+  const mDef = bossStats.defBase;
 
   const playerEffectiveAtk = p.atk * 1.2;  // スキル/クリ込みでざっくり
   const turnsToKill = Math.max(1, mHp / Math.max(1, playerEffectiveAtk - mDef));
@@ -73,6 +83,17 @@ export function assessDifficulty(d, p) {
   return                  { label: '無謀', color: '#f44336' };
 }
 
+// ダンジョンの推奨レベル：装備なしの素体で「適正」以上になる最小レベル
+export function recommendedLevel(d) {
+  for (let L = 1; L <= MAX_LEVEL; L++) {
+    const s = statsForLevel(L);
+    const fake = { hp: s.maxHp, atk: s.atkBase, def: s.defBase };
+    const diff = assessDifficulty(d, fake);
+    if (diff.label !== '危険' && diff.label !== '無謀') return L;
+  }
+  return MAX_LEVEL;
+}
+
 // 入場前モーダル
 function requestEnterDungeon(d) {
   pendingDungeon = d;
@@ -82,16 +103,23 @@ function requestEnterDungeon(d) {
 function showPreDungeonModal(d) {
   const stars = '⭐'.repeat(d.difficulty);
   const cleared = clearedSet.has(d.seed) ? '<span style="color:#4caf50">✅ 攻略済み</span> ' : '';
-  const diff = assessDifficulty(d, player);
+  const diff   = assessDifficulty(d, player);
+  const recLv  = recommendedLevel(d);
+  const bossLv = enemyLevel(d, d.floors, true);
+  const lvDiff = player.level - recLv;
+  const recLvColor = lvDiff >= 5 ? '#4caf50' : lvDiff >= 0 ? '#8bc34a' : lvDiff >= -5 ? '#ffc107' : '#f44336';
   document.getElementById('pre-dungeon-info').innerHTML =
     `<div class="pre-dungeon-info-line"><span class="label">名称</span><b>${d.name}</b></div>` +
     `<div class="pre-dungeon-info-line"><span class="label">難易度</span>${stars} / B${d.floors}F</div>` +
     `<div class="pre-dungeon-info-line"><span class="label">レアリティ</span>` +
       `<span style="color:${d.rarityBase.color};font-weight:bold">${d.rarityBase.name}</span></div>` +
     `<div class="pre-dungeon-info-line"><span class="label">属性</span>${d.element}</div>` +
-    `<div class="pre-dungeon-info-line"><span class="label">推奨</span>` +
+    `<div class="pre-dungeon-info-line"><span class="label">推奨Lv</span>` +
+      `<b style="color:${recLvColor};font-size:15px">Lv${recLv}</b>` +
+      `<span style="color:#888;font-size:11px"> （ボスLv${bossLv}・あなたLv${player.level}）</span></div>` +
+    `<div class="pre-dungeon-info-line"><span class="label">評価</span>` +
       `<b style="color:${diff.color};font-size:15px">${diff.label}</b>` +
-      `<span style="color:#888;font-size:11px"> （現装備で評価）</span></div>` +
+      `<span style="color:#888;font-size:11px"> （現装備込み）</span></div>` +
     (cleared ? `<div class="pre-dungeon-info-line">${cleared}（再戦可）</div>` : '');
 
   const w = player.weapon;
@@ -106,6 +134,8 @@ function showPreDungeonModal(d) {
     : '<div class="pre-dungeon-info-line" style="color:#888">🛡️ 防具なし</div>';
 
   document.getElementById('pre-dungeon-player').innerHTML =
+    `<div class="pre-dungeon-info-line"><span class="label">レベル</span>` +
+      `<b style="color:#ffc107">Lv${player.level}</b></div>` +
     `<div class="pre-dungeon-info-line">HP: <b style="color:#4caf50">${player.maxHp}/${player.maxHp}</b>` +
       ` <span style="color:#888">（入場時に全回復）</span></div>` +
     `<div class="pre-dungeon-info-line">ATK ${player.atk}　DEF ${player.def}</div>` +
@@ -166,9 +196,22 @@ function openMenu() {
 // メニュー（装備・持ち物管理）
 // ─────────────────────────────────────────────
 function refreshMenu() {
+  document.getElementById('menu-lv').textContent  = player.level;
   document.getElementById('menu-hp').textContent  = `${player.hp}/${player.maxHp}`;
   document.getElementById('menu-atk').textContent = player.atk;
   document.getElementById('menu-def').textContent = player.def;
+
+  // XP表示
+  if (player.level >= MAX_LEVEL) {
+    document.getElementById('menu-xp-current').textContent = 'MAX';
+    document.getElementById('menu-xp-next').textContent    = 'MAX';
+    document.getElementById('menu-xp-bar').style.width = '100%';
+  } else {
+    const need = xpRequiredForLevel(player.level);
+    document.getElementById('menu-xp-current').textContent = player.xp;
+    document.getElementById('menu-xp-next').textContent    = need;
+    document.getElementById('menu-xp-bar').style.width = `${Math.min(100, (player.xp / need) * 100)}%`;
+  }
 
   // 装備中
   const eq = document.getElementById('menu-equipment');
@@ -580,10 +623,45 @@ function loadFloor(floor) {
 }
 
 function refreshHUD() {
+  document.getElementById('player-lv').textContent = `Lv${player.level}`;
   document.getElementById('player-hp').textContent = `HP: ${player.hp}/${player.maxHp}`;
   const wName = player.weapon ? `${player.weapon.emoji} +${player.weapon.atkBonus}` : '⚔️ ー';
   const aName = player.armor  ? `${player.armor.emoji} +${player.armor.defBonus}`  : '🛡️ ー';
   document.getElementById('equip-display').textContent = `${wName}　${aName}`;
+}
+
+// XP獲得＆レベルアップ
+function gainXp(amount) {
+  if (amount <= 0) return;
+  player.xp += amount;
+  let leveledUp = false;
+  while (player.level < MAX_LEVEL && player.xp >= xpRequiredForLevel(player.level)) {
+    player.xp -= xpRequiredForLevel(player.level);
+    player.level += 1;
+    leveledUp = true;
+  }
+  if (player.level >= MAX_LEVEL) {
+    player.xp = 0; // 上限到達でXP溢れは捨てる
+  }
+  if (leveledUp) {
+    applyLevelStats(player);
+    player.hp = player.maxHp;
+    if (typeof dungeonLog === 'function' && screen === 'dungeon') {
+      dungeonLog(`🎉 レベルアップ！ Lv${player.level}（HP+${HP_PER_LEVEL} ATK+${ATK_PER_LEVEL} DEF+${DEF_PER_LEVEL}）`);
+    }
+  }
+  refreshHUD();
+  if (!document.getElementById('menu-modal').classList.contains('hidden')) refreshMenu();
+}
+
+// モンスター撃破時のXP量
+function _xpFromMonster(mob) {
+  const base =
+    mob.rarity === 'レジェンド' ? 200 :
+    mob.rarity === 'エピック'   ? 70  :
+    mob.rarity === 'レア'       ? 25  :
+    10;
+  return mob.isBoss ? base * 3 : base;
 }
 
 function dungeonLog(msg) {
@@ -789,6 +867,8 @@ function startBattle(mob, opts = {}) {
     if (result === 'win') {
       // 元のmobリファレンスで確実に削除（cloneのdefeatedではindexOf不一致）
       dungeon.removeMonster(mob);
+      // XP獲得
+      gainXp(_xpFromMonster(mob));
       // ドロップ判定
       const drop = _rollMonsterDrop(mob);
       if (drop) {
@@ -1028,6 +1108,7 @@ if (DEBUG) {
     }
     for (const mob of adj) {
       dungeon.removeMonster(mob);
+      gainXp(_xpFromMonster(mob));
       const drop = _rollMonsterDrop(mob);
       if (drop) {
         drop.x = mob.x;
@@ -1105,6 +1186,37 @@ if (DEBUG) {
     player.armor  = null;
     player.atk    = player.atkBase;
     player.def    = player.defBase;
+    if (!document.getElementById('menu-modal').classList.contains('hidden')) refreshMenu();
+  });
+
+  // レベル操作
+  document.getElementById('debug-lv-up').addEventListener('click', () => {
+    if (player.level >= MAX_LEVEL) { alert('既にLv MAX です'); return; }
+    const n = Math.max(1, parseInt(document.getElementById('debug-lv-amount').value, 10) || 1);
+    // n回連続で次レベル必要XPを補填
+    for (let i = 0; i < n && player.level < MAX_LEVEL; i++) {
+      const need = xpRequiredForLevel(player.level);
+      gainXp(need - player.xp);
+    }
+  });
+
+  document.getElementById('debug-lv-max').addEventListener('click', () => {
+    player.level = MAX_LEVEL;
+    player.xp    = 0;
+    applyLevelStats(player);
+    player.hp = player.maxHp;
+    refreshHUD();
+    if (!document.getElementById('menu-modal').classList.contains('hidden')) refreshMenu();
+    alert(`Lv${MAX_LEVEL} に強制設定しました（HP/ATK/DEF 全更新）`);
+  });
+
+  document.getElementById('debug-lv-reset').addEventListener('click', () => {
+    if (!confirm('レベルとXPを Lv1 にリセットします')) return;
+    player.level = 1;
+    player.xp    = 0;
+    applyLevelStats(player);
+    player.hp = player.maxHp;
+    refreshHUD();
     if (!document.getElementById('menu-modal').classList.contains('hidden')) refreshMenu();
   });
 }

@@ -1,5 +1,5 @@
 import { applyItem } from './items.js';
-import { showFloatingDamage } from './ui.js';
+import { showFloatingDamage, showEnemyDamage } from './ui.js';
 
 export class Battle {
   constructor(player, monster, onEnd, opts = {}) {
@@ -21,7 +21,8 @@ export class Battle {
   }
 
   updateUI() {
-    document.getElementById('enemy-name').textContent    = this.monster.name;
+    const lvLabel = this.monster.level ? `Lv${this.monster.level} ` : '';
+    document.getElementById('enemy-name').textContent    = `${lvLabel}${this.monster.name}`;
     document.getElementById('enemy-sprite').textContent  = this.monster.emoji;
     document.getElementById('enemy-element').textContent = `${this.monster.element}属性`;
     document.getElementById('enemy-element').style.color = '#fff';
@@ -98,6 +99,7 @@ export class Battle {
     const dmg = this._calcDmg(this.player.atk, this.monster.def, 1.0);
     this.monster.hp = Math.max(0, this.monster.hp - dmg);
     this.log(`⚔️ こうげき！ ${dmg} ダメージ！`);
+    showEnemyDamage(dmg);
     this.updateUI();
     this._checkEnemyDead() || this._enemyTurn();
   }
@@ -107,14 +109,16 @@ export class Battle {
     const dmg = this._calcDmg(this.player.atk, this.monster.def, 2.0);
     this.monster.hp = Math.max(0, this.monster.hp - dmg);
     this.log(`✨ スキル！ ${dmg} の大ダメージ！`);
+    showEnemyDamage(dmg);
     this.updateUI();
     this._checkEnemyDead() || this._enemyTurn();
   }
 
   useItem(item) {
     if (this._busy) return;
-    const { msg, consumed } = applyItem(item, this.player, this.monster);
+    const { msg, consumed, dmgAmt } = applyItem(item, this.player, this.monster);
     this.log(msg);
+    if (dmgAmt > 0) showEnemyDamage(dmgAmt);
     this.updateUI();
     if (!consumed) return;
 

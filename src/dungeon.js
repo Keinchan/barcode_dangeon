@@ -369,5 +369,61 @@ export class Dungeon {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('🧙', half * ts + ts / 2, half * ts + ts / 2);
+
+    // ミニマップ
+    const mini = document.getElementById('minimap');
+    if (mini) this._renderMinimap(mini);
+  }
+
+  // ── ミニマップ描画（既踏マスのみ、視野内は強調） ──
+  _renderMinimap(canvas) {
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width;
+    const h = canvas.height;
+    const tx = w / W;
+    const ty = h / H;
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(0, 0, w, h);
+
+    const dbg = getDebugState();
+    const revealAll = !!dbg.revealAll;
+
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const isDiscovered = revealAll || this.discovered[y][x] === 1;
+        if (!isDiscovered) continue;
+        const isVisible = revealAll || this.visible.has(`${x},${y}`);
+        const isWall    = this.grid[y][x] === T.WALL;
+
+        if (this.grid[y][x] === T.STAIRS) {
+          ctx.fillStyle = isVisible ? '#4caf50' : '#2e6b32';
+        } else if (isWall) {
+          ctx.fillStyle = isVisible ? '#888' : '#444';
+        } else {
+          ctx.fillStyle = isVisible ? '#ddd' : '#777';
+        }
+        ctx.fillRect(x * tx, y * ty, Math.ceil(tx), Math.ceil(ty));
+      }
+    }
+
+    // 視野内モンスター（オレンジ点）
+    for (const m of this.monsters) {
+      if (m.hp <= 0) continue;
+      if (!revealAll && !this.visible.has(`${m.x},${m.y}`)) continue;
+      ctx.fillStyle = '#ff9800';
+      const r = Math.max(1, Math.min(tx, ty) * 0.5);
+      ctx.beginPath();
+      ctx.arc(m.x * tx + tx / 2, m.y * ty + ty / 2, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // プレイヤー（赤点）
+    ctx.fillStyle = '#ff5252';
+    const pr = Math.max(1.5, Math.min(tx, ty) * 0.65);
+    ctx.beginPath();
+    ctx.arc(this.playerPos.x * tx + tx / 2, this.playerPos.y * ty + ty / 2, pr, 0, Math.PI * 2);
+    ctx.fill();
   }
 }
