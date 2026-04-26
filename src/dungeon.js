@@ -297,20 +297,29 @@ export class Dungeon {
         }
 
         const isWall = this.grid[wy][wx] === T.WALL;
-        ctx.fillStyle = isWall ? theme.wallColor : theme.floorColor;
-        if (!isVisible) ctx.globalAlpha = 0.35;
+        if (isVisible) {
+          ctx.fillStyle = isWall ? theme.wallColor : theme.floorColor;
+        } else {
+          // 既踏だが現視野外: テーマに依らない統一の暗色で、視野内とハッキリ差をつける
+          ctx.fillStyle = isWall ? '#23232c' : '#0f0f17';
+        }
         ctx.fillRect(sx, sy, ts, ts);
-        ctx.globalAlpha = 1;
 
-        ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+        ctx.strokeStyle = 'rgba(0,0,0,0.25)';
         ctx.strokeRect(sx, sy, ts, ts);
+
+        // 視野内の壁には微かなハイライトでさらに視認性UP
+        if (isVisible && isWall) {
+          ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+          ctx.strokeRect(sx + 0.5, sy + 0.5, ts - 1, ts - 1);
+        }
 
         if (this.grid[wy][wx] === T.STAIRS) {
           const fs = Math.floor(ts * 0.65);
           ctx.font = `${fs}px serif`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          if (!isVisible) ctx.globalAlpha = 0.45;
+          if (!isVisible) ctx.globalAlpha = 0.55;
           ctx.fillText('🔽', sx + ts / 2, sy + ts / 2);
           ctx.globalAlpha = 1;
         }
