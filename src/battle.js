@@ -21,7 +21,8 @@ export class Battle {
   }
 
   updateUI() {
-    document.getElementById('enemy-name').textContent    = this.monster.name;
+    const lvLabel = this.monster.level ? `Lv${this.monster.level} ` : '';
+    document.getElementById('enemy-name').textContent    = `${lvLabel}${this.monster.name}`;
     document.getElementById('enemy-sprite').textContent  = this.monster.emoji;
     document.getElementById('enemy-element').textContent = `${this.monster.element}属性`;
     document.getElementById('enemy-element').style.color = '#fff';

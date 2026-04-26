@@ -4,6 +4,8 @@ import {
   createPlayer,
   applyLevelStats,
   xpRequiredForLevel,
+  statsForLevel,
+  enemyLevel,
   MAX_LEVEL,
   HP_PER_LEVEL,
   ATK_PER_LEVEL,
@@ -53,21 +55,21 @@ function show(name) {
 let pendingDungeon = null;
 
 initMap({
-  onEnter:    d => requestEnterDungeon(d),
-  isCleared:  seed => clearedSet.has(seed),
-  difficulty: d => assessDifficulty(d, player),
+  onEnter:       d => requestEnterDungeon(d),
+  isCleared:     seed => clearedSet.has(seed),
+  difficulty:    d => assessDifficulty(d, player),
+  recommendedLv: d => recommendedLevel(d),
 });
 
 // プレイヤーvsダンジョンの難易度評価
-// turnsToKill / turnsToDie の比から5段階のラベルを返す
+// 最終フロアのボスLvを基準に turnsToKill / turnsToDie の比から5段階のラベルを返す
+// （フロアが深いほどボスLvが高くなる→自動でフロア難易度も加味される）
 export function assessDifficulty(d, p) {
-  const digits = d.barcode.padStart(13, '0');
-  const avgFloorMult = 1 + (d.floors - 1) * 0.175;
-  const rarityMult = d.rarityBase.mult;
-
-  const mHp  = (15 + parseInt(digits.slice(2, 5), 10) % 40) * avgFloorMult * rarityMult;
-  const mAtk = (4  + parseInt(digits.slice(5, 7), 10) % 12) * avgFloorMult * rarityMult;
-  const mDef = (1  + parseInt(digits.slice(7, 9), 10) % 8 ) * avgFloorMult;
+  const bossLvl   = enemyLevel(d, d.floors, true);
+  const bossStats = statsForLevel(bossLvl);
+  const mHp  = bossStats.maxHp;
+  const mAtk = bossStats.atkBase;
+  const mDef = bossStats.defBase;
 
   const playerEffectiveAtk = p.atk * 1.2;  // スキル/クリ込みでざっくり
   const turnsToKill = Math.max(1, mHp / Math.max(1, playerEffectiveAtk - mDef));
@@ -81,6 +83,17 @@ export function assessDifficulty(d, p) {
   return                  { label: '無謀', color: '#f44336' };
 }
 
+// ダンジョンの推奨レベル：装備なしの素体で「適正」以上になる最小レベル
+export function recommendedLevel(d) {
+  for (let L = 1; L <= MAX_LEVEL; L++) {
+    const s = statsForLevel(L);
+    const fake = { hp: s.maxHp, atk: s.atkBase, def: s.defBase };
+    const diff = assessDifficulty(d, fake);
+    if (diff.label !== '危険' && diff.label !== '無謀') return L;
+  }
+  return MAX_LEVEL;
+}
+
 // 入場前モーダル
 function requestEnterDungeon(d) {
   pendingDungeon = d;
@@ -90,16 +103,23 @@ function requestEnterDungeon(d) {
 function showPreDungeonModal(d) {
   const stars = '⭐'.repeat(d.difficulty);
   const cleared = clearedSet.has(d.seed) ? '<span style="color:#4caf50">✅ 攻略済み</span> ' : '';
-  const diff = assessDifficulty(d, player);
+  const diff   = assessDifficulty(d, player);
+  const recLv  = recommendedLevel(d);
+  const bossLv = enemyLevel(d, d.floors, true);
+  const lvDiff = player.level - recLv;
+  const recLvColor = lvDiff >= 5 ? '#4caf50' : lvDiff >= 0 ? '#8bc34a' : lvDiff >= -5 ? '#ffc107' : '#f44336';
   document.getElementById('pre-dungeon-info').innerHTML =
     `<div class="pre-dungeon-info-line"><span class="label">名称</span><b>${d.name}</b></div>` +
     `<div class="pre-dungeon-info-line"><span class="label">難易度</span>${stars} / B${d.floors}F</div>` +
     `<div class="pre-dungeon-info-line"><span class="label">レアリティ</span>` +
       `<span style="color:${d.rarityBase.color};font-weight:bold">${d.rarityBase.name}</span></div>` +
     `<div class="pre-dungeon-info-line"><span class="label">属性</span>${d.element}</div>` +
-    `<div class="pre-dungeon-info-line"><span class="label">推奨</span>` +
+    `<div class="pre-dungeon-info-line"><span class="label">推奨Lv</span>` +
+      `<b style="color:${recLvColor};font-size:15px">Lv${recLv}</b>` +
+      `<span style="color:#888;font-size:11px"> （ボスLv${bossLv}・あなたLv${player.level}）</span></div>` +
+    `<div class="pre-dungeon-info-line"><span class="label">評価</span>` +
       `<b style="color:${diff.color};font-size:15px">${diff.label}</b>` +
-      `<span style="color:#888;font-size:11px"> （現装備で評価）</span></div>` +
+      `<span style="color:#888;font-size:11px"> （現装備込み）</span></div>` +
     (cleared ? `<div class="pre-dungeon-info-line">${cleared}（再戦可）</div>` : '');
 
   const w = player.weapon;
@@ -1172,8 +1192,12 @@ if (DEBUG) {
   // レベル操作
   document.getElementById('debug-lv-up').addEventListener('click', () => {
     if (player.level >= MAX_LEVEL) { alert('既にLv MAX です'); return; }
-    const need = xpRequiredForLevel(player.level);
-    gainXp(need - player.xp); // 次のLvに到達する量だけ加算
+    const n = Math.max(1, parseInt(document.getElementById('debug-lv-amount').value, 10) || 1);
+    // n回連続で次レベル必要XPを補填
+    for (let i = 0; i < n && player.level < MAX_LEVEL; i++) {
+      const need = xpRequiredForLevel(player.level);
+      gainXp(need - player.xp);
+    }
   });
 
   document.getElementById('debug-lv-max').addEventListener('click', () => {

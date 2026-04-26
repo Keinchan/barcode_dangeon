@@ -280,10 +280,13 @@
       <fieldset class="debug-section">
         <legend>📈 レベル</legend>
         <div class="debug-row">
-          <button id="debug-lv-up"    class="debug-action">Lv +1</button>
-          <button id="debug-lv-max"   class="debug-action">Lv 100</button>
+          <input id="debug-lv-amount" type="number" min="1" max="99" value="1" />
+          <button id="debug-lv-up" class="debug-action">Lv +N</button>
         </div>
-        <button id="debug-lv-reset" class="debug-action ghost">Lv 1 にリセット</button>
+        <div class="debug-row">
+          <button id="debug-lv-max"   class="debug-action">Lv 100</button>
+          <button id="debug-lv-reset" class="debug-action ghost">Lv 1</button>
+        </div>
       </fieldset>
 
       <fieldset class="debug-section">
