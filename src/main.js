@@ -604,12 +604,12 @@ function move(dx, dy) {
     const nx = px + dx;
     const ny = py + dy;
 
-    // 斜め移動の壁抜け禁止：両側の縦横マスが壁の場合は通れない
+    // 斜め移動の壁抜け禁止：縦横どちらか1つでも壁ならその角の斜めへは進めない
     if (dx !== 0 && dy !== 0) {
       const sideX = dungeon.canWalk(px + dx, py);
       const sideY = dungeon.canWalk(px, py + dy);
-      if (!sideX && !sideY) {
-        // 角を抜けられない。先に敵がいれば魔法攻撃の選択肢
+      if (!sideX || !sideY) {
+        // 壁の角を抜けられない。先に敵がいれば魔法攻撃の選択肢
         const mob = dungeon.monsterAt(nx, ny);
         if (mob && dungeon.canWalk(nx, ny)) {
           if (confirm(`壁の向こうの ${mob.name} に魔法で攻撃する？`)) {
