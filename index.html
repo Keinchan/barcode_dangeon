@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>バーコードダンジョン</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- マップ画面 -->
+  <div id="screen-map" class="screen active">
+    <div id="map"></div>
+    <div class="map-hud">
+      <div class="hud-title">⚔️ バーコードダンジョン</div>
+      <button id="btn-scan" class="btn-primary">📷 バーコードをスキャン</button>
+    </div>
+  </div>
+
+  <!-- スキャン画面 -->
+  <div id="screen-scanner" class="screen">
+    <div class="scanner-header">
+      <button id="btn-back-scan" class="btn-back">← 戻る</button>
+      <span>バーコードをスキャン</span>
+    </div>
+    <div id="scanner-wrap">
+      <video id="scanner-video" autoplay muted playsinline></video>
+      <div class="scanner-frame">
+        <div class="scanner-line"></div>
+      </div>
+      <div class="scanner-hint">バーコードをフレームに合わせてください</div>
+    </div>
+    <div id="scan-result" class="hidden">
+      <div id="dungeon-preview"></div>
+      <button id="btn-enter-dungeon" class="btn-primary">ダンジョンに入る →</button>
+    </div>
+  </div>
+
+  <!-- ダンジョン画面 -->
+  <div id="screen-dungeon" class="screen">
+    <div class="dungeon-header">
+      <div>
+        <div id="dungeon-title">ダンジョン</div>
+        <div id="floor-label">B1F</div>
+      </div>
+      <div id="player-hp" class="hp-text">HP: 30/30</div>
+    </div>
+    <canvas id="dungeon-canvas"></canvas>
+    <div class="dungeon-footer">
+      <div id="dungeon-log"></div>
+      <div class="dpad">
+        <button class="dpad-btn" data-dir="up">↑</button>
+        <div class="dpad-row">
+          <button class="dpad-btn" data-dir="left">←</button>
+          <button class="dpad-btn dpad-wait" data-dir="wait">待</button>
+          <button class="dpad-btn" data-dir="right">→</button>
+        </div>
+        <button class="dpad-btn" data-dir="down">↓</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- バトル画面 -->
+  <div id="screen-battle" class="screen">
+    <div class="battle-area">
+      <div class="enemy-box">
+        <div id="enemy-name">???</div>
+        <div id="enemy-sprite" class="enemy-sprite">❓</div>
+        <div class="hp-bar-wrap">
+          <div id="enemy-hp-bar" class="hp-bar" style="width:100%"></div>
+        </div>
+        <div id="enemy-stat-text"></div>
+      </div>
+      <div id="battle-log" class="battle-log"></div>
+      <div class="battle-buttons">
+        <button class="btn-battle" id="btn-attack">⚔️ こうげき</button>
+        <button class="btn-battle" id="btn-skill">✨ スキル</button>
+        <button class="btn-battle" id="btn-item">🎒 アイテム</button>
+        <button class="btn-battle" id="btn-run">🏃 にげる</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- リザルト画面 -->
+  <div id="screen-result" class="screen">
+    <div class="result-box">
+      <div id="result-icon"></div>
+      <div id="result-title"></div>
+      <div id="result-body"></div>
+      <button id="btn-result-back" class="btn-primary">マップに戻る</button>
+    </div>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
