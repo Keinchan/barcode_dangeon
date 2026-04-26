@@ -1,9 +1,26 @@
 import { BrowserMultiFormatReader } from '@zxing/browser';
+import { BarcodeFormat, DecodeHintType } from '@zxing/library';
 
-let reader = null;
+let reader   = null;
+let controls = null;
+
+// 商品バーコードに絞ってヒント指定（精度・速度向上）
+function buildHints() {
+  const hints = new Map();
+  hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+    BarcodeFormat.EAN_13,   // JAN-13 / EAN-13（日本の商品バーコードのほとんど）
+    BarcodeFormat.EAN_8,    // JAN-8 / EAN-8
+    BarcodeFormat.UPC_A,    // 米国UPC-A
+    BarcodeFormat.UPC_E,    // 米国UPC-E
+    BarcodeFormat.CODE_128, // 物流系の数字バーコード
+    BarcodeFormat.ITF,      // ITF（書籍流通など）
+  ]);
+  hints.set(DecodeHintType.TRY_HARDER, true);
+  return hints;
+}
 
 export async function startScanner(onResult) {
-  reader = new BrowserMultiFormatReader();
+  reader = new BrowserMultiFormatReader(buildHints());
 
   const devices = await BrowserMultiFormatReader.listVideoInputDevices();
   // 背面カメラを優先
@@ -11,7 +28,7 @@ export async function startScanner(onResult) {
     devices.find(d => /back|rear|environment/i.test(d.label)) ||
     devices[devices.length - 1];
 
-  await reader.decodeFromVideoDevice(
+  controls = await reader.decodeFromVideoDevice(
     device?.deviceId ?? null,
     'scanner-video',
     (result, err) => {
@@ -26,7 +43,11 @@ export async function startScanner(onResult) {
 }
 
 export function stopScanner() {
-  if (reader) { reader.reset(); reader = null; }
+  if (controls) {
+    try { controls.stop(); } catch { /* noop */ }
+    controls = null;
+  }
+  reader = null;
 }
 
 export function getPosition() {
