@@ -47,6 +47,133 @@ document.getElementById('btn-scan').addEventListener('click', () => {
   launchScanner();
 });
 
+document.getElementById('btn-menu').addEventListener('click', () => {
+  refreshMenu();
+  document.getElementById('menu-modal').classList.remove('hidden');
+});
+document.getElementById('btn-menu-close').addEventListener('click', () => {
+  document.getElementById('menu-modal').classList.add('hidden');
+});
+
+// ─────────────────────────────────────────────
+// メニュー（装備・持ち物管理）
+// ─────────────────────────────────────────────
+function refreshMenu() {
+  document.getElementById('menu-hp').textContent  = `${player.hp}/${player.maxHp}`;
+  document.getElementById('menu-atk').textContent = player.atk;
+  document.getElementById('menu-def').textContent = player.def;
+
+  // 装備中
+  const eq = document.getElementById('menu-equipment');
+  eq.innerHTML = '';
+  if (player.weapon) eq.appendChild(_renderEquippedRow(player.weapon, 'weapon'));
+  if (player.armor)  eq.appendChild(_renderEquippedRow(player.armor,  'armor'));
+  if (!player.weapon && !player.armor) {
+    eq.innerHTML = '<div class="menu-empty">装備なし</div>';
+  }
+
+  // 持ち物
+  const inv = document.getElementById('menu-inventory');
+  document.getElementById('menu-inv-count').textContent = `(${player.inventory.length}/8)`;
+  inv.innerHTML = '';
+  if (player.inventory.length === 0) {
+    inv.innerHTML = '<div class="menu-empty">持ち物なし</div>';
+  } else {
+    player.inventory.forEach((item, idx) => {
+      inv.appendChild(_renderInventoryRow(item, idx));
+    });
+  }
+}
+
+function _statLine(item) {
+  if (item.type === 'weapon') return `ATK +${item.atkBonus}（${item.element}属性）`;
+  if (item.type === 'armor')  return `DEF +${item.defBonus}（${item.element}属性）`;
+  if (item.type === 'potion') return `HP +${item.heal} 回復`;
+  if (item.type === 'scroll') return `${item.element}属性 ${item.dmg}ダメージ`;
+  return '';
+}
+
+function _renderEquippedRow(item, slot) {
+  const div = document.createElement('div');
+  div.className = 'menu-row';
+  const skillHtml = item.skill?.name
+    ? `<div class="menu-row-skill">✨ ${item.skill.name}: ${item.skill.desc}</div>` : '';
+  div.innerHTML = `
+    <div class="menu-row-emoji">${item.emoji}</div>
+    <div class="menu-row-info">
+      <div class="menu-row-name" style="color:${item.rarityColor}">${item.name}</div>
+      <div class="menu-row-stat">${_statLine(item)} / ${item.rarity}</div>
+      ${skillHtml}
+    </div>
+    <div class="menu-row-actions">
+      <button class="menu-action-btn">外す</button>
+    </div>
+  `;
+  div.querySelector('.menu-action-btn').addEventListener('click', () => {
+    if (player.inventory.length >= 8) {
+      alert('持ち物が満杯のため外せません。先に何か廃棄してください');
+      return;
+    }
+    if (slot === 'weapon') {
+      player.inventory.push(player.weapon);
+      player.weapon = null;
+      player.atk    = player.atkBase;
+    } else {
+      player.inventory.push(player.armor);
+      player.armor  = null;
+      player.def    = player.defBase;
+    }
+    refreshMenu();
+  });
+  return div;
+}
+
+function _renderInventoryRow(item, idx) {
+  const div = document.createElement('div');
+  div.className = 'menu-row';
+  const skillHtml = item.skill?.name
+    ? `<div class="menu-row-skill">✨ ${item.skill.name}</div>` : '';
+  const isEquippable = item.type === 'weapon' || item.type === 'armor';
+  div.innerHTML = `
+    <div class="menu-row-emoji">${item.emoji}</div>
+    <div class="menu-row-info">
+      <div class="menu-row-name" style="color:${item.rarityColor}">${item.name}</div>
+      <div class="menu-row-stat">${_statLine(item)} / ${item.rarity}</div>
+      ${skillHtml}
+    </div>
+    <div class="menu-row-actions">
+      ${isEquippable ? '<button class="menu-action-btn equip">装備</button>' : ''}
+      <button class="menu-action-btn danger discard">廃棄</button>
+    </div>
+  `;
+  if (isEquippable) {
+    div.querySelector('.equip').addEventListener('click', () => _equipFromInventory(idx));
+  }
+  div.querySelector('.discard').addEventListener('click', () => {
+    if (!confirm(`${item.name} を廃棄しますか？`)) return;
+    player.inventory.splice(idx, 1);
+    refreshMenu();
+  });
+  return div;
+}
+
+function _equipFromInventory(idx) {
+  const item = player.inventory[idx];
+  if (!item) return;
+  // 入れ替え：まず取り出す
+  player.inventory.splice(idx, 1);
+  if (item.type === 'weapon') {
+    if (player.weapon) player.inventory.push(player.weapon);
+    player.weapon = item;
+    player.atk    = player.atkBase + item.atkBonus;
+  } else if (item.type === 'armor') {
+    if (player.armor) player.inventory.push(player.armor);
+    player.armor  = item;
+    player.def    = player.defBase + item.defBonus;
+  }
+  refreshMenu();
+}
+
 // ─────────────────────────────────────────────
 // スキャン → アイテム獲得
 // ─────────────────────────────────────────────
@@ -498,5 +625,61 @@ if (DEBUG) {
   // 入場距離バイパス
   document.getElementById('debug-bypass').addEventListener('change', e => {
     setBypassEnterRadius(e.target.checked);
+  });
+
+  // インベントリ操作（バーコードを type / rarity 確定の組合せで決め打ち）
+  const DEBUG_ITEM_CODES = {
+    weapon: {
+      コモン:     '0000000000000',
+      レア:       '1000000000007',
+      エピック:   '0000000000008',
+      レジェンド: '3000000000009',
+    },
+    armor: {
+      コモン:     '0000000000001',
+      レア:       '0000000000005',
+      エピック:   '1000000000008',
+      レジェンド: '0000000000009',
+    },
+    potion: {
+      コモン:     '0000000000002',
+      レア:       '1000000000005',
+      エピック:   '2000000000008',
+      レジェンド: '1000000000009',
+    },
+    scroll: {
+      コモン:     '0000000000003',
+      レア:       '0000000000007',
+      エピック:   '3000000000008',
+      レジェンド: '2000000000009',
+    },
+  };
+  const RARITY_NAMES = ['コモン', 'レア', 'エピック', 'レジェンド'];
+
+  function debugAddItem(type) {
+    if (player.inventory.length >= 8) {
+      alert('インベントリ満杯です（先に廃棄）');
+      return;
+    }
+    const rarity = RARITY_NAMES[Math.floor(Math.random() * RARITY_NAMES.length)];
+    const code   = DEBUG_ITEM_CODES[type][rarity];
+    const item   = generateItemFromBarcode(code);
+    player.inventory.push(item);
+    if (!document.getElementById('menu-modal').classList.contains('hidden')) refreshMenu();
+  }
+
+  document.getElementById('debug-add-weapon').addEventListener('click', () => debugAddItem('weapon'));
+  document.getElementById('debug-add-armor' ).addEventListener('click', () => debugAddItem('armor'));
+  document.getElementById('debug-add-potion').addEventListener('click', () => debugAddItem('potion'));
+  document.getElementById('debug-add-scroll').addEventListener('click', () => debugAddItem('scroll'));
+
+  document.getElementById('debug-clear-inv').addEventListener('click', () => {
+    if (!confirm('インベントリと装備を全廃棄します')) return;
+    player.inventory = [];
+    player.weapon = null;
+    player.armor  = null;
+    player.atk    = player.atkBase;
+    player.def    = player.defBase;
+    if (!document.getElementById('menu-modal').classList.contains('hidden')) refreshMenu();
   });
 }

@@ -16,7 +16,36 @@
     <div id="map"></div>
     <div class="map-hud">
       <div class="hud-title">⚔️ バーコードダンジョン</div>
-      <button id="btn-scan" class="btn-primary">📷 バーコードをスキャン</button>
+      <div class="hud-button-row">
+        <button id="btn-scan" class="btn-primary">📷 スキャン</button>
+        <button id="btn-menu" class="btn-secondary">🎒 メニュー</button>
+      </div>
+    </div>
+
+    <!-- メニューモーダル -->
+    <div id="menu-modal" class="menu-modal hidden">
+      <div class="menu-modal-header">
+        <button id="btn-menu-close" class="btn-back">← 閉じる</button>
+        <span class="menu-modal-title">メニュー</span>
+      </div>
+      <div class="menu-modal-body">
+        <section class="menu-section">
+          <div class="menu-section-title">🧙 ステータス</div>
+          <div class="menu-stats">
+            <div>HP <span id="menu-hp">35/35</span></div>
+            <div>ATK <span id="menu-atk">9</span></div>
+            <div>DEF <span id="menu-def">3</span></div>
+          </div>
+        </section>
+        <section class="menu-section">
+          <div class="menu-section-title">装備中</div>
+          <div id="menu-equipment"></div>
+        </section>
+        <section class="menu-section">
+          <div class="menu-section-title">持ち物 <span id="menu-inv-count" class="menu-section-meta"></span></div>
+          <div id="menu-inventory"></div>
+        </section>
+      </div>
     </div>
   </div>
 
@@ -161,6 +190,19 @@
           <input id="debug-bypass" type="checkbox" />
           <span>入場距離(80m)を無視</span>
         </label>
+      </fieldset>
+
+      <fieldset class="debug-section">
+        <legend>🎒 インベントリ操作</legend>
+        <div class="debug-row">
+          <button id="debug-add-weapon" class="debug-action">⚔️武器</button>
+          <button id="debug-add-armor"  class="debug-action">🛡️防具</button>
+        </div>
+        <div class="debug-row">
+          <button id="debug-add-potion" class="debug-action">🧪薬</button>
+          <button id="debug-add-scroll" class="debug-action">📜巻物</button>
+        </div>
+        <button id="debug-clear-inv" class="debug-action ghost">全廃棄(装備も)</button>
       </fieldset>
     </div>
   </div>
