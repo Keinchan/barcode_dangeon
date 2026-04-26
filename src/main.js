@@ -1,7 +1,8 @@
 import { initMap, refreshPin, setPlayerPosition } from './map.js';
 import { startScanner, stopScanner, getPosition, categoryOfFormat } from './scanner.js';
 import { createPlayer } from './generator.js';
-import { generateItemFromBarcode, rarityFromDigit, bumpRarity } from './items.js';
+import { generateItemFromBarcode, rarityFromDigit, bumpRarity, RARITIES } from './items.js';
+import { hashString } from './rng.js';
 import { Dungeon } from './dungeon.js';
 import { Battle } from './battle.js';
 import { showFloatingDamage } from './ui.js';
@@ -12,6 +13,7 @@ import {
   setBypassEnterRadius,
   setDisableEnemyAI,
   setRevealAll,
+  setForceDrop,
   getDebugState,
 } from './debug.js';
 
@@ -43,9 +45,33 @@ function show(name) {
 let pendingDungeon = null;
 
 initMap({
-  onEnter:   d => requestEnterDungeon(d),
-  isCleared: seed => clearedSet.has(seed),
+  onEnter:    d => requestEnterDungeon(d),
+  isCleared:  seed => clearedSet.has(seed),
+  difficulty: d => assessDifficulty(d, player),
 });
+
+// プレイヤーvsダンジョンの難易度評価
+// turnsToKill / turnsToDie の比から5段階のラベルを返す
+export function assessDifficulty(d, p) {
+  const digits = d.barcode.padStart(13, '0');
+  const avgFloorMult = 1 + (d.floors - 1) * 0.175;
+  const rarityMult = d.rarityBase.mult;
+
+  const mHp  = (15 + parseInt(digits.slice(2, 5), 10) % 40) * avgFloorMult * rarityMult;
+  const mAtk = (4  + parseInt(digits.slice(5, 7), 10) % 12) * avgFloorMult * rarityMult;
+  const mDef = (1  + parseInt(digits.slice(7, 9), 10) % 8 ) * avgFloorMult;
+
+  const playerEffectiveAtk = p.atk * 1.2;  // スキル/クリ込みでざっくり
+  const turnsToKill = Math.max(1, mHp / Math.max(1, playerEffectiveAtk - mDef));
+  const turnsToDie  = Math.max(1, p.hp / Math.max(1, mAtk - p.def));
+  const ratio = turnsToKill / turnsToDie;
+
+  if (ratio < 0.5) return { label: '楽勝', color: '#4caf50' };
+  if (ratio < 1.0) return { label: '余裕', color: '#8bc34a' };
+  if (ratio < 2.0) return { label: '適正', color: '#ffc107' };
+  if (ratio < 4.0) return { label: '危険', color: '#ff9800' };
+  return                  { label: '無謀', color: '#f44336' };
+}
 
 // 入場前モーダル
 function requestEnterDungeon(d) {
@@ -56,12 +82,16 @@ function requestEnterDungeon(d) {
 function showPreDungeonModal(d) {
   const stars = '⭐'.repeat(d.difficulty);
   const cleared = clearedSet.has(d.seed) ? '<span style="color:#4caf50">✅ 攻略済み</span> ' : '';
+  const diff = assessDifficulty(d, player);
   document.getElementById('pre-dungeon-info').innerHTML =
     `<div class="pre-dungeon-info-line"><span class="label">名称</span><b>${d.name}</b></div>` +
     `<div class="pre-dungeon-info-line"><span class="label">難易度</span>${stars} / B${d.floors}F</div>` +
     `<div class="pre-dungeon-info-line"><span class="label">レアリティ</span>` +
       `<span style="color:${d.rarityBase.color};font-weight:bold">${d.rarityBase.name}</span></div>` +
     `<div class="pre-dungeon-info-line"><span class="label">属性</span>${d.element}</div>` +
+    `<div class="pre-dungeon-info-line"><span class="label">推奨</span>` +
+      `<b style="color:${diff.color};font-size:15px">${diff.label}</b>` +
+      `<span style="color:#888;font-size:11px"> （現装備で評価）</span></div>` +
     (cleared ? `<div class="pre-dungeon-info-line">${cleared}（再戦可）</div>` : '');
 
   const w = player.weapon;
@@ -569,8 +599,25 @@ function move(dx, dy) {
 
   // 移動 or 待機の処理
   if (dx !== 0 || dy !== 0) {
-    const nx = dungeon.playerPos.x + dx;
-    const ny = dungeon.playerPos.y + dy;
+    const px = dungeon.playerPos.x;
+    const py = dungeon.playerPos.y;
+    const nx = px + dx;
+    const ny = py + dy;
+
+    // 斜め移動の壁抜け禁止：縦横どちらか1つでも壁ならその角の斜めへは進めない
+    if (dx !== 0 && dy !== 0) {
+      const sideX = dungeon.canWalk(px + dx, py);
+      const sideY = dungeon.canWalk(px, py + dy);
+      if (!sideX || !sideY) {
+        // 壁の角越しに敵がいれば、戦闘パネルを開く（壁越しの戦闘＝魔法のみ）
+        const mob = dungeon.monsterAt(nx, ny);
+        if (mob && dungeon.canWalk(nx, ny)) {
+          startBattle(mob, { wallPiercing: true });
+        }
+        return;
+      }
+    }
+
     if (!dungeon.canWalk(nx, ny)) return;
 
     const mob = dungeon.monsterAt(nx, ny);
@@ -592,11 +639,15 @@ function move(dx, dy) {
     }
   }
 
-  // 敵ターン（プレイヤーが移動 or 待機した時に実行）
+  _runEnemyTurn();
+}
+
+// 敵ターン共通処理
+function _runEnemyTurn() {
   const result = dungeon.tickEnemies(player);
   for (const ev of result.events) {
-    if (ev.type === 'attack') {
-      dungeonLog(`💢 ${ev.mob.name} の攻撃！ ${ev.dmg} ダメージ`);
+    if (ev.type === 'magic') {
+      dungeonLog(`✨ ${ev.mob.name} の魔法攻撃！ ${ev.dmg} ダメージ`);
     }
   }
   if (result.totalDmg > 0) {
@@ -608,7 +659,6 @@ function move(dx, dy) {
       return;
     }
   }
-
   dungeon.render(document.getElementById('dungeon-canvas'));
 }
 
@@ -654,21 +704,33 @@ function pickupItem(item) {
   dungeon.render(document.getElementById('dungeon-canvas'));
 }
 
-// D-パッド
+// D-パッド（8方向＋待機）
+const DPAD_DIRS = {
+  'up-left':    [-1, -1],
+  'up':         [ 0, -1],
+  'up-right':   [ 1, -1],
+  'left':       [-1,  0],
+  'wait':       [ 0,  0],
+  'right':      [ 1,  0],
+  'down-left':  [-1,  1],
+  'down':       [ 0,  1],
+  'down-right': [ 1,  1],
+};
 document.querySelectorAll('.dpad-btn').forEach(btn => {
   btn.addEventListener('click', () => {
-    const m = { up:[0,-1], down:[0,1], left:[-1,0], right:[1,0], wait:[0,0] };
-    const d = m[btn.dataset.dir];
+    const d = DPAD_DIRS[btn.dataset.dir];
     if (d) move(...d);
   });
 });
 
-// キーボード（PC確認用）
+// キーボード（PC確認用、8方向対応）
 document.addEventListener('keydown', e => {
   if (screen !== 'dungeon' || combatActive) return;
   const m = {
     ArrowUp:[0,-1], ArrowDown:[0,1], ArrowLeft:[-1,0], ArrowRight:[1,0],
     w:[0,-1], s:[0,1], a:[-1,0], d:[1,0], ' ':[0,0],
+    q:[-1,-1], e:[1,-1], z:[-1,1], c:[1,1],
+    Q:[-1,-1], E:[1,-1], Z:[-1,1], C:[1,1],
   };
   if (m[e.key]) { e.preventDefault(); move(...m[e.key]); }
 });
@@ -683,22 +745,37 @@ canvas.addEventListener('touchend', e => {
   if (!touchStart || combatActive) return;
   const dx = e.changedTouches[0].clientX - touchStart.x;
   const dy = e.changedTouches[0].clientY - touchStart.y;
-  if (Math.max(Math.abs(dx), Math.abs(dy)) < 20) return;
-  if (Math.abs(dx) > Math.abs(dy)) move(dx > 0 ? 1 : -1, 0);
-  else                              move(0, dy > 0 ? 1 : -1);
+  const adx = Math.abs(dx);
+  const ady = Math.abs(dy);
+  if (Math.max(adx, ady) < 20) { touchStart = null; return; }
+
+  const sx = Math.sign(dx);
+  const sy = Math.sign(dy);
+  const ratio = Math.min(adx, ady) / Math.max(adx, ady);
+
+  let mx, my;
+  if (ratio > 0.4) {
+    // 縦横の比が近ければ斜め
+    mx = sx; my = sy;
+  } else if (adx > ady) {
+    mx = sx; my = 0;
+  } else {
+    mx = 0; my = sy;
+  }
+  move(mx, my);
   touchStart = null;
 }, { passive: true });
 
 // ─────────────────────────────────────────────
 // バトル
 // ─────────────────────────────────────────────
-function startBattle(mob) {
+function startBattle(mob, opts = {}) {
   // 戦闘モードに切替（screen は dungeon のままインライン化）
   combatActive = true;
   document.getElementById('dungeon-footer').classList.add('hidden');
   document.getElementById('combat-panel').classList.remove('hidden');
 
-  battle = new Battle(player, mob, (result, defeated) => {
+  battle = new Battle(player, mob, (result /*, defeated (cloneのため使わない) */) => {
     // 戦闘終了：探索モードに復帰
     combatActive = false;
     document.getElementById('combat-panel').classList.add('hidden');
@@ -710,12 +787,21 @@ function startBattle(mob) {
     refreshHUD();
 
     if (result === 'win') {
-      dungeon.removeMonster(defeated);
-      if (defeated.isBoss) {
+      // 元のmobリファレンスで確実に削除（cloneのdefeatedではindexOf不一致）
+      dungeon.removeMonster(mob);
+      // ドロップ判定
+      const drop = _rollMonsterDrop(mob);
+      if (drop) {
+        drop.x = mob.x;
+        drop.y = mob.y;
+        dungeon.floorItems.push(drop);
+        dungeonLog(`💎 ${mob.name} は ${drop.name} を落とした！`);
+      } else {
+        dungeonLog(`${mob.name} を倒した！`);
+      }
+      if (mob.isBoss) {
         dungeonClear();
       } else {
-        dungeonLog(`${defeated.name} を倒した！`);
-        // フッターが探索パネルに戻ったので canvas を再サイズ
         requestAnimationFrame(() => dungeon.render(document.getElementById('dungeon-canvas')));
       }
     } else if (result === 'lose') {
@@ -724,7 +810,7 @@ function startBattle(mob) {
       dungeonLog('逃げた！');
       requestAnimationFrame(() => dungeon.render(document.getElementById('dungeon-canvas')));
     }
-  });
+  }, opts);
   document.getElementById('battle-log').innerHTML = '';
   battle.updateUI();
 
@@ -738,6 +824,28 @@ window.addEventListener('resize', () => {
     dungeon.render(document.getElementById('dungeon-canvas'));
   }
 });
+
+// モンスター撃破時のドロップ判定
+function _rollMonsterDrop(mob) {
+  const dbg = getDebugState();
+  const dropChance = dbg.forceDrop ? 1 :
+    mob.isBoss               ? 1.0 :
+    mob.rarity === 'レジェンド' ? 0.8 :
+    mob.rarity === 'エピック'   ? 0.5 :
+    mob.rarity === 'レア'       ? 0.3 :
+    0.2;
+  if (Math.random() > dropChance) return null;
+
+  const seed = hashString(`drop:${dungeonData.seed}:${currentFloor}:${mob.x}:${mob.y}`);
+  const code = String(seed).padStart(13, '0').slice(0, 13);
+
+  // ドロップアイテムのレアリティ：基本はモンスターと同レベル、ボスは+1段階
+  const baseRarity = RARITIES.find(r => r.name === mob.rarity);
+  let rarityOverride = baseRarity ?? null;
+  if (mob.isBoss && baseRarity) rarityOverride = bumpRarity(baseRarity, 1);
+
+  return generateItemFromBarcode(code, rarityOverride);
+}
 
 document.getElementById('btn-attack').addEventListener('click', () => battle?.attack());
 document.getElementById('btn-skill' ).addEventListener('click', () => battle?.skill());
@@ -825,10 +933,12 @@ if (DEBUG) {
   const panel = document.getElementById('debug-panel');
   panel.classList.remove('hidden');
 
-  // 折り畳み
+  // 折り畳み（panel 自体にも collapsed を付けて幅を縮める）
   document.getElementById('debug-toggle').addEventListener('click', () => {
-    const body = document.getElementById('debug-panel-body');
-    const btn  = document.getElementById('debug-toggle');
+    const panel = document.getElementById('debug-panel');
+    const body  = document.getElementById('debug-panel-body');
+    const btn   = document.getElementById('debug-toggle');
+    panel.classList.toggle('collapsed');
     const collapsed = body.classList.toggle('collapsed');
     btn.textContent = collapsed ? '+' : '−';
   });
@@ -894,6 +1004,43 @@ if (DEBUG) {
     }
   });
 
+  // ドロップ強制
+  document.getElementById('debug-force-drop').addEventListener('change', e => {
+    setForceDrop(e.target.checked);
+  });
+
+  // 隣接敵を即時撃破（ドロップ判定は通る）
+  document.getElementById('debug-kill-adj').addEventListener('click', () => {
+    if (!dungeon || screen !== 'dungeon' || combatActive) {
+      alert('ダンジョン探索中のみ実行可能です');
+      return;
+    }
+    const px = dungeon.playerPos.x;
+    const py = dungeon.playerPos.y;
+    const adj = dungeon.monsters.filter(m =>
+      m.hp > 0 &&
+      Math.abs(m.x - px) <= 1 && Math.abs(m.y - py) <= 1 &&
+      !(m.x === px && m.y === py),
+    );
+    if (adj.length === 0) {
+      alert('隣接する敵がいません');
+      return;
+    }
+    for (const mob of adj) {
+      dungeon.removeMonster(mob);
+      const drop = _rollMonsterDrop(mob);
+      if (drop) {
+        drop.x = mob.x;
+        drop.y = mob.y;
+        dungeon.floorItems.push(drop);
+        dungeonLog(`💎 ${mob.name} は ${drop.name} を落とした！`);
+      } else {
+        dungeonLog(`${mob.name} を撃破`);
+      }
+    }
+    dungeon.render(document.getElementById('dungeon-canvas'));
+  });
+
   // インベントリ操作（バーコードを type / rarity 確定の組合せで決め打ち）
   const DEBUG_ITEM_CODES = {
     weapon: {
@@ -924,14 +1071,25 @@ if (DEBUG) {
   const RARITY_NAMES = ['コモン', 'レア', 'エピック', 'レジェンド'];
 
   function debugAddItem(type) {
-    if (player.inventory.length >= 8) {
-      alert('インベントリ満杯です（先に廃棄）');
-      return;
-    }
     const rarity = RARITY_NAMES[Math.floor(Math.random() * RARITY_NAMES.length)];
     const code   = DEBUG_ITEM_CODES[type][rarity];
     const item   = generateItemFromBarcode(code);
-    player.inventory.push(item);
+
+    // 何も装備していない場合は自動装備（インベントリには入れない）
+    if (item.type === 'weapon' && !player.weapon) {
+      player.weapon = item;
+      player.atk    = player.atkBase + item.atkBonus;
+    } else if (item.type === 'armor' && !player.armor) {
+      player.armor  = item;
+      player.def    = player.defBase + item.defBonus;
+    } else {
+      if (player.inventory.length >= 8) {
+        alert('インベントリ満杯です（先に廃棄）');
+        return;
+      }
+      player.inventory.push(item);
+    }
+    refreshHUD();
     if (!document.getElementById('menu-modal').classList.contains('hidden')) refreshMenu();
   }
 

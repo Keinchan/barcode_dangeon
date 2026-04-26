@@ -260,19 +260,24 @@ html, body {
   gap: 3px;
 }
 .dpad-btn {
-  width: 46px;
-  height: 46px;
+  width: 42px;
+  height: 42px;
   background: rgba(255,255,255,0.08);
   border: 1px solid rgba(255,255,255,0.15);
   border-radius: 10px;
   color: #fff;
-  font-size: 20px;
+  font-size: 18px;
   cursor: pointer;
   transition: background .1s;
   display: flex; align-items: center; justify-content: center;
 }
 .dpad-btn:active { background: var(--primary); }
-.dpad-wait { font-size: 12px; }
+.dpad-wait { font-size: 11px; }
+.dpad-diag {
+  font-size: 14px;
+  background: rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.85);
+}
 
 /* ── DUNGEON HUD 追加 ── */
 .dungeon-right-hud { text-align: right; flex: 1; }
@@ -396,6 +401,11 @@ html, body {
   min-height: 44px;
 }
 .btn-battle:active { background: var(--primary); }
+.btn-battle:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.btn-battle:disabled:active { background: rgba(255,255,255,0.05); }
 .btn-battle-sub {
   font-size: 9px;
   font-weight: normal;
@@ -789,6 +799,14 @@ html, body {
   pointer-events: auto;
 }
 .debug-panel.hidden { display: none; }
+/* 折り畳み時はアイコン＋トグルだけのコンパクト表示。さらに下にずらして
+   ダンジョンHUDの🎒メニューボタンと被らないようにする */
+.debug-panel.collapsed {
+  top: 70px;
+  width: auto;
+}
+.debug-panel.collapsed .debug-panel-label { display: none; }
+.debug-panel.collapsed .debug-panel-header { padding: 4px 8px; }
 
 .debug-panel-header {
   display: flex;

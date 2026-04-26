@@ -6,6 +6,7 @@ const state = {
   bypassEnterRadius: false,  // ダンジョン入場の80m制限を無視
   disableEnemyAI: false,     // 敵のAIターンをスキップ
   revealAll: false,          // ダンジョン全マスを可視化
+  forceDrop: false,          // 敵撃破時に必ずドロップ
 };
 
 export function getDebugState() {
@@ -36,4 +37,8 @@ export function setDisableEnemyAI(v) {
 
 export function setRevealAll(v) {
   state.revealAll = !!v;
+}
+
+export function setForceDrop(v) {
+  state.forceDrop = !!v;
 }
