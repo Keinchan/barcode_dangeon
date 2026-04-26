@@ -70,7 +70,9 @@ html, body {
   letter-spacing: 1px;
   margin-bottom: 4px;
 }
-.title-section input[type="text"] {
+.title-section input[type="text"],
+.title-section input[type="email"],
+.title-section input[type="password"] {
   background: rgba(0,0,0,0.4);
   color: #fff;
   border: 1px solid rgba(255,255,255,0.2);
@@ -78,6 +80,48 @@ html, body {
   padding: 10px 12px;
   font-size: 14px;
   font-family: inherit;
+}
+.title-row {
+  display: flex;
+  gap: 8px;
+}
+.title-row button { flex: 1; padding: 10px; font-size: 13px; }
+
+.btn-google {
+  background: #fff;
+  color: #1a1a2e;
+  border: none;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: transform .1s;
+}
+.btn-google:active { transform: scale(0.97); }
+
+.title-warning,
+.title-error {
+  background: rgba(255, 107, 53, 0.15);
+  border: 1px solid var(--accent);
+  color: #ffb38d;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.title-warning.hidden,
+.title-error.hidden { display: none; }
+.title-warning code {
+  background: rgba(0,0,0,0.4);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+.title-error {
+  background: rgba(244, 67, 54, 0.15);
+  border-color: var(--danger);
+  color: #ff8a80;
 }
 .title-save-list {
   display: flex;

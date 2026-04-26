@@ -17,8 +17,16 @@ import { Dungeon } from './dungeon.js';
 import { Battle } from './battle.js';
 import { showFloatingDamage } from './ui.js';
 import {
-  listUsers, getCurrentUser, setCurrentUser,
-  loadSave, saveData, deleteSave, clearAllSaves,
+  isFirebaseConfigured,
+  subscribeAuth,
+  getCurrentAuthUser,
+  signInEmail,
+  signUpEmail,
+  signInGoogle,
+  signOutUser,
+  loadSave,
+  saveData,
+  deleteSave,
 } from './save.js';
 import {
   DEBUG,
@@ -39,7 +47,6 @@ let dungeon      = null;
 let currentFloor = 1;
 let battle       = null;
 let combatActive = false;               // 戦闘中フラグ（インライン化のため screen は dungeon のまま）
-let currentUser  = null;                // ログイン中のユーザー名
 const clearedSet = new Set();
 
 // ダンジョン入場時のスナップショット（敗北時ロールバック用）
@@ -206,7 +213,9 @@ function openMenu() {
 // メニュー（装備・持ち物管理）
 // ─────────────────────────────────────────────
 function refreshMenu() {
-  document.getElementById('menu-username').textContent = currentUser ? `(${currentUser})` : '(未ログイン)';
+  const u = getCurrentAuthUser();
+  const label = u ? `(${u.email || 'Google: ' + (u.displayName ?? u.uid.slice(0, 6))})` : '(未ログイン)';
+  document.getElementById('menu-username').textContent = label;
   document.getElementById('menu-lv').textContent  = player.level;
   document.getElementById('menu-hp').textContent  = `${player.hp}/${player.maxHp}`;
   document.getElementById('menu-atk').textContent = player.atk;
@@ -1030,11 +1039,14 @@ document.getElementById('btn-result-back').addEventListener('click', () => {
 });
 
 // ─────────────────────────────────────────────
-// ログイン / セーブ
+// ログイン / セーブ（Firebase Auth + Firestore）
 // ─────────────────────────────────────────────
+let _authUid = null;
+let _isLoadingSave = false;
+
 function autoSave() {
-  if (!currentUser) return;
-  saveData(currentUser, {
+  if (!_authUid || _isLoadingSave) return;
+  saveData(_authUid, {
     player: {
       level: player.level,
       xp: player.xp,
@@ -1066,95 +1078,99 @@ function _applySave(data) {
   refreshHUD();
 }
 
-function loginAs(username, isNew) {
-  currentUser = username;
-  setCurrentUser(username);
-
-  if (isNew) {
-    player = createPlayer();
-    clearedSet.clear();
-    autoSave();
+function _setError(msg) {
+  const el = document.getElementById('title-error');
+  if (!el) return;
+  if (msg) {
+    el.textContent = msg;
+    el.classList.remove('hidden');
   } else {
-    const data = loadSave(username);
-    if (data) _applySave(data);
-    else { player = createPlayer(); clearedSet.clear(); }
-  }
-  show('map');
-  _updateDebugSaveStatus();
-}
-
-function renderTitle() {
-  const list = document.getElementById('title-save-list');
-  const users = listUsers();
-  if (users.length === 0) {
-    list.innerHTML = '<div class="title-empty">セーブデータがありません</div>';
-    return;
-  }
-  list.innerHTML = '';
-  for (const name of users) {
-    const data = loadSave(name);
-    const lv = data?.player?.level ?? 1;
-    const inv = data?.player?.inventory?.length ?? 0;
-    const at  = data?.savedAt ? new Date(data.savedAt).toLocaleString('ja-JP', { dateStyle: 'short', timeStyle: 'short' }) : '';
-    const row = document.createElement('div');
-    row.className = 'title-save-row';
-    row.innerHTML = `
-      <div class="title-save-info">
-        <div class="title-save-name">${name}</div>
-        <div class="title-save-meta">Lv${lv}・持ち物${inv}個 ${at ? '/ ' + at : ''}</div>
-      </div>
-      <button class="title-save-load">続きから</button>
-      <button class="title-save-delete" title="削除">🗑</button>
-    `;
-    row.querySelector('.title-save-load').addEventListener('click', () => loginAs(name, false));
-    row.querySelector('.title-save-delete').addEventListener('click', () => {
-      if (!confirm(`${name} のセーブを削除します。よろしいですか？`)) return;
-      deleteSave(name);
-      renderTitle();
-    });
-    list.appendChild(row);
+    el.classList.add('hidden');
   }
 }
 
-document.getElementById('btn-title-newgame').addEventListener('click', () => {
-  const input = document.getElementById('title-username-input');
-  const name = (input.value || '').trim();
-  if (!name) { alert('ユーザー名を入力してください'); return; }
-  if (listUsers().includes(name)) {
-    if (!confirm(`「${name}」は既存のセーブを上書きします。続けますか？`)) return;
+// メールログイン
+document.getElementById('btn-title-login').addEventListener('click', async () => {
+  const email = document.getElementById('title-email').value.trim();
+  const pw    = document.getElementById('title-password').value;
+  if (!email || !pw) { _setError('メールとパスワードを入力してください'); return; }
+  try {
+    _setError(null);
+    await signInEmail(email, pw);
+  } catch (e) {
+    _setError('ログイン失敗: ' + (e.code || e.message));
   }
-  input.value = '';
-  loginAs(name, true);
 });
 
-document.getElementById('btn-logout').addEventListener('click', () => {
-  if (!confirm('ログアウトしますか？（セーブ済みデータは残ります）')) return;
+// メール新規登録
+document.getElementById('btn-title-signup').addEventListener('click', async () => {
+  const email = document.getElementById('title-email').value.trim();
+  const pw    = document.getElementById('title-password').value;
+  if (!email || !pw) { _setError('メールとパスワードを入力してください'); return; }
+  if (pw.length < 6) { _setError('パスワードは6文字以上が必要です'); return; }
+  try {
+    _setError(null);
+    await signUpEmail(email, pw);
+  } catch (e) {
+    _setError('新規登録失敗: ' + (e.code || e.message));
+  }
+});
+
+// Google ログイン
+document.getElementById('btn-title-google').addEventListener('click', async () => {
+  try {
+    _setError(null);
+    await signInGoogle();
+  } catch (e) {
+    _setError('Google ログイン失敗: ' + (e.code || e.message));
+  }
+});
+
+// ログアウト
+document.getElementById('btn-logout').addEventListener('click', async () => {
+  if (!confirm('ログアウトしますか？（クラウドのセーブは残ります）')) return;
   autoSave();
   document.getElementById('menu-modal').classList.add('hidden');
-  setCurrentUser(null);
-  currentUser = null;
-  player = createPlayer();
-  clearedSet.clear();
-  renderTitle();
-  show('title');
-  _updateDebugSaveStatus();
+  await signOutUser();
 });
+
+// auth state 監視：ログイン状態変化に追従
+subscribeAuth(async user => {
+  if (user) {
+    _authUid = user.uid;
+    _isLoadingSave = true;
+    const data = await loadSave(user.uid);
+    if (data) {
+      _applySave(data);
+    } else {
+      // 初回ログイン：新規プレイヤー作成
+      player = createPlayer();
+      clearedSet.clear();
+    }
+    _isLoadingSave = false;
+    show('map');
+    refreshHUD();
+    _updateDebugSaveStatus();
+    // 初回ログインの場合のみ初期セーブ書き込み
+    if (!data) autoSave();
+  } else {
+    _authUid = null;
+    player = createPlayer();
+    clearedSet.clear();
+    show('title');
+    _updateDebugSaveStatus();
+  }
+});
+
+// 設定未投入時の警告表示
+if (!isFirebaseConfigured()) {
+  document.getElementById('title-config-warning').classList.remove('hidden');
+}
 
 // ページを離れる時に保険として最後の保存
 window.addEventListener('beforeunload', () => {
   autoSave();
 });
-
-// 起動時：自動ログイン or タイトル表示
-(function bootLogin() {
-  const cur = getCurrentUser();
-  if (cur && loadSave(cur)) {
-    loginAs(cur, false);
-  } else {
-    renderTitle();
-    show('title');
-  }
-})();
 
 // ─────────────────────────────────────────────
 // デバッグパネル（?debug=1 で有効）
@@ -1373,22 +1389,19 @@ if (DEBUG) {
 
   // セーブ強制
   document.getElementById('debug-save-now').addEventListener('click', () => {
-    if (!currentUser) { alert('未ログインです'); return; }
+    const u = getCurrentAuthUser();
+    if (!u) { alert('未ログインです'); return; }
     autoSave();
-    alert(`セーブしました (${currentUser})`);
+    alert(`セーブしました (${u.email || u.uid})`);
   });
 
-  // 全データ消去
-  document.getElementById('debug-clear-all').addEventListener('click', () => {
-    if (!confirm('全てのセーブデータを消去します。元に戻せません')) return;
-    clearAllSaves();
-    currentUser = null;
-    player = createPlayer();
-    clearedSet.clear();
-    document.getElementById('menu-modal').classList.add('hidden');
-    renderTitle();
-    show('title');
-    _updateDebugSaveStatus();
+  // 自分のセーブのみ削除（クラウド側）
+  document.getElementById('debug-clear-all').addEventListener('click', async () => {
+    const u = getCurrentAuthUser();
+    if (!u) { alert('未ログインです'); return; }
+    if (!confirm('クラウドの自分のセーブを消去してログアウトします。よろしいですか？')) return;
+    await deleteSave(u.uid);
+    await signOutUser();
   });
 }
 
@@ -1396,8 +1409,9 @@ if (DEBUG) {
 function _updateDebugSaveStatus() {
   const el = document.getElementById('debug-save-status');
   if (!el) return;
-  if (currentUser) {
-    el.textContent = `ログイン中: ${currentUser}`;
+  const u = getCurrentAuthUser();
+  if (u) {
+    el.textContent = `ログイン中: ${u.email || 'Google: ' + (u.displayName ?? u.uid.slice(0, 6))}`;
   } else {
     el.textContent = '未ログイン';
   }

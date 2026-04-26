@@ -16,16 +16,26 @@
     <div class="title-box">
       <div class="title-logo">⚔️ バーコードダンジョン</div>
 
-      <div class="title-section" id="title-existing-saves">
-        <div class="title-section-label">続きから</div>
-        <div id="title-save-list" class="title-save-list"></div>
+      <div id="title-config-warning" class="title-warning hidden">
+        ⚠️ Firebase未設定です。<code>src/firebase-config.js</code> を編集してください
       </div>
 
       <div class="title-section">
-        <div class="title-section-label">新規プレイ</div>
-        <input id="title-username-input" type="text" placeholder="ユーザー名（20文字まで）" maxlength="20" />
-        <button id="btn-title-newgame" class="btn-primary">新しく始める</button>
+        <div class="title-section-label">メール / パスワード</div>
+        <input id="title-email"    type="email"    placeholder="メールアドレス" autocomplete="email" />
+        <input id="title-password" type="password" placeholder="パスワード（6文字以上）" autocomplete="current-password" />
+        <div class="title-row">
+          <button id="btn-title-login"  class="btn-primary">ログイン</button>
+          <button id="btn-title-signup" class="btn-secondary">新規登録</button>
+        </div>
       </div>
+
+      <div class="title-section">
+        <div class="title-section-label">Google アカウント</div>
+        <button id="btn-title-google" class="btn-google">Google でログイン / 新規登録</button>
+      </div>
+
+      <div id="title-error" class="title-error hidden"></div>
     </div>
   </div>
 
