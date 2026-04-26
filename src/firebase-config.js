@@ -1,19 +1,15 @@
-// Firebase 設定
+// Firebase 設定（Firebase コンソール「プロジェクト設定 → マイアプリ」より）
 //
-// 1) https://console.firebase.google.com で新規プロジェクトを作成
-// 2) Authentication → Sign-in method で「メール/パスワード」と「Google」を有効化
-// 3) Firestore Database を作成（本番モード推奨）
-// 4) プロジェクト設定 → マイアプリ → Web アプリを追加 → 設定オブジェクトをコピー
-// 5) この firebaseConfig を上書きしてください
-//
-// ※ 5) を行わない限り、起動時にコンソールへ警告が出てログイン操作はエラーになります
+// 実APIキー類は公開フロントに埋め込まれる前提で、Firestore セキュリティルールで
+// アクセス制御する。実際のルール例は README またはチャット履歴を参照。
 export const firebaseConfig = {
-  apiKey: 'TODO_API_KEY',
-  authDomain: 'TODO.firebaseapp.com',
-  projectId: 'TODO_PROJECT_ID',
-  storageBucket: 'TODO.appspot.com',
-  messagingSenderId: 'TODO_SENDER_ID',
-  appId: 'TODO_APP_ID',
+  apiKey:            'AIzaSyAuKFCtEmPrGG8KpiE4jz8YTSJremyOtRE',
+  authDomain:        'barcode-d1c01.firebaseapp.com',
+  projectId:         'barcode-d1c01',
+  storageBucket:     'barcode-d1c01.firebasestorage.app',
+  messagingSenderId: '664237494636',
+  appId:             '1:664237494636:web:5dfb7bf44e5efd66d7e349',
+  measurementId:     'G-HQGGW33JG8',
 };
 
 export const isConfigured =
