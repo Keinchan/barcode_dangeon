@@ -21,52 +21,6 @@
         <button id="btn-menu" class="btn-secondary">🎒 メニュー</button>
       </div>
     </div>
-
-    <!-- メニューモーダル -->
-    <div id="menu-modal" class="menu-modal hidden">
-      <div class="menu-modal-header">
-        <button id="btn-menu-close" class="btn-back">← 閉じる</button>
-        <span class="menu-modal-title">メニュー</span>
-      </div>
-      <div class="menu-modal-body">
-        <section class="menu-section">
-          <div class="menu-section-title">🧙 ステータス</div>
-          <div class="menu-stats">
-            <div>HP <span id="menu-hp">35/35</span></div>
-            <div>ATK <span id="menu-atk">9</span></div>
-            <div>DEF <span id="menu-def">3</span></div>
-          </div>
-        </section>
-        <section class="menu-section">
-          <div class="menu-section-title">装備中</div>
-          <div id="menu-equipment"></div>
-        </section>
-        <section class="menu-section">
-          <div class="menu-section-title">持ち物 <span id="menu-inv-count" class="menu-section-meta"></span></div>
-          <div id="menu-inventory"></div>
-        </section>
-      </div>
-
-      <!-- 装備交換モーダル（同じスロットの候補から選んで装備し直す） -->
-      <div id="swap-modal" class="swap-modal hidden">
-        <div class="swap-modal-box">
-          <div class="swap-modal-title">装備を交換</div>
-          <div class="swap-modal-current">
-            <div class="swap-modal-label">現在装備中</div>
-            <div id="swap-current"></div>
-          </div>
-          <div class="swap-modal-arrow">↕</div>
-          <div class="swap-modal-candidates">
-            <div class="swap-modal-label">交換候補</div>
-            <div id="swap-candidates"></div>
-          </div>
-          <div class="swap-modal-actions">
-            <button id="btn-swap-unequip" class="btn-back">外して持ち物に</button>
-            <button id="btn-swap-cancel"  class="btn-back">キャンセル</button>
-          </div>
-        </div>
-      </div>
-    </div>
   </div>
 
   <!-- スキャン画面 -->
@@ -100,6 +54,7 @@
         <div id="player-hp" class="hp-text">HP: 35/35</div>
         <div id="equip-display" class="equip-display">⚔️ー　🛡️ー</div>
       </div>
+      <button id="btn-dungeon-menu" class="btn-icon-menu" title="メニュー">🎒</button>
     </div>
     <canvas id="dungeon-canvas"></canvas>
 
@@ -157,6 +112,52 @@
         <div class="modal-title">アイテムを使う</div>
         <div id="item-list"></div>
         <button id="btn-item-cancel" class="btn-back">キャンセル</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- メニューモーダル（マップ・ダンジョンの両方から開く。screen 非依存に body 直下） -->
+  <div id="menu-modal" class="menu-modal hidden">
+    <div class="menu-modal-header">
+      <button id="btn-menu-close" class="btn-back">← 閉じる</button>
+      <span class="menu-modal-title">メニュー</span>
+    </div>
+    <div class="menu-modal-body">
+      <section class="menu-section">
+        <div class="menu-section-title">🧙 ステータス</div>
+        <div class="menu-stats">
+          <div>HP <span id="menu-hp">35/35</span></div>
+          <div>ATK <span id="menu-atk">9</span></div>
+          <div>DEF <span id="menu-def">3</span></div>
+        </div>
+      </section>
+      <section class="menu-section">
+        <div class="menu-section-title">装備中</div>
+        <div id="menu-equipment"></div>
+      </section>
+      <section class="menu-section">
+        <div class="menu-section-title">持ち物 <span id="menu-inv-count" class="menu-section-meta"></span></div>
+        <div id="menu-inventory"></div>
+      </section>
+    </div>
+
+    <!-- 装備交換モーダル（メニューに重ねるサブモーダル） -->
+    <div id="swap-modal" class="swap-modal hidden">
+      <div class="swap-modal-box">
+        <div class="swap-modal-title">装備を交換</div>
+        <div class="swap-modal-current">
+          <div class="swap-modal-label">現在装備中</div>
+          <div id="swap-current"></div>
+        </div>
+        <div class="swap-modal-arrow">↕</div>
+        <div class="swap-modal-candidates">
+          <div class="swap-modal-label">交換候補</div>
+          <div id="swap-candidates"></div>
+        </div>
+        <div class="swap-modal-actions">
+          <button id="btn-swap-unequip" class="btn-back">外して持ち物に</button>
+          <button id="btn-swap-cancel"  class="btn-back">キャンセル</button>
+        </div>
       </div>
     </div>
   </div>

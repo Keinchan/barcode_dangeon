@@ -48,12 +48,26 @@ document.getElementById('btn-scan').addEventListener('click', () => {
 });
 
 document.getElementById('btn-menu').addEventListener('click', () => {
-  refreshMenu();
-  document.getElementById('menu-modal').classList.remove('hidden');
+  openMenu();
 });
 document.getElementById('btn-menu-close').addEventListener('click', () => {
   document.getElementById('menu-modal').classList.add('hidden');
 });
+
+// ダンジョン画面のメニューボタン
+const btnDungeonMenu = document.getElementById('btn-dungeon-menu');
+btnDungeonMenu.addEventListener('click', () => {
+  if (combatActive) {
+    alert('戦闘中はメニューを開けません');
+    return;
+  }
+  openMenu();
+});
+
+function openMenu() {
+  refreshMenu();
+  document.getElementById('menu-modal').classList.remove('hidden');
+}
 
 // ─────────────────────────────────────────────
 // メニュー（装備・持ち物管理）
@@ -127,6 +141,7 @@ function _onUnequipClick(slot) {
       return;
     }
     _unequipDirect(slot);
+    refreshHUD();
     refreshMenu();
     return;
   }
@@ -199,6 +214,7 @@ document.getElementById('btn-swap-unequip').addEventListener('click', () => {
   }
   _unequipDirect(slot);
   document.getElementById('swap-modal').classList.add('hidden');
+  refreshHUD();
   refreshMenu();
 });
 
@@ -212,6 +228,8 @@ function _renderInventoryRow(item, idx) {
   const skillHtml = item.skill?.name
     ? `<div class="menu-row-skill">✨ ${item.skill.name}</div>` : '';
   const isEquippable = item.type === 'weapon' || item.type === 'armor';
+  // 探索中は回復薬を使える（戦闘中はバトル側のアイテムボタン経由なのでここでは出さない）
+  const isUsableHere = item.type === 'potion' && screen === 'dungeon' && !combatActive;
   div.innerHTML = `
     <div class="menu-row-emoji">${item.emoji}</div>
     <div class="menu-row-info">
@@ -220,10 +238,14 @@ function _renderInventoryRow(item, idx) {
       ${skillHtml}
     </div>
     <div class="menu-row-actions">
+      ${isUsableHere ? '<button class="menu-action-btn use">使う</button>' : ''}
       ${isEquippable ? '<button class="menu-action-btn equip">装備</button>' : ''}
       <button class="menu-action-btn danger discard">廃棄</button>
     </div>
   `;
+  if (isUsableHere) {
+    div.querySelector('.use').addEventListener('click', () => _usePotionFromInventory(idx));
+  }
   if (isEquippable) {
     div.querySelector('.equip').addEventListener('click', () => _equipFromInventory(idx));
   }
@@ -233,6 +255,24 @@ function _renderInventoryRow(item, idx) {
     refreshMenu();
   });
   return div;
+}
+
+function _usePotionFromInventory(idx) {
+  const item = player.inventory[idx];
+  if (!item || item.type !== 'potion') return;
+  if (player.hp >= player.maxHp) {
+    alert('HPが満タンです');
+    return;
+  }
+  const before = player.hp;
+  player.hp = Math.min(player.maxHp, player.hp + item.heal);
+  const actual = player.hp - before;
+  player.inventory.splice(idx, 1);
+  if (typeof dungeonLog === 'function' && screen === 'dungeon') {
+    dungeonLog(`🧪 ${item.name} を使用！ HPが${actual}回復した`);
+  }
+  refreshHUD();
+  refreshMenu();
 }
 
 function _equipFromInventory(idx) {
@@ -249,6 +289,7 @@ function _equipFromInventory(idx) {
     player.armor  = item;
     player.def    = player.defBase + item.defBonus;
   }
+  refreshHUD();
   refreshMenu();
 }
 
