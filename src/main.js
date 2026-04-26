@@ -599,8 +599,27 @@ function move(dx, dy) {
 
   // 移動 or 待機の処理
   if (dx !== 0 || dy !== 0) {
-    const nx = dungeon.playerPos.x + dx;
-    const ny = dungeon.playerPos.y + dy;
+    const px = dungeon.playerPos.x;
+    const py = dungeon.playerPos.y;
+    const nx = px + dx;
+    const ny = py + dy;
+
+    // 斜め移動の壁抜け禁止：両側の縦横マスが壁の場合は通れない
+    if (dx !== 0 && dy !== 0) {
+      const sideX = dungeon.canWalk(px + dx, py);
+      const sideY = dungeon.canWalk(px, py + dy);
+      if (!sideX && !sideY) {
+        // 角を抜けられない。先に敵がいれば魔法攻撃の選択肢
+        const mob = dungeon.monsterAt(nx, ny);
+        if (mob && dungeon.canWalk(nx, ny)) {
+          if (confirm(`壁の向こうの ${mob.name} に魔法で攻撃する？`)) {
+            _magicStrike(mob);
+          }
+        }
+        return;
+      }
+    }
+
     if (!dungeon.canWalk(nx, ny)) return;
 
     const mob = dungeon.monsterAt(nx, ny);
@@ -622,7 +641,11 @@ function move(dx, dy) {
     }
   }
 
-  // 敵ターン（プレイヤーが移動 or 待機した時に実行）
+  _runEnemyTurn();
+}
+
+// 敵ターン共通処理
+function _runEnemyTurn() {
   const result = dungeon.tickEnemies(player);
   for (const ev of result.events) {
     if (ev.type === 'attack') {
@@ -638,8 +661,36 @@ function move(dx, dy) {
       return;
     }
   }
-
   dungeon.render(document.getElementById('dungeon-canvas'));
+}
+
+// 壁貫通の魔法攻撃（角の壁で塞がれた敵への遠距離一撃）
+function _magicStrike(mob) {
+  const base = Math.max(1, player.atk - mob.def);
+  const roll = 1 + Math.floor(Math.random() * Math.ceil(base * 0.4));
+  const dmg  = Math.floor((base + roll) * 1.2); // 通常より少し強め
+  mob.hp = Math.max(0, mob.hp - dmg);
+  dungeonLog(`✨ 魔法で ${mob.name} に ${dmg} ダメージ`);
+
+  if (mob.hp <= 0) {
+    dungeon.removeMonster(mob);
+    const drop = _rollMonsterDrop(mob);
+    if (drop) {
+      drop.x = mob.x;
+      drop.y = mob.y;
+      dungeon.floorItems.push(drop);
+      dungeonLog(`💎 ${mob.name} は ${drop.name} を落とした！`);
+    } else {
+      dungeonLog(`${mob.name} を撃破`);
+    }
+    if (mob.isBoss) {
+      dungeonClear();
+      return;
+    }
+  }
+
+  // 1ターン消費 → 敵ターン
+  _runEnemyTurn();
 }
 
 function pickupItem(item) {
