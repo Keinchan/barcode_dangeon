@@ -40,7 +40,7 @@
     </div>
   </div>
 
-  <!-- ダンジョン画面 -->
+  <!-- ダンジョン画面（戦闘も同画面にインライン化） -->
   <div id="screen-dungeon" class="screen">
     <div class="dungeon-header">
       <div>
@@ -53,7 +53,9 @@
       </div>
     </div>
     <canvas id="dungeon-canvas"></canvas>
-    <div class="dungeon-footer">
+
+    <!-- 探索中フッター：D-pad + 探索ログ -->
+    <div class="dungeon-footer" id="dungeon-footer">
       <div id="dungeon-log"></div>
       <div class="dpad">
         <button class="dpad-btn" data-dir="up">↑</button>
@@ -65,33 +67,30 @@
         <button class="dpad-btn" data-dir="down">↓</button>
       </div>
     </div>
-  </div>
 
-  <!-- バトル画面 -->
-  <div id="screen-battle" class="screen">
-    <div class="battle-area">
-      <div class="enemy-box">
-        <div class="enemy-meta">
-          <span id="enemy-rarity">[コモン]</span>
-          <span id="enemy-element">火属性</span>
+    <!-- 戦闘中パネル：敵情報・自HP・ログ・行動ボタン -->
+    <div class="combat-panel hidden" id="combat-panel">
+      <div class="combat-enemy">
+        <div class="combat-enemy-row">
+          <span id="enemy-sprite" class="enemy-sprite-mini">❓</span>
+          <div class="combat-enemy-text">
+            <div id="enemy-name" class="combat-enemy-name">???</div>
+            <div class="enemy-meta">
+              <span id="enemy-rarity">[コモン]</span>
+              <span id="enemy-element">火属性</span>
+            </div>
+          </div>
         </div>
-        <div id="enemy-name">???</div>
-        <div id="enemy-sprite" class="enemy-sprite">❓</div>
-        <div class="hp-bar-wrap">
-          <div id="enemy-hp-bar" class="hp-bar" style="width:100%"></div>
-        </div>
+        <div class="hp-bar-wrap"><div id="enemy-hp-bar" class="hp-bar" style="width:100%"></div></div>
         <div id="enemy-stat-text"></div>
       </div>
 
-      <div class="player-box">
-        <div class="player-box-row">
-          <span class="player-box-label">🧙 自分</span>
-          <span id="battle-player-hp" class="player-box-hp">HP 35/35</span>
+      <div class="combat-player">
+        <div class="combat-player-row">
+          <span>🧙 自分</span>
+          <span id="battle-player-hp">HP 35/35</span>
         </div>
-        <div class="hp-bar-wrap">
-          <div id="battle-player-hp-bar" class="hp-bar" style="width:100%"></div>
-        </div>
-        <div id="battle-player-equip" class="player-box-equip">⚔️ー　🛡️ー</div>
+        <div class="hp-bar-wrap"><div id="battle-player-hp-bar" class="hp-bar" style="width:100%"></div></div>
       </div>
 
       <div id="battle-log" class="battle-log"></div>
