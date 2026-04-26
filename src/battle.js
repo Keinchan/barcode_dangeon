@@ -33,8 +33,27 @@ export class Battle {
     document.getElementById('enemy-rarity').textContent  = `[${this.monster.rarity}]`;
     document.getElementById('enemy-rarity').style.color  = this.monster.rarityColor;
 
-    document.getElementById('player-hp').textContent =
-      `HP: ${this.player.hp}/${this.player.maxHp}`;
+    // ダンジョン画面のプレイヤーHP表示（既存）
+    const dungeonHp = document.getElementById('player-hp');
+    if (dungeonHp) dungeonHp.textContent = `HP: ${this.player.hp}/${this.player.maxHp}`;
+
+    // バトル画面のプレイヤーHP表示（新規）
+    const bpHp = document.getElementById('battle-player-hp');
+    if (bpHp) bpHp.textContent = `HP ${this.player.hp}/${this.player.maxHp}`;
+
+    const bpBar = document.getElementById('battle-player-hp-bar');
+    if (bpBar) {
+      const ppct = Math.max(0, this.player.hp / this.player.maxHp) * 100;
+      bpBar.style.width      = ppct + '%';
+      bpBar.style.background = ppct > 50 ? '#4caf50' : ppct > 25 ? '#ffc107' : '#f44336';
+    }
+
+    const bpEq = document.getElementById('battle-player-equip');
+    if (bpEq) {
+      const w = this.player.weapon ? `⚔️${this.player.weapon.atkBonus}` : '⚔️ー';
+      const a = this.player.armor  ? `🛡️${this.player.armor.defBonus}`  : '🛡️ー';
+      bpEq.textContent = `${w}　${a}`;
+    }
   }
 
   // ── プレイヤーアクション ──

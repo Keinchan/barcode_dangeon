@@ -1,17 +1,23 @@
-import { initMap, addDungeonPin } from './map.js';
+import { initMap, refreshPin } from './map.js';
 import { startScanner, stopScanner, getPosition } from './scanner.js';
-import { generateDungeonData, createPlayer } from './generator.js';
+import { createPlayer } from './generator.js';
+import { generateItemFromBarcode, rarityFromDigit, bumpRarity } from './items.js';
 import { Dungeon } from './dungeon.js';
 import { Battle } from './battle.js';
 
 // ── 状態 ──
 let screen       = 'map';
-let player       = createPlayer();
+let player       = createPlayer();      // セッション通して維持
 let dungeonData  = null;
 let dungeon      = null;
 let currentFloor = 1;
 let battle       = null;
 const clearedSet = new Set();
+
+// ダンジョン入場時のスナップショット（敗北時ロールバック用）
+let entrySnapshot = null;
+// スキャン直後の保留アイテム（「受け取る」で確定）
+let pendingItem = null;
 
 // ── 画面切替 ──
 function show(name) {
@@ -21,9 +27,12 @@ function show(name) {
 }
 
 // ─────────────────────────────────────────────
-// マップ画面
+// マップ画面（位置ベース固定湧き）
 // ─────────────────────────────────────────────
-initMap();
+initMap({
+  onEnter:   d => enterDungeon(d),
+  isCleared: seed => clearedSet.has(seed),
+});
 
 document.getElementById('btn-scan').addEventListener('click', () => {
   show('scanner');
@@ -31,16 +40,17 @@ document.getElementById('btn-scan').addEventListener('click', () => {
 });
 
 // ─────────────────────────────────────────────
-// スキャン画面
+// スキャン → アイテム獲得
 // ─────────────────────────────────────────────
 async function launchScanner() {
   document.getElementById('scan-result').classList.add('hidden');
+  pendingItem = null;
   try {
-    await startScanner(async barcode => {
+    await startScanner(scanResult => {
       stopScanner();
-      const pos = await getPosition();
-      dungeonData = generateDungeonData(barcode, pos.lat, pos.lng);
-      showDungeonPreview(dungeonData);
+      const item = _itemFromScan(scanResult);
+      pendingItem = item;
+      _showItemResult(item, scanResult);
     });
   } catch (e) {
     alert('カメラを起動できません。HTTPS環境か、カメラの許可を確認してください。\n\n' + e.message);
@@ -48,37 +58,108 @@ async function launchScanner() {
   }
 }
 
-function showDungeonPreview(d) {
-  document.getElementById('dungeon-preview').innerHTML =
-    `<h3>${d.name}</h3>` +
-    `<p>テーマ　：${d.theme.name}</p>` +
-    `<p>属性　　：${d.element}</p>` +
-    `<p>フロア　：B${d.floors}F</p>` +
-    `<p>難易度　：${'⭐'.repeat(d.difficulty)}</p>` +
-    `<p>レアリティ：<span style="color:${d.rarityBase.color}">${d.rarityBase.name}</span></p>` +
-    `<p style="font-size:11px;color:#666;margin-top:6px">コード：${d.barcode}</p>`;
+function _itemFromScan({ text, category }) {
+  // レシート系（Code 128 / ITF）はレア度を1段階底上げ
+  let rarityOverride = null;
+  if (category === 'receipt') {
+    const baseRarity = rarityFromDigit(parseInt(text.slice(-1), 10));
+    rarityOverride   = bumpRarity(baseRarity, 1);
+  }
+  const padded = text.padStart(13, '0').slice(0, 13);
+  return generateItemFromBarcode(padded, rarityOverride);
+}
+
+function _showItemResult(item, scan) {
+  const statsLine =
+    item.type === 'weapon' ? `ATK +${item.atkBonus}（${item.element}属性）` :
+    item.type === 'armor'  ? `DEF +${item.defBonus}（${item.element}属性）` :
+    item.type === 'potion' ? `HP +${item.heal} 回復` :
+    item.type === 'scroll' ? `${item.element}属性 ${item.dmg}ダメージ` : '';
+
+  const skillBlock = item.skill?.name
+    ? `<div class="item-result-skill">
+         <span class="skill-name">✨ ${item.skill.name}</span><br>
+         <span class="skill-desc">${item.skill.desc}</span>
+       </div>` : '';
+
+  const categoryLabel =
+    scan.category === 'receipt' ? '（レシート系：レア度+1）' :
+    scan.category === 'product' ? '（商品コード）' : '';
+
+  document.getElementById('item-result').innerHTML = `
+    <div class="item-result-row">
+      <div class="item-result-emoji">${item.emoji}</div>
+      <div class="item-result-info">
+        <div class="item-result-name">${item.name}</div>
+        <div class="item-result-rarity" style="color:${item.rarityColor}">${item.rarity}</div>
+      </div>
+    </div>
+    <div class="item-result-stats">${statsLine}</div>
+    ${skillBlock}
+    <div class="item-result-meta">${scan.format} / ${scan.text}${categoryLabel}</div>
+  `;
   document.getElementById('scan-result').classList.remove('hidden');
 }
 
 document.getElementById('btn-back-scan').addEventListener('click', () => {
   stopScanner();
+  pendingItem = null;
   show('map');
 });
 
-document.getElementById('btn-enter-dungeon').addEventListener('click', () => {
-  if (!dungeonData) return;
-  getPosition().then(pos => {
-    addDungeonPin(pos.lat, pos.lng, dungeonData, clearedSet.has(dungeonData.seed), enterDungeon);
-    enterDungeon(dungeonData);
-  });
+document.getElementById('btn-rescan').addEventListener('click', () => {
+  pendingItem = null;
+  launchScanner();
 });
+
+document.getElementById('btn-keep-item').addEventListener('click', () => {
+  if (!pendingItem) return;
+  const msg = _acquireItem(pendingItem);
+  pendingItem = null;
+  alert(msg);
+  show('map');
+});
+
+// 装備自動切替＋インベントリ追加。戻り値: 通知メッセージ
+function _acquireItem(item) {
+  if (item.type === 'weapon') {
+    if (!player.weapon || item.atkBonus > player.weapon.atkBonus) {
+      const old = player.weapon;
+      player.weapon = item;
+      player.atk    = player.atkBase + item.atkBonus;
+      if (old && player.inventory.length < 8) player.inventory.push(old);
+      return `⚔️ ${item.name} を装備！`;
+    }
+  } else if (item.type === 'armor') {
+    if (!player.armor || item.defBonus > player.armor.defBonus) {
+      const old = player.armor;
+      player.armor = item;
+      player.def   = player.defBase + item.defBonus;
+      if (old && player.inventory.length < 8) player.inventory.push(old);
+      return `🛡️ ${item.name} を装備！`;
+    }
+  }
+  if (player.inventory.length >= 8) {
+    return `🎒 持ち物が満杯！ ${item.name} を諦めた...`;
+  }
+  player.inventory.push(item);
+  return `🎒 ${item.name} を入手！`;
+}
 
 // ─────────────────────────────────────────────
 // ダンジョン
 // ─────────────────────────────────────────────
 function enterDungeon(data) {
   dungeonData  = data;
-  player       = createPlayer();
+  // 入場前スナップショット（敗北時ロールバック）
+  entrySnapshot = {
+    inventory: [...player.inventory],
+    weapon:    player.weapon,
+    armor:     player.armor,
+    atk:       player.atk,
+    def:       player.def,
+  };
+  player.hp    = player.maxHp;     // 入場時に全回復
   currentFloor = 1;
   loadFloor(1);
   show('dungeon');
@@ -96,7 +177,6 @@ function loadFloor(floor) {
 
 function refreshHUD() {
   document.getElementById('player-hp').textContent = `HP: ${player.hp}/${player.maxHp}`;
-
   const wName = player.weapon ? `⚔️${player.weapon.atkBonus}` : '⚔️ー';
   const aName = player.armor  ? `🛡️${player.armor.defBonus}`  : '🛡️ー';
   document.getElementById('equip-display').textContent = `${wName}　${aName}`;
@@ -121,11 +201,9 @@ function move(dx, dy) {
 
   dungeon.playerPos = { x: nx, y: ny };
 
-  // アイテム自動ピックアップ
   const floorItem = dungeon.itemAt(nx, ny);
   if (floorItem) pickupItem(floorItem);
 
-  // 階段チェック
   if (dungeon.atStairs(nx, ny)) {
     if (currentFloor >= dungeonData.floors) {
       dungeonClear();
@@ -140,23 +218,24 @@ function move(dx, dy) {
 }
 
 function pickupItem(item) {
-  if (player.inventory.length >= 8) {
+  if (player.inventory.length >= 8 && item.type !== 'weapon' && item.type !== 'armor') {
     dungeonLog(`🎒 満杯！ ${item.name} を拾えなかった`);
     return;
   }
   dungeon.removeFloorItem(item);
 
-  // 武器・防具は自動装備（今より強ければ）
   if (item.type === 'weapon') {
     if (!player.weapon || item.atkBonus > player.weapon.atkBonus) {
       const old = player.weapon;
       player.weapon = item;
       player.atk    = player.atkBase + item.atkBonus;
       dungeonLog(`⚔️ ${item.name} を装備！ ATK+${item.atkBonus}`);
-      if (old) player.inventory.push(old); // 外した装備はインベントリへ
-    } else {
+      if (old && player.inventory.length < 8) player.inventory.push(old);
+    } else if (player.inventory.length < 8) {
       player.inventory.push(item);
       dungeonLog(`🎒 ${item.name} を拾った`);
+    } else {
+      dungeonLog(`🎒 満杯！ ${item.name} を拾えなかった`);
     }
   } else if (item.type === 'armor') {
     if (!player.armor || item.defBonus > player.armor.defBonus) {
@@ -164,10 +243,12 @@ function pickupItem(item) {
       player.armor = item;
       player.def   = player.defBase + item.defBonus;
       dungeonLog(`🛡️ ${item.name} を装備！ DEF+${item.defBonus}`);
-      if (old) player.inventory.push(old);
-    } else {
+      if (old && player.inventory.length < 8) player.inventory.push(old);
+    } else if (player.inventory.length < 8) {
       player.inventory.push(item);
       dungeonLog(`🎒 ${item.name} を拾った`);
+    } else {
+      dungeonLog(`🎒 満杯！ ${item.name} を拾えなかった`);
     }
   } else {
     player.inventory.push(item);
@@ -181,8 +262,8 @@ function pickupItem(item) {
 // D-パッド
 document.querySelectorAll('.dpad-btn').forEach(btn => {
   btn.addEventListener('click', () => {
-    const map = { up:[0,-1], down:[0,1], left:[-1,0], right:[1,0], wait:[0,0] };
-    const d   = map[btn.dataset.dir];
+    const m = { up:[0,-1], down:[0,1], left:[-1,0], right:[1,0], wait:[0,0] };
+    const d = m[btn.dataset.dir];
     if (d) move(...d);
   });
 });
@@ -190,16 +271,16 @@ document.querySelectorAll('.dpad-btn').forEach(btn => {
 // キーボード（PC確認用）
 document.addEventListener('keydown', e => {
   if (screen !== 'dungeon') return;
-  const map = {
+  const m = {
     ArrowUp:[0,-1], ArrowDown:[0,1], ArrowLeft:[-1,0], ArrowRight:[1,0],
     w:[0,-1], s:[0,1], a:[-1,0], d:[1,0], ' ':[0,0],
   };
-  if (map[e.key]) { e.preventDefault(); move(...map[e.key]); }
+  if (m[e.key]) { e.preventDefault(); move(...m[e.key]); }
 });
 
 // スワイプ（モバイル）
 let touchStart = null;
-const canvas   = document.getElementById('dungeon-canvas');
+const canvas = document.getElementById('dungeon-canvas');
 canvas.addEventListener('touchstart', e => {
   touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
 }, { passive: true });
@@ -259,8 +340,7 @@ document.getElementById('btn-item-cancel').addEventListener('click', () => {
 });
 
 function showItemModal() {
-  const usable = player.inventory.filter(it => it.type === 'potion' || it.type === 'scroll');
-  const list   = document.getElementById('item-list');
+  const list = document.getElementById('item-list');
 
   if (player.inventory.length === 0) {
     list.innerHTML = '<div style="text-align:center;color:#888;padding:12px">アイテムを持っていない</div>';
@@ -297,19 +377,30 @@ function showItemModal() {
 // ─────────────────────────────────────────────
 function dungeonClear() {
   clearedSet.add(dungeonData.seed);
+  refreshPin(dungeonData.seed);
   showResult(true);
 }
 
 function showResult(isWin) {
+  if (!isWin && entrySnapshot) {
+    // 敗北：ダンジョンで拾った装備とアイテムをロールバック
+    player.inventory = entrySnapshot.inventory;
+    player.weapon    = entrySnapshot.weapon;
+    player.armor     = entrySnapshot.armor;
+    player.atk       = entrySnapshot.atk;
+    player.def       = entrySnapshot.def;
+  }
+  player.hp = player.maxHp;       // マップ復帰時は全回復
+  entrySnapshot = null;
+
   show('result');
   document.getElementById('result-icon').textContent  = isWin ? '🎉' : '💀';
   document.getElementById('result-title').textContent = isWin ? '攻略成功！' : 'ゲームオーバー';
   document.getElementById('result-body').textContent  = isWin
-    ? `${dungeonData.name} を踏破した！`
-    : 'ダンジョンで力尽きた...';
+    ? `${dungeonData.name} を踏破した！\n（再挑戦可）`
+    : 'ダンジョンで力尽きた...\nこのダンジョンで拾ったものは失われた';
 }
 
 document.getElementById('btn-result-back').addEventListener('click', () => {
-  player = createPlayer();
   show('map');
 });

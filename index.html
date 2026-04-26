@@ -34,8 +34,9 @@
       <div class="scanner-hint">バーコードをフレームに合わせてください</div>
     </div>
     <div id="scan-result" class="hidden">
-      <div id="dungeon-preview"></div>
-      <button id="btn-enter-dungeon" class="btn-primary">ダンジョンに入る →</button>
+      <div id="item-result"></div>
+      <button id="btn-keep-item" class="btn-primary">受け取る</button>
+      <button id="btn-rescan" class="btn-back" style="margin-top:6px">もう一度スキャン</button>
     </div>
   </div>
 
@@ -81,6 +82,18 @@
         </div>
         <div id="enemy-stat-text"></div>
       </div>
+
+      <div class="player-box">
+        <div class="player-box-row">
+          <span class="player-box-label">🧙 自分</span>
+          <span id="battle-player-hp" class="player-box-hp">HP 35/35</span>
+        </div>
+        <div class="hp-bar-wrap">
+          <div id="battle-player-hp-bar" class="hp-bar" style="width:100%"></div>
+        </div>
+        <div id="battle-player-equip" class="player-box-equip">⚔️ー　🛡️ー</div>
+      </div>
+
       <div id="battle-log" class="battle-log"></div>
       <div class="battle-buttons">
         <button class="btn-battle" id="btn-attack">⚔️ こうげき</button>

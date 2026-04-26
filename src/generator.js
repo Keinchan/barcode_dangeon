@@ -34,36 +34,95 @@ const DUNGEON_THEMES = [
   { name: '毒の沼地',   wallColor: '#1a4a1a', floorColor: '#061406' },
 ];
 
-// ── バーコード + GPS → ダンジョンデータ ──
-export function generateDungeonData(barcode, lat, lng) {
-  const locSeed = hashString(`${Math.floor(lat * 50)}:${Math.floor(lng * 50)}`);
-  const barSeed = hashString(barcode);
-  const seed    = (locSeed ^ barSeed) >>> 0;
-  const rng     = createRNG(seed);
+// ── 位置ベース固定湧き設定 ──
+export const GRID_STEP = 0.002;       // 約 200m
+const SPAWN_PROBABILITY = 0.6;        // セルあたり60%でダンジョン出現
+const ENTER_RADIUS_M    = 80;         // 入場可能距離（プレイヤー位置から）
 
+// ──────────────────────────────────────────
+// ダンジョンデータ共通ビルダー
+// ──────────────────────────────────────────
+function _buildDungeonFromSeed(seed, lat, lng) {
+  const rng = createRNG(seed);
   const floors     = 3 + Math.floor(rng() * 3);
   const difficulty = 1 + Math.floor(rng() * 3);
   const theme      = DUNGEON_THEMES[Math.floor(rng() * DUNGEON_THEMES.length)];
 
-  // バーコード先頭2桁 → モンスター族
-  const monsterTypeIdx = parseInt(barcode.slice(0, 2), 10) % MONSTER_POOL.length;
-  // 5〜6桁 → 属性
-  const elementIdx     = parseInt(barcode.slice(5, 7), 10) % ELEMENTS.length;
-  // 末尾桁 → ダンジョンレアリティ（出現モンスター/アイテムの品質ベース）
-  const rarityBase     = rarityFromDigit(parseInt(barcode.slice(-1), 10));
+  const monsterTypeIdx = Math.floor(rng() * MONSTER_POOL.length);
+  const elementIdx     = Math.floor(rng() * ELEMENTS.length);
+
+  // ダンジョン基準レアリティ：コモン45 / レア35 / エピック15 / レジェンド5
+  const r = rng();
+  let rarityIdx;
+  if      (r < 0.45) rarityIdx = 0;
+  else if (r < 0.80) rarityIdx = 1;
+  else if (r < 0.95) rarityIdx = 2;
+  else               rarityIdx = 3;
+
+  // モンスターステータス算出用の合成「バーコード」
+  // generateMonster 側で digits.slice(2,5) 等を使うため数字13桁にする
+  const fakeBarcode = String(seed).padStart(13, '0').slice(0, 13);
 
   return {
-    seed, barcode, lat, lng,
+    seed, barcode: fakeBarcode, lat, lng,
     name: theme.name + 'ダンジョン',
     theme, floors, difficulty,
     monsterTypeIdx,
     elementIdx,
     element: ELEMENTS[elementIdx],
-    rarityBase,
+    rarityBase: RARITIES[rarityIdx],
   };
 }
 
-// ── バーコード → モンスター生成（強化版） ──
+// ──────────────────────────────────────────
+// グリッド固定湧き
+// ──────────────────────────────────────────
+function _gridDungeon(gx, gy) {
+  const seed = hashString(`grid:${gx}:${gy}`);
+  const rng  = createRNG(seed);
+  if (rng() > SPAWN_PROBABILITY) return null;
+
+  // セル内のランダム位置（中央寄り 30〜70%）
+  const lat = gy * GRID_STEP + GRID_STEP * (0.3 + rng() * 0.4);
+  const lng = gx * GRID_STEP + GRID_STEP * (0.3 + rng() * 0.4);
+
+  return _buildDungeonFromSeed(seed, lat, lng);
+}
+
+// プレイヤーの周囲 radiusMeters 以内のグリッドダンジョンを返す
+export function getDungeonsNear(lat, lng, radiusMeters = 1500) {
+  const radiusDeg  = radiusMeters / 100000; // 大雑把に 1° ≒ 100km
+  const cellRadius = Math.ceil(radiusDeg / GRID_STEP);
+  const baseGx = Math.floor(lng / GRID_STEP);
+  const baseGy = Math.floor(lat / GRID_STEP);
+
+  const result = [];
+  for (let dy = -cellRadius; dy <= cellRadius; dy++) {
+    for (let dx = -cellRadius; dx <= cellRadius; dx++) {
+      const d = _gridDungeon(baseGx + dx, baseGy + dy);
+      if (d) result.push(d);
+    }
+  }
+  return result;
+}
+
+// プレイヤー位置からダンジョン入口までの距離（m）
+export function distanceMeters(lat1, lng1, lat2, lng2) {
+  // 簡易: 1° ≒ 111.32km、緯度補正なしで近距離なら十分
+  const dLat = (lat1 - lat2) * 111320;
+  const dLng = (lng1 - lng2) * 111320 * Math.cos(lat1 * Math.PI / 180);
+  return Math.sqrt(dLat * dLat + dLng * dLng);
+}
+
+export function isWithinEnterRadius(playerLat, playerLng, dungeon) {
+  return distanceMeters(playerLat, playerLng, dungeon.lat, dungeon.lng) <= ENTER_RADIUS_M;
+}
+
+export const ENTER_RADIUS = ENTER_RADIUS_M;
+
+// ──────────────────────────────────────────
+// バーコード → モンスター（既存のロジックを維持）
+// ──────────────────────────────────────────
 export function generateMonster(dungeonData, floor, isBoss = false) {
   const key  = `${dungeonData.barcode}:${floor}:${isBoss}`;
   const rng  = createRNG(hashString(key));
@@ -74,14 +133,12 @@ export function generateMonster(dungeonData, floor, isBoss = false) {
   const floorMult   = 1 + (floor - 1) * 0.35;
   const bossMult    = isBoss ? 2.8 : 1;
 
-  // レアリティ（ボスは1段階上）
   const baseRarityIdx = RARITIES.indexOf(dungeonData.rarityBase);
   const rarityIdx     = isBoss
     ? Math.min(RARITIES.length - 1, baseRarityIdx + 1)
     : baseRarityIdx;
   const rarity        = RARITIES[rarityIdx];
 
-  // バーコード各桁をステータスベースに使う + 乱数ブレ
   const digits = dungeonData.barcode.padStart(13, '0');
   const rawHp  = 15 + (parseInt(digits.slice(2, 5), 10) % 40);
   const rawAtk = 4  + (parseInt(digits.slice(5, 7), 10) % 12);
@@ -99,27 +156,23 @@ export function generateMonster(dungeonData, floor, isBoss = false) {
     name: displayName,
     rarity: rarity.name, rarityColor: rarity.color,
     element, skill,
-    skillCharge: 0,   // 3ターンたまったらスキル発動
+    skillCharge: 0,
     hp, maxHp: hp, atk, def, floor,
   };
 }
 
 // ── フロアのアイテム生成 ──
-// rooms: ダンジョン内の部屋リスト
 export function generateFloorItems(dungeonData, floor, rooms) {
   const rng   = createRNG(hashString(`floor-items:${dungeonData.seed}:${floor}`));
   const items = [];
 
-  // 最初と最後の部屋以外に配置
   rooms.slice(1, -1).forEach((room, idx) => {
-    if (rng() > 0.5) return; // 50%でアイテムあり
+    if (rng() > 0.5) return;
 
-    // 部屋ごとの決定論的サブシード → バーコード生成
     const subHash  = hashString(`${dungeonData.barcode}:${floor}:room${idx}`);
     const subCode  = subHash.toString().padStart(13, '0').slice(0, 13);
     const item     = generateItemFromBarcode(subCode);
 
-    // 部屋内のランダム位置
     const x = room.x + 1 + Math.floor(rng() * Math.max(1, room.w - 2));
     const y = room.y + 1 + Math.floor(rng() * Math.max(1, room.h - 2));
     item.x = x;
