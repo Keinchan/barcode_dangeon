@@ -197,11 +197,10 @@ html, body {
 
 #dungeon-canvas {
   display: block;
-  margin: 0 auto;
+  margin: 8px auto;
   image-rendering: pixelated;
-  flex: 1;
-  max-width: 100%;
-  max-height: 55vw;
+  flex-shrink: 0;
+  /* サイズは src/dungeon.js の render() がwindow基準で完全制御 */
 }
 
 .dungeon-footer {

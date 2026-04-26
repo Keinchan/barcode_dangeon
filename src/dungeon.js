@@ -122,13 +122,18 @@ export class Dungeon {
   render(canvas) {
     const VIEW = 11;
     const half = Math.floor(VIEW / 2);
-    const size = Math.min(
-      canvas.parentElement?.clientWidth  || 352,
-      canvas.parentElement?.clientHeight || 352,
-    );
+    // ビューポート基準でサイズ計算（flex に依存しないので毎回安定）
+    // PC で巨大化しないよう上限を設定
+    const HEADER_H = 60;
+    const FOOTER_H = 220;     // D-pad / combat-panel どちらも収まる目安
+    const availW = window.innerWidth;
+    const availH = window.innerHeight - HEADER_H - FOOTER_H;
+    const size = Math.max(264, Math.min(availW, availH, 480));
     const ts = Math.max(24, Math.floor(size / VIEW));
     canvas.width  = ts * VIEW;
     canvas.height = ts * VIEW;
+    canvas.style.width  = canvas.width  + 'px';
+    canvas.style.height = canvas.height + 'px';
 
     const ctx   = canvas.getContext('2d');
     const { x: px, y: py } = this.playerPos;
