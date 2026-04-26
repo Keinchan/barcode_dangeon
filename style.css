@@ -197,11 +197,10 @@ html, body {
 
 #dungeon-canvas {
   display: block;
-  margin: 0 auto;
+  margin: 8px auto;
   image-rendering: pixelated;
-  flex: 1;
-  max-width: 100%;
-  max-height: 55vw;
+  flex-shrink: 0;
+  /* サイズは src/dungeon.js の render() がwindow基準で完全制御 */
 }
 
 .dungeon-footer {
@@ -252,101 +251,102 @@ html, body {
 .dungeon-right-hud { text-align: right; }
 .equip-display { font-size: 11px; color: var(--muted); margin-top: 3px; }
 
-/* ── BATTLE ── */
-#screen-battle { background: var(--bg); position: relative; }
-
-.battle-area {
-  flex: 1;
+/* ── COMBAT PANEL（ダンジョン画面に統合・スマホで収まるよう密度を下げる） ── */
+.combat-panel {
   display: flex;
   flex-direction: column;
-  padding: 16px;
-  gap: 12px;
-}
-
-.enemy-box {
+  gap: 6px;
+  padding: 8px 12px 10px;
   background: var(--surface);
-  border-radius: 16px;
-  padding: 16px;
-  text-align: center;
+  flex-shrink: 0;
+  max-height: 50vh;
+  overflow-y: auto;
 }
+.combat-panel.hidden { display: none; }
 
+.combat-enemy {
+  background: rgba(0,0,0,0.25);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+.combat-enemy-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.enemy-sprite-mini { font-size: 26px; flex-shrink: 0; }
+.combat-enemy-text { flex: 1; min-width: 0; }
+.combat-enemy-name { font-size: 14px; font-weight: bold; }
 .enemy-meta {
   display: flex;
-  justify-content: center;
-  gap: 10px;
-  font-size: 12px;
-  margin-bottom: 6px;
+  gap: 8px;
+  font-size: 10px;
+  margin-top: 1px;
 }
-
-#enemy-name {
-  font-size: 20px;
-  font-weight: bold;
-  margin-bottom: 8px;
-}
-
-.enemy-sprite { font-size: 60px; margin: 8px 0; }
 
 .hp-bar-wrap {
-  height: 12px;
+  height: 8px;
   background: rgba(255,255,255,0.1);
-  border-radius: 6px;
+  border-radius: 4px;
   overflow: hidden;
-  margin: 8px 0;
+  margin: 4px 0 2px;
 }
 .hp-bar {
   height: 100%;
-  border-radius: 6px;
+  border-radius: 4px;
   background: var(--success);
   transition: width .3s, background .3s;
 }
 
-#enemy-stat-text { font-size: 12px; color: var(--muted); }
+#enemy-stat-text { font-size: 10px; color: var(--muted); }
 
-.player-box {
-  background: var(--surface);
-  border-radius: 12px;
-  padding: 10px 14px;
-  border: 1px solid rgba(124,77,255,0.3);
+.combat-player {
+  background: rgba(124,77,255,0.08);
+  border: 1px solid rgba(124,77,255,0.25);
+  border-radius: 8px;
+  padding: 4px 8px;
 }
-.player-box-row {
+.combat-player-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: bold;
 }
-.player-box-label { font-size: 14px; font-weight: bold; }
-.player-box-hp    { font-size: 14px; font-weight: bold; color: var(--success); }
-.player-box-equip { font-size: 11px; color: var(--muted); margin-top: 4px; }
+#battle-player-hp { color: var(--success); }
 
 .battle-log {
-  flex: 1;
-  background: var(--surface);
-  border-radius: 12px;
-  padding: 10px 14px;
-  font-size: 14px;
+  background: rgba(0,0,0,0.25);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
   overflow-y: auto;
-  min-height: 80px;
-  max-height: 140px;
+  min-height: 32px;
+  max-height: 60px;
+  line-height: 1.4;
 }
-.battle-log p { padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+.battle-log p { padding: 1px 0; }
 
 .battle-buttons {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: 5px;
   flex-shrink: 0;
 }
 .btn-battle {
-  background: var(--surface);
+  background: rgba(255,255,255,0.05);
   color: #fff;
   border: 1px solid rgba(255,255,255,0.15);
-  padding: 15px;
-  border-radius: 12px;
-  font-size: 15px;
+  padding: 8px;
+  border-radius: 6px;
+  font-size: 12px;
   cursor: pointer;
   transition: background .1s;
 }
 .btn-battle:active { background: var(--primary); }
+
+/* 戦闘中はフッター(D-pad/探索ログ)を隠す */
+.dungeon-footer.hidden { display: none; }
 
 /* ── ITEM MODAL ── */
 .modal {

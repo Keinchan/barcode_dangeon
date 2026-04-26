@@ -78,6 +78,31 @@ function _pinHtml(dungeon, cleared) {
        + `${dungeon.theme.name[0]}</div>`;
 }
 
+function _buildPopupHtml(dungeon) {
+  if (!playerPos) {
+    return `<b>${dungeon.name}</b><br>位置情報を取得中...`;
+  }
+  const dbg        = getDebugState();
+  const inRange    = dbg.bypassEnterRadius
+                      || isWithinEnterRadius(playerPos.lat, playerPos.lng, dungeon);
+  const dist       = Math.round(distanceMeters(playerPos.lat, playerPos.lng, dungeon.lat, dungeon.lng));
+  const clearedNow = isClearedCb?.(dungeon.seed) ?? false;
+
+  return (
+    `<div><b>${dungeon.name}</b></div>` +
+    `<div>難易度: ${'⭐'.repeat(dungeon.difficulty)} / B${dungeon.floors}F</div>` +
+    `<div style="color:${dungeon.rarityBase.color};font-weight:bold">${dungeon.rarityBase.name}</div>` +
+    `<div style="font-size:11px;color:#888">${dungeon.element}属性</div>` +
+    (clearedNow ? '<div style="color:#4caf50;margin-top:4px">✅ 攻略済み（再戦可）</div>' : '') +
+    (inRange
+      ? `<button class="popup-enter-btn" data-seed="${dungeon.seed}" `
+        + `style="margin-top:8px;padding:6px 14px;background:#7c4dff;color:#fff;`
+        + `border:none;border-radius:6px;cursor:pointer;font-weight:bold">入場する</button>`
+      : `<div style="margin-top:6px;color:#888">🚶 距離 ${dist}m`
+        + `（${ENTER_RADIUS}m以内で入場可）</div>`)
+  );
+}
+
 function _addDungeonPin(dungeon) {
   const cleared = isClearedCb?.(dungeon.seed) ?? false;
   const icon = L.divIcon({
@@ -88,42 +113,20 @@ function _addDungeonPin(dungeon) {
   });
   const marker = L.marker([dungeon.lat, dungeon.lng], { icon }).addTo(map);
 
-  marker.on('click', () => {
-    if (!playerPos) {
-      marker.bindPopup(`<b>${dungeon.name}</b><br>位置情報を取得中...`).openPopup();
-      return;
-    }
-    const dbg        = getDebugState();
-    const inRange    = dbg.bypassEnterRadius
-                        || isWithinEnterRadius(playerPos.lat, playerPos.lng, dungeon);
-    const dist       = Math.round(distanceMeters(playerPos.lat, playerPos.lng, dungeon.lat, dungeon.lng));
-    const clearedNow = isClearedCb?.(dungeon.seed) ?? false;
+  // Leafletの標準トグル動作を使う：クリック毎にコンテンツ関数で最新HTMLを生成
+  marker.bindPopup(() => _buildPopupHtml(dungeon));
 
-    const html =
-      `<div><b>${dungeon.name}</b></div>` +
-      `<div>難易度: ${'⭐'.repeat(dungeon.difficulty)} / B${dungeon.floors}F</div>` +
-      `<div style="color:${dungeon.rarityBase.color};font-weight:bold">${dungeon.rarityBase.name}</div>` +
-      `<div style="font-size:11px;color:#888">${dungeon.element}属性</div>` +
-      (clearedNow ? '<div style="color:#4caf50;margin-top:4px">✅ 攻略済み（再戦可）</div>' : '') +
-      (inRange
-        ? `<button class="popup-enter-btn" data-seed="${dungeon.seed}" `
-          + `style="margin-top:8px;padding:6px 14px;background:#7c4dff;color:#fff;`
-          + `border:none;border-radius:6px;cursor:pointer;font-weight:bold">入場する</button>`
-        : `<div style="margin-top:6px;color:#888">🚶 距離 ${dist}m`
-          + `（${ENTER_RADIUS}m以内で入場可）</div>`);
-
-    marker.bindPopup(html).openPopup();
-    if (inRange && onEnterCb) {
-      setTimeout(() => {
-        const btn = document.querySelector(
-          `button.popup-enter-btn[data-seed="${dungeon.seed}"]`,
-        );
-        btn?.addEventListener('click', () => {
-          marker.closePopup();
-          onEnterCb(dungeon);
-        });
-      }, 50);
-    }
+  // ポップアップが開かれた直後に「入場する」ボタンへハンドラを付ける
+  marker.on('popupopen', () => {
+    if (!onEnterCb) return;
+    const btn = document.querySelector(
+      `button.popup-enter-btn[data-seed="${dungeon.seed}"]`,
+    );
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      marker.closePopup();
+      onEnterCb(dungeon);
+    }, { once: true });
   });
 
   renderedPins.set(dungeon.seed, { marker, dungeon });

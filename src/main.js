@@ -19,6 +19,7 @@ let dungeonData  = null;
 let dungeon      = null;
 let currentFloor = 1;
 let battle       = null;
+let combatActive = false;               // 戦闘中フラグ（インライン化のため screen は dungeon のまま）
 const clearedSet = new Set();
 
 // ダンジョン入場時のスナップショット（敗北時ロールバック用）
@@ -157,6 +158,12 @@ function _acquireItem(item) {
 // ダンジョン
 // ─────────────────────────────────────────────
 function enterDungeon(data) {
+  // 戦闘UIを必ずリセット（デバッグ操作で途中離脱した場合の保険）
+  combatActive = false;
+  battle       = null;
+  document.getElementById('combat-panel').classList.add('hidden');
+  document.getElementById('dungeon-footer').classList.remove('hidden');
+
   dungeonData  = data;
   // 入場前スナップショット（敗北時ロールバック）
   entrySnapshot = {
@@ -198,7 +205,7 @@ function dungeonLog(msg) {
 
 // ── 移動 ──
 function move(dx, dy) {
-  if (!dungeon || screen !== 'dungeon') return;
+  if (!dungeon || screen !== 'dungeon' || combatActive) return;
   const nx = dungeon.playerPos.x + dx;
   const ny = dungeon.playerPos.y + dy;
   if (!dungeon.canWalk(nx, ny)) return;
@@ -277,7 +284,7 @@ document.querySelectorAll('.dpad-btn').forEach(btn => {
 
 // キーボード（PC確認用）
 document.addEventListener('keydown', e => {
-  if (screen !== 'dungeon') return;
+  if (screen !== 'dungeon' || combatActive) return;
   const m = {
     ArrowUp:[0,-1], ArrowDown:[0,1], ArrowLeft:[-1,0], ArrowRight:[1,0],
     w:[0,-1], s:[0,1], a:[-1,0], d:[1,0], ' ':[0,0],
@@ -292,7 +299,7 @@ canvas.addEventListener('touchstart', e => {
   touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
 }, { passive: true });
 canvas.addEventListener('touchend', e => {
-  if (!touchStart) return;
+  if (!touchStart || combatActive) return;
   const dx = e.changedTouches[0].clientX - touchStart.x;
   const dy = e.changedTouches[0].clientY - touchStart.y;
   if (Math.max(Math.abs(dx), Math.abs(dy)) < 20) return;
@@ -305,8 +312,17 @@ canvas.addEventListener('touchend', e => {
 // バトル
 // ─────────────────────────────────────────────
 function startBattle(mob) {
-  show('battle');
+  // 戦闘モードに切替（screen は dungeon のままインライン化）
+  combatActive = true;
+  document.getElementById('dungeon-footer').classList.add('hidden');
+  document.getElementById('combat-panel').classList.remove('hidden');
+
   battle = new Battle(player, mob, (result, defeated) => {
+    // 戦闘終了：探索モードに復帰
+    combatActive = false;
+    document.getElementById('combat-panel').classList.add('hidden');
+    document.getElementById('dungeon-footer').classList.remove('hidden');
+
     player.hp  = battle.player.hp;
     player.atk = battle.player.atk;
     player.def = battle.player.def;
@@ -318,20 +334,29 @@ function startBattle(mob) {
         dungeonClear();
       } else {
         dungeonLog(`${defeated.name} を倒した！`);
-        show('dungeon');
-        dungeon.render(document.getElementById('dungeon-canvas'));
+        // フッターが探索パネルに戻ったので canvas を再サイズ
+        requestAnimationFrame(() => dungeon.render(document.getElementById('dungeon-canvas')));
       }
     } else if (result === 'lose') {
       showResult(false);
     } else if (result === 'run') {
       dungeonLog('逃げた！');
-      show('dungeon');
-      dungeon.render(document.getElementById('dungeon-canvas'));
+      requestAnimationFrame(() => dungeon.render(document.getElementById('dungeon-canvas')));
     }
   });
   document.getElementById('battle-log').innerHTML = '';
   battle.updateUI();
+
+  // 戦闘パネルが表示・レイアウト確定された後に canvas を再サイズして再描画
+  requestAnimationFrame(() => dungeon.render(document.getElementById('dungeon-canvas')));
 }
+
+// 画面サイズ変動時にも canvas を追従させる
+window.addEventListener('resize', () => {
+  if (dungeon && screen === 'dungeon') {
+    dungeon.render(document.getElementById('dungeon-canvas'));
+  }
+});
 
 document.getElementById('btn-attack').addEventListener('click', () => battle?.attack());
 document.getElementById('btn-skill' ).addEventListener('click', () => battle?.skill());
@@ -429,6 +454,14 @@ if (DEBUG) {
 
   // モックスキャン
   document.getElementById('debug-mock-scan').addEventListener('click', () => {
+    if (combatActive) {
+      alert('戦闘中はスキャンできません（戦闘を終わらせてください）');
+      return;
+    }
+    if (screen === 'dungeon') {
+      alert('ダンジョン内ではスキャンできません（マップに戻ってから）');
+      return;
+    }
     const text   = document.getElementById('debug-scan-text').value.trim();
     const format = document.getElementById('debug-scan-format').value;
     if (!/^\d{8,20}$/.test(text)) {

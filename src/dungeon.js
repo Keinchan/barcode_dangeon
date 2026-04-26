@@ -122,13 +122,25 @@ export class Dungeon {
   render(canvas) {
     const VIEW = 11;
     const half = Math.floor(VIEW / 2);
-    const size = Math.min(
-      canvas.parentElement?.clientWidth  || 352,
-      canvas.parentElement?.clientHeight || 352,
-    );
-    const ts = Math.max(24, Math.floor(size / VIEW));
+    // 実際のヘッダー/フッター高さを測定して canvas に必要な空間を確保。
+    // canvas は flex-shrink:0 なので flex の伸縮に巻き込まれない（測定は安定）。
+    const header  = document.querySelector('#screen-dungeon .dungeon-header');
+    const combat  = document.getElementById('combat-panel');
+    const explore = document.getElementById('dungeon-footer');
+    const visibleFooter =
+      combat  && !combat.classList .contains('hidden') ? combat  :
+      explore && !explore.classList.contains('hidden') ? explore : null;
+
+    const headerH = header?.offsetHeight ?? 60;
+    const footerH = visibleFooter?.offsetHeight ?? 200;
+    const availW  = window.innerWidth;
+    const availH  = window.innerHeight - headerH - footerH - 16;
+    const size = Math.max(220, Math.min(availW, availH, 480));
+    const ts = Math.max(20, Math.floor(size / VIEW));
     canvas.width  = ts * VIEW;
     canvas.height = ts * VIEW;
+    canvas.style.width  = canvas.width  + 'px';
+    canvas.style.height = canvas.height + 'px';
 
     const ctx   = canvas.getContext('2d');
     const { x: px, y: py } = this.playerPos;
