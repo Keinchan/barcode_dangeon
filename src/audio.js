@@ -373,16 +373,45 @@ export function getCurrentBgmName() {
 const SFX = {
   pickup(opts = {}) {
     const t = ensureRunning()?.currentTime; if (t == null) return;
-    // レアリティで音色変更
     const tier = opts.rarityTier ?? 0;     // 0..3
-    const base = 600 + tier * 120;
-    playTone(t,         base,        0.10, { type: 'triangle', vol: 0.32 });
-    playTone(t + 0.08,  base * 1.5,  0.13, { type: 'triangle', vol: 0.28 });
-    if (tier >= 2) {
-      playTone(t + 0.18, base * 2.0, 0.18, { type: 'sine',     vol: 0.22 });
-    }
-    if (tier >= 3) {
-      playTone(t + 0.32, base * 2.5, 0.22, { type: 'sine',     vol: 0.20 });
+    // レアリティで全く別パターンの効果音を鳴らし、聞き分けが付くようにする
+    if (tier === 0) {
+      // コモン: 短い「コン」だけ
+      playTone(t,        660, 0.08, { type: 'triangle', vol: 0.28 });
+      playTone(t + 0.05, 880, 0.07, { type: 'triangle', vol: 0.22 });
+    } else if (tier === 1) {
+      // レア: 上昇2音 + ハイライトのチャイム
+      playTone(t,        noteFreq(N.E, 5), 0.10, { type: 'triangle', vol: 0.30 });
+      playTone(t + 0.09, noteFreq(N.A, 5), 0.14, { type: 'triangle', vol: 0.30 });
+      playTone(t + 0.20, noteFreq(N.E, 6), 0.20, { type: 'sine',     vol: 0.22 });
+    } else if (tier === 2) {
+      // エピック: メジャー3和音 + キラキラ
+      const chord = [N.C, N.E, N.G];
+      for (let i = 0; i < chord.length; i++) {
+        playTone(t + i * 0.05, noteFreq(chord[i], 5), 0.22, {
+          type: 'triangle', vol: 0.28,
+        });
+      }
+      playTone(t + 0.18, noteFreq(N.C, 6), 0.30, { type: 'sine', vol: 0.26 });
+      playTone(t + 0.34, noteFreq(N.E, 6), 0.26, { type: 'sine', vol: 0.22 });
+      playNoise(t + 0.10, 0.06, { vol: 0.10, highpass: 5000 });
+    } else {
+      // レジェンド: フルファンファーレ（4音上昇 + 高音和音 + 余韻）
+      const seq = [N.C, N.E, N.G, N.C];
+      for (let i = 0; i < seq.length; i++) {
+        playTone(t + i * 0.10, noteFreq(seq[i], i === 3 ? 6 : 5), 0.22, {
+          type: 'triangle', vol: 0.32,
+        });
+      }
+      // 同時和音（上ハモ）
+      playTone(t + 0.40, noteFreq(N.E, 6), 0.40, { type: 'sine', vol: 0.26 });
+      playTone(t + 0.40, noteFreq(N.G, 6), 0.40, { type: 'sine', vol: 0.22 });
+      playTone(t + 0.40, noteFreq(N.C, 7), 0.50, { type: 'sine', vol: 0.20 });
+      // ベース
+      playTone(t,        noteFreq(N.C, 3), 0.45, { type: 'sawtooth', vol: 0.18 });
+      // キラキラ余韻
+      playNoise(t + 0.04, 0.10, { vol: 0.15, highpass: 6000 });
+      playNoise(t + 0.50, 0.18, { vol: 0.12, highpass: 5000 });
     }
   },
 

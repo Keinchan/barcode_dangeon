@@ -11,6 +11,10 @@ export class Battle {
     this._busy        = false;
     // 壁越し戦闘フラグ: true なら通常こうげき不可、敵も魔法のみ
     this.wallPiercing = !!opts.wallPiercing;
+    // 戦闘中も周囲の他敵がティックして動く / 攻撃する
+    this.dungeon      = opts.dungeon ?? null;
+    this.mobRef       = opts.mobRef  ?? null;     // tick 対象から除外する戦闘中 mob
+    this.onTick       = opts.onTick  ?? null;     // tick 後の追加描画コールバック
   }
 
   log(msg) {
@@ -173,7 +177,35 @@ export class Battle {
       } else {
         this._enemyBasicAttack();
       }
+      // 戦闘中 mob のターン後、周囲の他敵もティックして攻撃／接近する。
+      // _checkPlayerDead が onEnd('lose') 済みなら hp <= 0 なのでスキップ。
+      if (this.player.hp > 0) {
+        setTimeout(() => this._tickOtherEnemies(), 380);
+      }
     }, 550);
+  }
+
+  _tickOtherEnemies() {
+    if (!this.dungeon) { this._busy = false; return; }
+    const r = this.dungeon.tickEnemies(this.player, { excludeMob: this.mobRef });
+    for (const ev of r.events) {
+      if (ev.type === 'magic') {
+        this.log(`✨ ${ev.mob.name} の魔法攻撃！ ${ev.dmg} ダメージ`);
+      }
+    }
+    if (r.totalDmg > 0) {
+      this.player.hp = Math.max(0, this.player.hp - r.totalDmg);
+      showFloatingDamage(r.totalDmg);
+      playSfx('damage');
+    }
+    if (this.onTick) { try { this.onTick(r); } catch {} }
+    this.updateUI();
+    if (this.player.hp <= 0) {
+      this.log('💀 周囲の敵に倒された...');
+      setTimeout(() => this.onEnd('lose'), 900);
+      return;
+    }
+    this._busy = false;
   }
 
   // 壁越し戦闘では魔法ナラティブ、通常戦闘は物理ナラティブ。ダメージ計算は同一
@@ -198,7 +230,7 @@ export class Battle {
       this.monster.hp = Math.min(this.monster.maxHp, this.monster.hp + heal);
       this.log(`🌟 ${this.monster.name} が「${sk.name}」を使った！ HPが${heal}回復！`);
       this.updateUI();
-      this._busy = false;
+      // _busy=false は後段の _tickOtherEnemies に委譲（その間に操作させない）
     } else if (sk.poison) {
       // 毒スキル（闇属性）
       const dmg = this._calcDmg(this.monster.atk, this.player.def, sk.mult);
@@ -221,7 +253,7 @@ export class Battle {
   }
 
   _checkPlayerDead() {
-    if (this.player.hp > 0) { this._busy = false; return; }
+    if (this.player.hp > 0) return;   // _busy=false は _tickOtherEnemies に委譲
     this.log('💀 倒れてしまった...');
     setTimeout(() => this.onEnd('lose'), 900);
   }

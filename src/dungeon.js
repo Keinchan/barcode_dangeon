@@ -167,22 +167,40 @@ export class Dungeon {
 
   // ── 敵AI（プレイヤー行動後に呼ぶ）──
   // 戻り値: { events: [{type, mob, dmg}, ...], totalDmg }
-  // ルール: 魔法攻撃の射程＝8近傍（壁貫通）。射程外なら必ずプレイヤーへ向かって移動
-  tickEnemies(player) {
+  // ルール:
+  //   魔法攻撃の射程＝8近傍（壁貫通）。射程外は「プレイヤー周囲8マスのうち
+  //   未予約のスロット」を greedy に予約し、そこに最短で向かう。これにより
+  //   複数の mob が一塊にならず、プレイヤーを取り囲む形で接近する。
+  //
+  //   excludeMob: 戦闘パネルで戦闘中の敵 1 体を除外するためのオプション
+  tickEnemies(player, opts = {}) {
     if (getDebugState().disableEnemyAI) return { events: [], totalDmg: 0 };
 
     const events = [];
     let totalDmg = 0;
+    const exclude = opts.excludeMob ?? null;
 
-    for (const m of this.monsters) {
-      if (m.hp <= 0) continue;
+    // 行動対象（生存・除外外）を距離昇順で並べる：近い mob が先にスロットを
+    // 取れる方が「囲み」が自然に成立する
+    const actors = this.monsters
+      .filter(m => m.hp > 0 && m !== exclude)
+      .map(m => ({
+        m,
+        dist: Math.abs(m.x - this.playerPos.x) + Math.abs(m.y - this.playerPos.y),
+      }))
+      .sort((a, b) => a.dist - b.dist);
 
+    // 周囲8マスのスロット（予約済みは Set に追加していく）
+    const reserved = new Set();
+
+    for (const { m } of actors) {
       const adx = Math.abs(m.x - this.playerPos.x);
       const ady = Math.abs(m.y - this.playerPos.y);
       const inMagicRange = adx <= 1 && ady <= 1 && !(adx === 0 && ady === 0);
 
       if (inMagicRange) {
-        // 魔法攻撃（壁貫通）
+        // 既に隣接：その場で魔法攻撃。座標もスロット予約に入れて他敵と衝突回避
+        reserved.add(`${m.x},${m.y}`);
         const base = Math.max(1, m.atk - player.def);
         const roll = 1 + Math.floor(Math.random() * Math.ceil(base * 0.4));
         const dmg  = base + roll;
@@ -191,30 +209,69 @@ export class Dungeon {
         continue;
       }
 
-      // 射程外 → プレイヤーへ向かって移動（無条件追跡）
-      const dx = Math.sign(this.playerPos.x - m.x);
-      const dy = Math.sign(this.playerPos.y - m.y);
-      const dxLarger = adx >= ady;
+      // 周囲8マスから「歩ける・他敵未予約・壁でない」スロットを mob ごとに選ぶ。
+      // 候補は「自 mob からの距離」が短い順に評価し、最も近いものを予約する。
+      const slot = this._pickSurroundSlot(m, reserved);
+      if (!slot) {
+        // 取れるスロットが無い → その場待機（混雑時の暴走を防止）
+        reserved.add(`${m.x},${m.y}`);
+        continue;
+      }
+      reserved.add(`${slot.x},${slot.y}`);
+
+      // 目標スロットへ 1 ステップ greedy に詰める
+      const tdx = Math.sign(slot.x - m.x);
+      const tdy = Math.sign(slot.y - m.y);
+      const tAdx = Math.abs(slot.x - m.x);
+      const tAdy = Math.abs(slot.y - m.y);
       const tryStep = (sx, sy) => {
         if (sx === 0 && sy === 0) return false;
-        // モンスター側の移動も「壁角の斜め抜け」を禁止して挙動を統一
         if (sx !== 0 && sy !== 0) {
           if (!this.canWalk(m.x + sx, m.y) || !this.canWalk(m.x, m.y + sy)) return false;
         }
         return this._canMonsterStep(m.x + sx, m.y + sy, m);
       };
-      if (dxLarger) {
-        if      (tryStep(dx, 0))  m.x += dx;
-        else if (tryStep(0, dy))  m.y += dy;
-        else if (tryStep(dx, dy)) { m.x += dx; m.y += dy; }
+      let moved = false;
+      if (tAdx >= tAdy) {
+        if      (tryStep(tdx, 0))  { m.x += tdx; moved = true; }
+        else if (tryStep(0, tdy))  { m.y += tdy; moved = true; }
+        else if (tryStep(tdx, tdy)) { m.x += tdx; m.y += tdy; moved = true; }
       } else {
-        if      (tryStep(0, dy))  m.y += dy;
-        else if (tryStep(dx, 0))  m.x += dx;
-        else if (tryStep(dx, dy)) { m.x += dx; m.y += dy; }
+        if      (tryStep(0, tdy))  { m.y += tdy; moved = true; }
+        else if (tryStep(tdx, 0))  { m.x += tdx; moved = true; }
+        else if (tryStep(tdx, tdy)) { m.x += tdx; m.y += tdy; moved = true; }
       }
+      // 動いた後の座標も予約に追加（他敵が同マスに来ないように）
+      if (moved) reserved.add(`${m.x},${m.y}`);
     }
 
     return { events, totalDmg };
+  }
+
+  // プレイヤー周囲8マスから、まだ誰にも予約されていない・歩ける・通行可能な
+  // スロットを mob から見て最も近い順に1つ返す
+  _pickSurroundSlot(m, reserved) {
+    const px = this.playerPos.x;
+    const py = this.playerPos.y;
+    const candidates = [];
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const sx = px + dx;
+        const sy = py + dy;
+        if (!this.canWalk(sx, sy)) continue;
+        const key = `${sx},${sy}`;
+        if (reserved.has(key)) continue;
+        // 別 mob が既にそこに居る場合も予約済み扱い
+        const other = this._monsterAt(sx, sy);
+        if (other && other !== m) continue;
+        const d = Math.abs(sx - m.x) + Math.abs(sy - m.y);
+        candidates.push({ x: sx, y: sy, d });
+      }
+    }
+    if (candidates.length === 0) return null;
+    candidates.sort((a, b) => a.d - b.d);
+    return candidates[0];
   }
 
   _canMonsterStep(x, y, self) {
