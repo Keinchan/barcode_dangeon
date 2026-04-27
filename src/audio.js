@@ -36,14 +36,29 @@ function ensureCtx() {
   masterBgm.connect(ctx.destination);
   masterSfx.connect(ctx.destination);
 
-  // ctx の suspended → running 遷移を拾って保留中の BGM を再投入。
-  // iOS Safari は resume() の Promise が完了するまで state が変わらないので、
-  // この listener が鳴り出しの最終ガード。
+  // ctx の状態遷移を拾う:
+  //   running 遷移時 … pendingBgm or 直前まで鳴っていた currentBgm を再投入
+  //   suspended 遷移時 … 鳴っていた BGM をスケジューラ毎切り捨て、名前だけ pending に
+  //                      退避（ctx.currentTime が止まるとスケジューラが暴走するため）
   ctx.addEventListener('statechange', () => {
-    if (ctx.state === 'running' && pendingBgm) {
-      const n = pendingBgm;
-      pendingBgm = null;
-      startBgm(n);
+    if (ctx.state === 'running') {
+      const name = pendingBgm ?? currentBgm?.name ?? null;
+      if (name) {
+        pendingBgm = null;
+        if (currentBgm) {
+          currentBgm.stop();
+          currentBgm = null;
+        }
+        startBgm(name);
+      }
+    } else if (ctx.state === 'suspended') {
+      // confirm/alert などのネイティブダイアログで suspended に落ちた場合の保全
+      if (currentBgm) {
+        const n = currentBgm.name;
+        currentBgm.stop();
+        currentBgm = null;
+        pendingBgm = n;
+      }
     }
   });
   return ctx;
@@ -60,19 +75,32 @@ function ensureRunning() {
 
 // 初回ユーザー操作で起動。iOS Safari 対策:
 //   - **AudioContext はこのジェスチャ内で初めて生成する**。gesture 外で生成すると
-//     その ctx は後から resume しても完全にロック解除されないケースがある（実機で
-//     確認: BGM が無音のまま、SFX 系を一度押すと初めて鳴り出す）。
-//   - 1サンプルの空 BufferSource を gesture 内で実際に start() して audio policy 解除
-//   - resume の Promise は await しない（gesture コンテキストを抜けないため）。
-//     statechange listener が pendingBgm を捕捉して再投入する。
+//     その ctx は後から resume しても完全にロック解除されないケースがある。
+//   - resume を await して、明示的に pendingBgm を投入する。statechange に頼らない。
+//   - 1サンプルの空 BufferSource と silent oscillator を実際に start() して
+//     audio policy 解除（resume だけでは効かない iOS 版がある）
 //   - capture フェーズで拾うことで、子要素が stopPropagation していても発火
 function unlockOnGesture() {
   let unlocked = false;
-  const fire = () => {
+  const fire = async () => {
     if (unlocked) return;
     unlocked = true;
-    const c = ensureCtx();    // ★ ここで初めて ctx が作られる（gesture 内）
+    const c = ensureCtx();
     if (!c) return;
+    // ① resume を先に。gesture 内で resume を発行することが iOS 解除の必須条件
+    if (c.state === 'suspended') {
+      try { await c.resume(); } catch {}
+    }
+    // ② silent oscillator も鳴らす（一部の iOS は BufferSource のみだと解除されない）
+    try {
+      const o = c.createOscillator();
+      const g = c.createGain();
+      g.gain.value = 0;
+      o.connect(g).connect(c.destination);
+      o.start(0);
+      o.stop(c.currentTime + 0.01);
+    } catch {}
+    // ③ unlock buffer
     try {
       const buf = c.createBuffer(1, 1, 22050);
       const src = c.createBufferSource();
@@ -80,8 +108,11 @@ function unlockOnGesture() {
       src.connect(c.destination);
       src.start(0);
     } catch {}
-    if (c.state === 'suspended') {
-      c.resume().catch(() => {});
+    // ④ 明示的に pendingBgm を投入（statechange に頼らない）
+    if (pendingBgm) {
+      const name = pendingBgm;
+      pendingBgm = null;
+      startBgm(name);
     }
     initFns.forEach(fn => { try { fn(); } catch {} });
     document.removeEventListener('pointerdown', fire, true);
@@ -93,6 +124,26 @@ function unlockOnGesture() {
   document.addEventListener('keydown',     fire, true);
   document.addEventListener('touchstart',  fire, true);
   document.addEventListener('click',       fire, true);
+
+  // 常時アクティブな保険: クリックの度に suspended なら resume を試す。
+  // alert/confirm 等のネイティブダイアログで suspended に落ちた場合、
+  // ダイアログ閉幕後の最初のクリックで自動復帰させる。
+  document.addEventListener('click', () => {
+    if (ctx && ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+  }, true);
+
+  // タブ復帰系イベントでも resume を試す（iOS は焦点系で発火しないこともあるが
+  // PC ブラウザでは効く）
+  const tryResume = () => {
+    if (ctx && ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+  };
+  document.addEventListener('visibilitychange', tryResume);
+  window.addEventListener('focus', tryResume);
+  window.addEventListener('pageshow', tryResume);
 }
 unlockOnGesture();
 

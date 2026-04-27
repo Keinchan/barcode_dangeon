@@ -65,6 +65,9 @@ export class Dungeon {
     });
 
     this.floorItems = generateFloorItems(this.data, this.floor, rooms);
+
+    // 念のためスポーン直後にもオーバーラップを解消（_pickSurroundSlot 等の前提条件）
+    this._fixOverlaps?.();
   }
 
   _genRooms(target) {
@@ -245,7 +248,46 @@ export class Dungeon {
       if (moved) reserved.add(`${m.x},${m.y}`);
     }
 
+    // 万一同一マスに複数 mob が乗っている状態が発生したら最終ガードで解消
+    this._fixOverlaps();
+
     return { events, totalDmg };
+  }
+
+  // 同一マスに 2 体以上の mob が居る場合、後から見つかった方を 8 近傍の空きマスへ
+  // 退避させる。アルゴリズム上は重ならないはずだが、診断・将来の変更への保険。
+  _fixOverlaps() {
+    const occ = new Map();
+    for (const m of this.monsters) {
+      if (m.hp <= 0) continue;
+      const k = `${m.x},${m.y}`;
+      if (occ.has(k)) {
+        // 別の空きマスへ退避
+        if (!this._evacuateMob(m)) {
+          // どこも開いてない場合は諦め（次ティックで解消される可能性あり）
+        } else {
+          occ.set(`${m.x},${m.y}`, m);
+        }
+      } else {
+        occ.set(k, m);
+      }
+    }
+  }
+
+  _evacuateMob(m) {
+    const dirs = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
+    for (const [dx, dy] of dirs) {
+      const nx = m.x + dx;
+      const ny = m.y + dy;
+      if (!this.canWalk(nx, ny)) continue;
+      if (this.playerPos.x === nx && this.playerPos.y === ny) continue;
+      const other = this._monsterAt(nx, ny);
+      if (other && other !== m) continue;
+      m.x = nx;
+      m.y = ny;
+      return true;
+    }
+    return false;
   }
 
   // プレイヤー周囲8マスから、まだ誰にも予約されていない・歩ける・通行可能な
