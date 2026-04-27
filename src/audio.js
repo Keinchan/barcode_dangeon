@@ -35,33 +35,66 @@ function ensureCtx() {
   masterSfx.gain.value = settings.sfxEnabled ? settings.sfxVolume : 0;
   masterBgm.connect(ctx.destination);
   masterSfx.connect(ctx.destination);
+
+  // ctx の suspended → running 遷移を拾って保留中の BGM を再投入。
+  // iOS Safari は resume() の Promise が完了するまで state が変わらないので、
+  // この listener が鳴り出しの最終ガード。
+  ctx.addEventListener('statechange', () => {
+    if (ctx.state === 'running' && pendingBgm) {
+      const n = pendingBgm;
+      pendingBgm = null;
+      startBgm(n);
+    }
+  });
   return ctx;
 }
 
 function ensureRunning() {
   const c = ensureCtx();
   if (!c) return null;
-  if (c.state === 'suspended') c.resume();
+  if (c.state === 'suspended') {
+    c.resume().catch(() => {});
+  }
   return c;
 }
 
-// 初回ユーザー操作で起動
+// 初回ユーザー操作で起動。iOS Safari 対策:
+//   - ジェスチャ内で AudioContext を生成 / resume する
+//   - 1サンプルの空 BufferSource を実際に start() して audio policy を確実に解除
+//     （resume() 単体だと iOS の一部バージョンでロック解除されない）
+//   - capture フェーズで拾うことで、子要素が stopPropagation していても発火
 function unlockOnGesture() {
-  const fire = () => {
-    ensureRunning();
+  let unlocked = false;
+  const fire = async () => {
+    if (unlocked) return;
+    unlocked = true;
+    const c = ensureCtx();
+    if (!c) return;
+    try {
+      const buf = c.createBuffer(1, 1, 22050);
+      const src = c.createBufferSource();
+      src.buffer = buf;
+      src.connect(c.destination);
+      src.start(0);
+    } catch {}
+    if (c.state === 'suspended') {
+      try { await c.resume(); } catch {}
+    }
     if (pendingBgm) {
       const name = pendingBgm;
       pendingBgm = null;
       startBgm(name);
     }
     initFns.forEach(fn => { try { fn(); } catch {} });
-    document.removeEventListener('pointerdown', fire);
-    document.removeEventListener('keydown',     fire);
-    document.removeEventListener('touchstart',  fire);
+    document.removeEventListener('pointerdown', fire, true);
+    document.removeEventListener('keydown',     fire, true);
+    document.removeEventListener('touchstart',  fire, true);
+    document.removeEventListener('click',       fire, true);
   };
-  document.addEventListener('pointerdown', fire, { once: true });
-  document.addEventListener('keydown',     fire, { once: true });
-  document.addEventListener('touchstart',  fire, { once: true });
+  document.addEventListener('pointerdown', fire, true);
+  document.addEventListener('keydown',     fire, true);
+  document.addEventListener('touchstart',  fire, true);
+  document.addEventListener('click',       fire, true);
 }
 unlockOnGesture();
 
@@ -274,12 +307,16 @@ const BGM_TRACKS = {
 };
 
 // ─── BGM 再生 ───
+//   各 BGM セッションは専用 voice GainNode を介して masterBgm に接続する。
+//   stop 時は voice を disconnect することで、まだ未到達のスケジュール済オシレータも
+//   含めて確実に無音化する（master を絞ってすぐ戻す方式は、戻した瞬間に未到達ノートが
+//   鳴ってしまうバグがあったため廃止）。
 export function startBgm(name) {
   if (!settings.bgmEnabled) { stopBgm(); pendingBgm = null; return; }
   const c = ensureCtx();
   if (!c) return;
   if (c.state === 'suspended') {
-    // ジェスチャ前に呼ばれた場合は予約
+    // ジェスチャ前に呼ばれた場合は予約。ctx の statechange でリトライされる。
     pendingBgm = name;
     return;
   }
@@ -289,6 +326,10 @@ export function startBgm(name) {
   const track = BGM_TRACKS[name];
   if (!track) return;
 
+  const voice = c.createGain();
+  voice.gain.value = 1;
+  voice.connect(masterBgm);
+
   const beat    = 60 / track.bpm;
   const loopSec = track.loopBeats * beat;
   let cancelled = false;
@@ -297,7 +338,7 @@ export function startBgm(name) {
 
   const scheduleOne = () => {
     if (cancelled) return;
-    track.schedule(nextStart, beat, masterBgm);
+    track.schedule(nextStart, beat, voice);
     nextStart += loopSec;
     // ループを切れ目なくつなぐため、半ループ前に再スケジュール
     const aheadMs = Math.max(50, (nextStart - c.currentTime - loopSec * 0.5) * 1000);
@@ -307,25 +348,12 @@ export function startBgm(name) {
 
   currentBgm = {
     name,
+    voice,
     stop() {
       cancelled = true;
       if (timer) clearTimeout(timer);
-      // 鳴り続けている発振器を断つために一度 BGM ゲインを 0 に絞り、すぐ戻す
-      if (masterBgm) {
-        const at = c.currentTime;
-        masterBgm.gain.cancelScheduledValues(at);
-        masterBgm.gain.setValueAtTime(masterBgm.gain.value, at);
-        masterBgm.gain.linearRampToValueAtTime(0, at + 0.06);
-        // 0.1s 後に元の音量に戻す
-        setTimeout(() => {
-          if (!masterBgm) return;
-          masterBgm.gain.setValueAtTime(0, c.currentTime);
-          masterBgm.gain.linearRampToValueAtTime(
-            settings.bgmEnabled ? settings.bgmVolume : 0,
-            c.currentTime + 0.05,
-          );
-        }, 120);
-      }
+      // voice を切ることで、未到達ノートを含めて即座に完全無音化
+      try { voice.disconnect(); } catch {}
     },
   };
 }
