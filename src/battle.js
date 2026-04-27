@@ -1,5 +1,9 @@
 import { applyItem } from './items.js';
-import { showFloatingDamage, showEnemyDamage } from './ui.js';
+import {
+  showFloatingDamage, showEnemyDamage,
+  sparkSpray, explosion, shockwave, magicCircle,
+  playerVfxAnchor, enemyVfxAnchor,
+} from './ui.js';
 import { playSfx } from './audio.js';
 
 export class Battle {
@@ -107,6 +111,10 @@ export class Battle {
     this.log(`⚔️ こうげき！ ${dmg} ダメージ！`);
     showEnemyDamage(dmg);
     playSfx(isCrit ? 'crit' : 'hit');
+    // VFX: クリティカルは爆発、通常は火花
+    const enemyAt = enemyVfxAnchor();
+    if (isCrit) explosion(enemyAt, { color: '#ff7043' });
+    else        sparkSpray(enemyAt, { color: '#ffd54f', count: 8 });
     this.updateUI();
     this._checkEnemyDead() || this._enemyTurn();
   }
@@ -118,6 +126,11 @@ export class Battle {
     this.log(`✨ スキル！ ${dmg} の大ダメージ！`);
     showEnemyDamage(dmg);
     playSfx('crit');
+    // VFX: 武器属性の魔法陣 → 爆発
+    const enemyAt = enemyVfxAnchor();
+    const elem = this.player.weapon?.element ?? this.player.weapon?.skill?.element;
+    magicCircle(enemyAt, elem);
+    setTimeout(() => explosion(enemyAt, { color: '#ff8a65' }), 350);
     this.updateUI();
     this._checkEnemyDead() || this._enemyTurn();
   }
@@ -188,24 +201,39 @@ export class Battle {
   _tickOtherEnemies() {
     if (!this.dungeon) { this._busy = false; return; }
     const r = this.dungeon.tickEnemies(this.player, { excludeMob: this.mobRef });
-    for (const ev of r.events) {
-      if (ev.type === 'magic') {
-        this.log(`✨ ${ev.mob.name} の魔法攻撃！ ${ev.dmg} ダメージ`);
-      }
-    }
-    if (r.totalDmg > 0) {
-      this.player.hp = Math.max(0, this.player.hp - r.totalDmg);
-      showFloatingDamage(r.totalDmg);
-      playSfx('damage');
-    }
     if (this.onTick) { try { this.onTick(r); } catch {} }
-    this.updateUI();
-    if (this.player.hp <= 0) {
-      this.log('💀 周囲の敵に倒された...');
-      setTimeout(() => this.onEnd('lose'), 900);
+
+    const magics = r.events.filter(e => e.type === 'magic');
+    if (magics.length === 0) {
+      this._busy = false;
       return;
     }
-    this._busy = false;
+
+    // 各敵の魔法攻撃を順次（時間差で）処理し、1 件ずつフロート＋SFX＋ログを発火
+    let i = 0;
+    const STEP_MS = 320;
+    const step = () => {
+      if (this.player.hp <= 0) return;   // すでに死亡判定済み
+      const ev = magics[i++];
+      if (!ev) {
+        this.updateUI();
+        this._busy = false;
+        return;
+      }
+      this.player.hp = Math.max(0, this.player.hp - ev.dmg);
+      this.log(`✨ ${ev.mob.name} の魔法攻撃！ ${ev.dmg} ダメージ`);
+      showFloatingDamage(ev.dmg);
+      playSfx('damage');
+      this.updateUI();
+      if (this.player.hp <= 0) {
+        this.log('💀 周囲の敵に倒された...');
+        setTimeout(() => this.onEnd('lose'), 900);
+        return;
+      }
+      if (i < magics.length) setTimeout(step, STEP_MS);
+      else { this._busy = false; }
+    };
+    step();
   }
 
   // 壁越し戦闘では魔法ナラティブ、通常戦闘は物理ナラティブ。ダメージ計算は同一
@@ -216,6 +244,10 @@ export class Battle {
     this.log(`${label} ${this.monster.name} の一撃！ ${dmg} ダメージ！`);
     showFloatingDamage(dmg);
     playSfx('damage');
+    // VFX: 被ダメ衝撃波（壁越しは魔法陣も）
+    const playerAt = playerVfxAnchor();
+    shockwave(playerAt, { color: 'rgba(255,82,82,0.65)' });
+    if (this.wallPiercing) magicCircle(playerAt, this.monster.element);
     this.updateUI();
     this._checkPlayerDead();
   }
@@ -229,6 +261,7 @@ export class Battle {
       const heal = Math.floor(this.monster.maxHp * sk.healSelf);
       this.monster.hp = Math.min(this.monster.maxHp, this.monster.hp + heal);
       this.log(`🌟 ${this.monster.name} が「${sk.name}」を使った！ HPが${heal}回復！`);
+      magicCircle(enemyVfxAnchor(), '光');
       this.updateUI();
       // _busy=false は後段の _tickOtherEnemies に委譲（その間に操作させない）
     } else if (sk.poison) {
@@ -238,6 +271,8 @@ export class Battle {
       this.log(`☠️ ${this.monster.name} が「${sk.name}」を使った！ ${dmg} ダメージ＋毒！`);
       showFloatingDamage(dmg);
       playSfx('damage');
+      magicCircle(enemyVfxAnchor(), '闇');
+      shockwave(playerVfxAnchor(), { color: 'rgba(176,112,221,0.6)' });
       this.updateUI();
       this._checkPlayerDead();
     } else {
@@ -247,6 +282,9 @@ export class Battle {
       this.log(`🔥 ${this.monster.name} が「${sk.name}」を使った！ ${dmg} ダメージ！`);
       showFloatingDamage(dmg);
       playSfx('damage');
+      // 敵スキル: 敵側に魔法陣 → プレイヤー側に爆発
+      magicCircle(enemyVfxAnchor(), this.monster.element);
+      setTimeout(() => explosion(playerVfxAnchor(), { color: '#ff7043' }), 250);
       this.updateUI();
       this._checkPlayerDead();
     }

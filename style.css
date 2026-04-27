@@ -1097,6 +1097,178 @@ html, body {
   margin-top: 2px;
 }
 
+/* ── 戦闘 VFX（パーティクル / 爆発 / 衝撃波 / 魔法陣） ── */
+.vfx-wrap {
+  position: fixed;
+  width: 0; height: 0;
+  pointer-events: none;
+  z-index: 4500;
+}
+.vfx-spark {
+  position: absolute;
+  left: 0; top: 0;
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: #ffd54f;
+  animation: vfxSpark 0.55s ease-out forwards;
+}
+@keyframes vfxSpark {
+  0%   { transform: translate(0, 0)              scale(1.4); opacity: 1; }
+  100% { transform: translate(var(--vx), var(--vy)) scale(0.3); opacity: 0; }
+}
+
+.vfx-explosion {
+  position: fixed;
+  width: 8px; height: 8px;
+  margin-left: -4px; margin-top: -4px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--c2) 0%, var(--c1) 35%, rgba(0,0,0,0) 70%);
+  pointer-events: none;
+  z-index: 4500;
+  animation: vfxBoom 0.65s ease-out forwards;
+}
+@keyframes vfxBoom {
+  0%   { transform: scale(0.4); opacity: 1; }
+  60%  { transform: scale(8);   opacity: 0.85; }
+  100% { transform: scale(12);  opacity: 0; }
+}
+
+.vfx-shockwave {
+  position: fixed;
+  width: 30px; height: 30px;
+  margin-left: -15px; margin-top: -15px;
+  border-radius: 50%;
+  border: 3px solid var(--c);
+  pointer-events: none;
+  z-index: 4500;
+  animation: vfxShock 0.5s ease-out forwards;
+}
+@keyframes vfxShock {
+  0%   { transform: scale(0.3); opacity: 1; }
+  100% { transform: scale(3);   opacity: 0; }
+}
+
+.vfx-circle {
+  position: fixed;
+  width: 80px; height: 80px;
+  margin-left: -40px; margin-top: -40px;
+  border-radius: 50%;
+  border: 2px solid var(--c);
+  background: radial-gradient(circle, transparent 55%, color-mix(in srgb, var(--c) 30%, transparent) 80%);
+  box-shadow: 0 0 18px var(--c), inset 0 0 18px var(--c);
+  pointer-events: none;
+  z-index: 4500;
+  animation: vfxCircle 0.85s ease-out forwards;
+}
+@keyframes vfxCircle {
+  0%   { transform: rotate(0deg)   scale(0.2); opacity: 0; }
+  30%  { transform: rotate(120deg) scale(1.0); opacity: 1; }
+  100% { transform: rotate(360deg) scale(1.6); opacity: 0; }
+}
+
+/* ── ストレージ ── */
+.storage-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+.storage-tab {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: var(--text);
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.storage-tab.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+.storage-tab:active { transform: scale(0.96); }
+
+.storage-controls {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+  align-items: center;
+}
+.storage-sort {
+  flex: 1;
+  background: rgba(0,0,0,0.4);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+  font-family: inherit;
+}
+.storage-controls .menu-action-btn { white-space: nowrap; flex-shrink: 0; }
+
+/* 「→持ち物」「→ストレージ」アクションボタン */
+.menu-action-btn.move {
+  border-color: rgba(124,77,255,0.5);
+  color: #b39bff;
+}
+.menu-action-btn.move:active {
+  background: var(--primary);
+  color: #fff;
+}
+
+/* ── アプリ内 alert/confirm ダイアログ ── */
+.dialog-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 7000;
+  background: rgba(0,0,0,0.78);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.dialog-modal.hidden { display: none; }
+.dialog-box {
+  background: var(--surface2);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 14px;
+  width: 100%;
+  max-width: 360px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.dialog-title {
+  font-size: 15px;
+  font-weight: bold;
+  text-align: center;
+}
+.dialog-title:empty { display: none; }
+.dialog-body {
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: center;
+  white-space: pre-wrap;
+  color: var(--text);
+}
+.dialog-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 4px;
+}
+.dialog-actions .btn-primary,
+.dialog-actions .btn-back { width: 100%; padding: 12px; font-size: 14px; }
+.dialog-actions .btn-back.hidden { display: none; }
+.dialog-actions .btn-back.hidden ~ .btn-primary { grid-column: 1 / -1; }
+.btn-primary.btn-danger {
+  background: var(--danger);
+  box-shadow: 0 4px 20px rgba(244,67,54,0.45);
+}
+
 /* ── レアアイテム取得バナー ── */
 .item-banner {
   position: fixed;

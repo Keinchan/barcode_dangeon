@@ -15,7 +15,7 @@ import { generateItemFromBarcode, rarityFromDigit, bumpRarity, RARITIES } from '
 import { hashString } from './rng.js';
 import { Dungeon } from './dungeon.js';
 import { Battle } from './battle.js';
-import { showFloatingDamage, showItemBanner } from './ui.js';
+import { showFloatingDamage, showItemBanner, shockwave, magicCircle, playerVfxAnchor } from './ui.js';
 import {
   isFirebaseConfigured,
   subscribeAuth,
@@ -52,6 +52,7 @@ import {
   SFX_NAMES,
 } from './audio.js';
 import { getItemIconUrl } from './icons.js';
+import { showAlert, showConfirm } from './dialog.js';
 
 // アイテム表示を絵文字 → 手続きアイコンに置換するためのヘルパ
 function iconImg(item, size = 38) {
@@ -239,7 +240,7 @@ document.getElementById('btn-menu-close').addEventListener('click', () => {
 const btnDungeonMenu = document.getElementById('btn-dungeon-menu');
 btnDungeonMenu.addEventListener('click', () => {
   if (combatActive) {
-    alert('戦闘中はメニューを開けません');
+    showAlert('戦闘中はメニューを開けません');
     return;
   }
   playSfx('click');
@@ -296,6 +297,163 @@ function refreshMenu() {
     player.inventory.forEach((item, idx) => {
       inv.appendChild(_renderInventoryRow(item, idx));
     });
+  }
+
+  // ストレージ
+  _refreshStorageUI();
+}
+
+// ─── ストレージ UI ───
+let _storageCat  = 'all';
+let _storageSort = 'rarity';
+let _storageBound = false;
+
+function _refreshStorageUI() {
+  if (!Array.isArray(player.storage)) player.storage = [];
+
+  // 初回バインド
+  if (!_storageBound) {
+    _storageBound = true;
+    document.querySelectorAll('.storage-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        _storageCat = btn.dataset.cat;
+        document.querySelectorAll('.storage-tab').forEach(b => b.classList.toggle('active', b === btn));
+        _refreshStorageUI();
+      });
+    });
+    document.getElementById('storage-sort').addEventListener('change', e => {
+      _storageSort = e.target.value;
+      _refreshStorageUI();
+    });
+    document.getElementById('btn-deposit-all').addEventListener('click', () => {
+      if (player.inventory.length === 0) return;
+      const moved = player.inventory.length;
+      // weapon/armor は装備中以外を全部ストレージへ
+      for (const it of player.inventory) player.storage.push(it);
+      player.inventory = [];
+      playSfx('discard');   // 「ガサッ」と入れる感のため流用
+      refreshMenu();
+      autoSave();
+      showAlert(`${moved} 個をストレージに移動しました`);
+    });
+  }
+
+  const grid = document.getElementById('menu-storage');
+  document.getElementById('menu-storage-count').textContent = `(${player.storage.length})`;
+  grid.innerHTML = '';
+
+  let arr = player.storage.map((it, origIdx) => ({ it, origIdx }));
+  if (_storageCat !== 'all') arr = arr.filter(x => x.it.type === _storageCat);
+  arr = _sortStorageRows(arr, _storageSort);
+
+  if (arr.length === 0) {
+    grid.innerHTML = '<div class="menu-empty">ストレージは空です</div>';
+    return;
+  }
+  for (const { it, origIdx } of arr) {
+    grid.appendChild(_renderStorageRow(it, origIdx));
+  }
+}
+
+const _RARITY_RANK = { 'レジェンド': 4, 'エピック': 3, 'レア': 2, 'コモン': 1 };
+function _sortStorageRows(arr, sortKey) {
+  const cp = arr.slice();
+  switch (sortKey) {
+    case 'rarity':
+      cp.sort((a, b) => {
+        const r = (_RARITY_RANK[b.it.rarity] ?? 0) - (_RARITY_RANK[a.it.rarity] ?? 0);
+        if (r !== 0) return r;
+        return (b.it.level ?? 1) - (a.it.level ?? 1);
+      });
+      break;
+    case 'level':
+      cp.sort((a, b) => (b.it.level ?? 1) - (a.it.level ?? 1));
+      break;
+    case 'name':
+      cp.sort((a, b) => a.it.name.localeCompare(b.it.name, 'ja'));
+      break;
+    case 'recent':
+    default:
+      // origIdx が大きいほど新しい
+      cp.sort((a, b) => b.origIdx - a.origIdx);
+      break;
+  }
+  return cp;
+}
+
+function _renderStorageRow(item, idx) {
+  const div = document.createElement('div');
+  div.className = 'menu-row';
+  const skillHtml = item.skill?.name
+    ? `<div class="menu-row-skill">✨ ${item.skill.name}</div>` : '';
+  const lvHtml = item.level ? `<span class="menu-row-lv">Lv${item.level}</span>` : '';
+  div.innerHTML = `
+    <div class="menu-row-emoji">${iconImg(item, 38)}</div>
+    <div class="menu-row-info">
+      <div class="menu-row-name" style="color:${item.rarityColor}">${item.name} ${lvHtml}</div>
+      <div class="menu-row-stat">${_statLine(item)} / ${item.rarity}</div>
+      ${skillHtml}
+    </div>
+    <div class="menu-row-actions">
+      <button class="menu-action-btn move withdraw">→持ち物</button>
+      <button class="menu-action-btn danger discard">廃棄</button>
+    </div>
+  `;
+  div.querySelector('.withdraw').addEventListener('click', () => {
+    if (player.inventory.length >= 8) {
+      showAlert('持ち物が満杯です');
+      return;
+    }
+    const it = player.storage.splice(idx, 1)[0];
+    if (it) {
+      player.inventory.push(it);
+      playSfx('equip');
+      refreshMenu();
+      autoSave();
+    }
+  });
+  div.querySelector('.discard').addEventListener('click', async () => {
+    const ok = await showConfirm(`${item.name} を廃棄しますか？`, { danger: true, okLabel: '廃棄' });
+    if (!ok) return;
+    player.storage.splice(idx, 1);
+    playSfx('discard');
+    refreshMenu();
+    autoSave();
+  });
+  return div;
+}
+
+// 持ち物 → ストレージ単品送り（_renderInventoryRow にボタンを追加するヘルパ）
+function _depositToStorage(idx) {
+  const it = player.inventory.splice(idx, 1)[0];
+  if (!it) return;
+  player.storage.push(it);
+  playSfx('discard');
+  refreshMenu();
+  autoSave();
+}
+
+// ボス撃破直後など、フロアに置けないドロップを自動取得。
+// インベントリに余裕があればそこに、満杯ならストレージに退避（永久消失を防ぐ）。
+function _autoCollectDrop(drop) {
+  if (!Array.isArray(player.storage)) player.storage = [];
+  let toStorage = false;
+  if (player.inventory.length < 8) {
+    player.inventory.push(drop);
+  } else {
+    player.storage.push(drop);
+    toStorage = true;
+  }
+  playSfx('drop', { rarityTier: rarityTier(drop.rarity) });
+  const where = toStorage ? '📦ストレージへ' : '🎒持ち物へ';
+  if (typeof dungeonLog === 'function' && screen === 'dungeon') {
+    dungeonLog(`💎 ${drop.name} を獲得！（${where}）`, { rarity: drop.rarity });
+  }
+  // レア+はバナー、コモンは控えめなアラート。ボスは満杯時のみ通知が欲しい
+  if (drop.rarity !== 'コモン') {
+    _celebratePickup(drop, toStorage ? 'ストレージへ' : 'ドロップ');
+  } else if (toStorage) {
+    showAlert(`持ち物満杯のため ${drop.name} はストレージへ`);
   }
 }
 
@@ -366,7 +524,7 @@ function _onUnequipClick(slot) {
 
   if (candidates.length === 0) {
     if (player.inventory.length >= 8) {
-      alert('持ち物が満杯のため外せません。先に何か廃棄してください');
+      showAlert('持ち物が満杯のため外せません。先に何か廃棄してください');
       return;
     }
     const cur = slot === 'weapon' ? player.weapon : player.armor;
@@ -445,7 +603,7 @@ function _renderSwapRow(item, swapIdx) {
 document.getElementById('btn-swap-unequip').addEventListener('click', () => {
   const slot = document.getElementById('swap-modal').dataset.slot;
   if (player.inventory.length >= 8) {
-    alert('持ち物が満杯のため外せません');
+    showAlert('持ち物が満杯のため外せません');
     return;
   }
   _unequipDirect(slot);
@@ -483,6 +641,7 @@ function _renderInventoryRow(item, idx) {
       </div>
     </button>
     <div class="menu-row-actions">
+      <button class="menu-action-btn move deposit" title="ストレージへ">→📦</button>
       <button class="menu-action-btn danger discard">廃棄</button>
     </div>
   `;
@@ -494,7 +653,7 @@ function _renderInventoryRow(item, idx) {
         });
       } else if (action === 'use') {
         if (player.hp >= player.maxHp) {
-          alert('HPが満タンです');
+          showAlert('HPが満タンです');
           return;
         }
         showActionConfirm(`${item.name} を使いますか？`, item, '使う', () => {
@@ -503,12 +662,16 @@ function _renderInventoryRow(item, idx) {
       }
     });
   }
-  div.querySelector('.discard').addEventListener('click', () => {
-    if (!confirm(`${item.name} を廃棄しますか？`)) return;
+  div.querySelector('.discard').addEventListener('click', async () => {
+    const ok = await showConfirm(`${item.name} を廃棄しますか？`, { danger: true, okLabel: '廃棄' });
+    if (!ok) return;
     player.inventory.splice(idx, 1);
     playSfx('discard');
     refreshMenu();
     autoSave();
+  });
+  div.querySelector('.deposit').addEventListener('click', () => {
+    _depositToStorage(idx);
   });
   return div;
 }
@@ -553,7 +716,7 @@ function _usePotionFromInventory(idx) {
   const item = player.inventory[idx];
   if (!item || item.type !== 'potion') return;
   if (player.hp >= player.maxHp) {
-    alert('HPが満タンです');
+    showAlert('HPが満タンです');
     return;
   }
   const before = player.hp;
@@ -603,7 +766,7 @@ async function launchScanner() {
       _showItemResult(item, scanResult);
     });
   } catch (e) {
-    alert('カメラを起動できません。HTTPS環境か、カメラの許可を確認してください。\n\n' + e.message);
+    showAlert('カメラを起動できません。HTTPS環境か、カメラの許可を確認してください。\n\n' + e.message);
     show('map');
   }
 }
@@ -676,11 +839,11 @@ document.getElementById('btn-keep-item').addEventListener('click', () => {
   const msg = _acquireItem(item);
   pendingItem = null;
   show('map');
-  // レア+はバナーで派手に告知（コモンは旧来のalertでサッと済ます）
+  // レア+はバナーで派手に告知（コモンは軽いアラート）
   if (item.rarity !== 'コモン') {
     _celebratePickup(item, '入手');
   } else {
-    alert(msg);
+    showAlert(msg);
   }
   autoSave();
 });
@@ -867,24 +1030,38 @@ function move(dx, dy) {
 }
 
 // 敵ターン共通処理
+//   各敵の魔法攻撃を 1 件ずつ時間差で表示する（合算しない）。
+//   1 体撃破でも複数体に囲まれていると連続でダメージ表示・SFX・ログが重なる演出。
 function _runEnemyTurn() {
   const result = dungeon.tickEnemies(player);
-  for (const ev of result.events) {
-    if (ev.type === 'magic') {
-      dungeonLog(`✨ ${ev.mob.name} の魔法攻撃！ ${ev.dmg} ダメージ`);
-    }
-  }
-  if (result.totalDmg > 0) {
-    player.hp = Math.max(0, player.hp - result.totalDmg);
-    showFloatingDamage(result.totalDmg);
+  const magics = result.events.filter(e => e.type === 'magic');
+
+  // 描画はとりあえず移動結果だけ先に反映
+  dungeon.render(document.getElementById('dungeon-canvas'));
+
+  if (magics.length === 0) return;
+
+  let i = 0;
+  const STEP_MS = 320;
+  const apply = () => {
+    if (player.hp <= 0) return;
+    const ev = magics[i++];
+    if (!ev) return;
+    player.hp = Math.max(0, player.hp - ev.dmg);
+    showFloatingDamage(ev.dmg);
     playSfx('damage');
+    // 壁越し魔法は属性魔法陣＋衝撃波
+    magicCircle(playerVfxAnchor(), ev.mob.element);
+    shockwave(playerVfxAnchor(), { color: 'rgba(255,82,82,0.6)' });
+    dungeonLog(`✨ ${ev.mob.name} の魔法攻撃！ ${ev.dmg} ダメージ`);
     refreshHUD();
     if (player.hp <= 0) {
-      showResult(false);
+      setTimeout(() => showResult(false), 350);
       return;
     }
-  }
-  dungeon.render(document.getElementById('dungeon-canvas'));
+    if (i < magics.length) setTimeout(apply, STEP_MS);
+  };
+  apply();
 }
 
 function pickupItem(item) {
@@ -1036,12 +1213,18 @@ function startBattle(mob, opts = {}) {
       // ドロップ判定
       const drop = _rollMonsterDrop(mob);
       if (drop) {
-        drop.x = mob.x;
-        drop.y = mob.y;
-        dungeon.floorItems.push(drop);
-        dungeonLog(`💎 ${mob.name} は ${drop.name} を落とした！`, { rarity: drop.rarity });
-        playSfx('drop', { rarityTier: rarityTier(drop.rarity) });
-        _celebratePickup(drop, 'ドロップ');
+        if (mob.isBoss) {
+          // ボスは即 dungeonClear で離脱するためフロアに置けない。直接取得し、
+          // インベントリ満杯ならストレージに自動退避（永久消失を防ぐ）。
+          _autoCollectDrop(drop);
+        } else {
+          drop.x = mob.x;
+          drop.y = mob.y;
+          dungeon.floorItems.push(drop);
+          dungeonLog(`💎 ${mob.name} は ${drop.name} を落とした！`, { rarity: drop.rarity });
+          playSfx('drop', { rarityTier: rarityTier(drop.rarity) });
+          _celebratePickup(drop, 'ドロップ');
+        }
       } else {
         dungeonLog(`${mob.name} を倒した！`);
       }
@@ -1208,6 +1391,7 @@ function autoSave() {
       weapon: player.weapon,
       armor: player.armor,
       inventory: player.inventory,
+      storage:   player.storage ?? [],
     },
     clearedSeeds: Array.from(clearedSet),
     savedAt: Date.now(),
@@ -1220,6 +1404,8 @@ function _applySave(data) {
   // フィールドの取り残しを防ぐため初期化してから上書き
   player = createPlayer();
   Object.assign(player, data.player);
+  // 旧セーブ互換: storage が無いケース
+  if (!Array.isArray(player.storage)) player.storage = [];
   clearedSet.clear();
   if (Array.isArray(data.clearedSeeds)) {
     for (const s of data.clearedSeeds) clearedSet.add(s);
@@ -1277,7 +1463,8 @@ document.getElementById('btn-title-google').addEventListener('click', async () =
 
 // ログアウト
 document.getElementById('btn-logout').addEventListener('click', async () => {
-  if (!confirm('ログアウトしますか？（クラウドのセーブは残ります）')) return;
+  const ok = await showConfirm('ログアウトしますか？（クラウドのセーブは残ります）');
+  if (!ok) return;
   autoSave();
   document.getElementById('menu-modal').classList.add('hidden');
   await signOutUser();
@@ -1341,17 +1528,17 @@ if (DEBUG) {
   // モックスキャン
   document.getElementById('debug-mock-scan').addEventListener('click', () => {
     if (combatActive) {
-      alert('戦闘中はスキャンできません（戦闘を終わらせてください）');
+      showAlert('戦闘中はスキャンできません（戦闘を終わらせてください）');
       return;
     }
     if (screen === 'dungeon') {
-      alert('ダンジョン内ではスキャンできません（マップに戻ってから）');
+      showAlert('ダンジョン内ではスキャンできません（マップに戻ってから）');
       return;
     }
     const text   = document.getElementById('debug-scan-text').value.trim();
     const format = document.getElementById('debug-scan-format').value;
     if (!/^\d{8,20}$/.test(text)) {
-      alert('バーコードは数字8〜20桁で入力してください');
+      showAlert('バーコードは数字8〜20桁で入力してください');
       return;
     }
     stopScanner();
@@ -1368,7 +1555,7 @@ if (DEBUG) {
     const lat = document.getElementById('debug-gps-lat').value;
     const lng = document.getElementById('debug-gps-lng').value;
     if (!setMockGps(lat, lng)) {
-      alert('緯度経度の入力が不正です');
+      showAlert('緯度経度の入力が不正です');
       return;
     }
     const m = getDebugState().mockGps;
@@ -1407,7 +1594,7 @@ if (DEBUG) {
   // 隣接敵を即時撃破（ドロップ判定は通る）
   document.getElementById('debug-kill-adj').addEventListener('click', () => {
     if (!dungeon || screen !== 'dungeon' || combatActive) {
-      alert('ダンジョン探索中のみ実行可能です');
+      showAlert('ダンジョン探索中のみ実行可能です');
       return;
     }
     const px = dungeon.playerPos.x;
@@ -1418,7 +1605,7 @@ if (DEBUG) {
       !(m.x === px && m.y === py),
     );
     if (adj.length === 0) {
-      alert('隣接する敵がいません');
+      showAlert('隣接する敵がいません');
       return;
     }
     for (const mob of adj) {
@@ -1482,7 +1669,7 @@ if (DEBUG) {
       player.def    = player.defBase + item.defBonus;
     } else {
       if (player.inventory.length >= 8) {
-        alert('インベントリ満杯です（先に廃棄）');
+        showAlert('インベントリ満杯です（先に廃棄）');
         return;
       }
       player.inventory.push(item);
@@ -1496,8 +1683,9 @@ if (DEBUG) {
   document.getElementById('debug-add-potion').addEventListener('click', () => debugAddItem('potion'));
   document.getElementById('debug-add-scroll').addEventListener('click', () => debugAddItem('scroll'));
 
-  document.getElementById('debug-clear-inv').addEventListener('click', () => {
-    if (!confirm('インベントリと装備を全廃棄します')) return;
+  document.getElementById('debug-clear-inv').addEventListener('click', async () => {
+    const ok = await showConfirm('インベントリと装備を全廃棄します', { danger: true, okLabel: '全廃棄' });
+    if (!ok) return;
     player.inventory = [];
     player.weapon = null;
     player.armor  = null;
@@ -1508,7 +1696,7 @@ if (DEBUG) {
 
   // レベル操作
   document.getElementById('debug-lv-up').addEventListener('click', () => {
-    if (player.level >= MAX_LEVEL) { alert('既にLv MAX です'); return; }
+    if (player.level >= MAX_LEVEL) { showAlert('既にLv MAX です'); return; }
     const n = Math.max(1, parseInt(document.getElementById('debug-lv-amount').value, 10) || 1);
     // n回連続で次レベル必要XPを補填
     for (let i = 0; i < n && player.level < MAX_LEVEL; i++) {
@@ -1524,11 +1712,12 @@ if (DEBUG) {
     player.hp = player.maxHp;
     refreshHUD();
     if (!document.getElementById('menu-modal').classList.contains('hidden')) refreshMenu();
-    alert(`Lv${MAX_LEVEL} に強制設定しました（HP/ATK/DEF 全更新）`);
+    showAlert(`Lv${MAX_LEVEL} に強制設定しました（HP/ATK/DEF 全更新）`);
   });
 
-  document.getElementById('debug-lv-reset').addEventListener('click', () => {
-    if (!confirm('レベルとXPを Lv1 にリセットします')) return;
+  document.getElementById('debug-lv-reset').addEventListener('click', async () => {
+    const ok = await showConfirm('レベルとXPを Lv1 にリセットします', { danger: true, okLabel: 'リセット' });
+    if (!ok) return;
     player.level = 1;
     player.xp    = 0;
     applyLevelStats(player);
@@ -1541,16 +1730,17 @@ if (DEBUG) {
   // セーブ強制
   document.getElementById('debug-save-now').addEventListener('click', () => {
     const u = getCurrentAuthUser();
-    if (!u) { alert('未ログインです'); return; }
+    if (!u) { showAlert('未ログインです'); return; }
     autoSave();
-    alert(`セーブしました (${u.email || u.uid})`);
+    showAlert(`セーブしました (${u.email || u.uid})`);
   });
 
   // 自分のセーブのみ削除（クラウド側）
   document.getElementById('debug-clear-all').addEventListener('click', async () => {
     const u = getCurrentAuthUser();
-    if (!u) { alert('未ログインです'); return; }
-    if (!confirm('クラウドの自分のセーブを消去してログアウトします。よろしいですか？')) return;
+    if (!u) { showAlert('未ログインです'); return; }
+    const ok = await showConfirm('クラウドの自分のセーブを消去してログアウトします。よろしいですか？', { danger: true, okLabel: '消去' });
+    if (!ok) return;
     await deleteSave(u.uid);
     await signOutUser();
   });
