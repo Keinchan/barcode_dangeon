@@ -15,7 +15,7 @@ import { generateItemFromBarcode, rarityFromDigit, bumpRarity, RARITIES } from '
 import { hashString } from './rng.js';
 import { Dungeon } from './dungeon.js';
 import { Battle } from './battle.js';
-import { showFloatingDamage } from './ui.js';
+import { showFloatingDamage, showItemBanner } from './ui.js';
 import {
   isFirebaseConfigured,
   subscribeAuth,
@@ -655,10 +655,16 @@ document.getElementById('btn-rescan').addEventListener('click', () => {
 
 document.getElementById('btn-keep-item').addEventListener('click', () => {
   if (!pendingItem) return;
-  const msg = _acquireItem(pendingItem);
+  const item = pendingItem;
+  const msg = _acquireItem(item);
   pendingItem = null;
-  alert(msg);
   show('map');
+  // レア+はバナーで派手に告知（コモンは旧来のalertでサッと済ます）
+  if (item.rarity !== 'コモン') {
+    _celebratePickup(item, '入手');
+  } else {
+    alert(msg);
+  }
   autoSave();
 });
 
@@ -768,11 +774,29 @@ function _xpFromMonster(mob) {
   return mob.isBoss ? base * 3 : base;
 }
 
-function dungeonLog(msg) {
+function dungeonLog(msg, opts = {}) {
   const el = document.getElementById('dungeon-log');
-  el.innerHTML = `<div>${msg}</div>` + el.innerHTML;
+  const cls = opts.rarity ? ` class="${_logClassFor(opts.rarity)}"` : '';
+  el.innerHTML = `<div${cls}>${msg}</div>` + el.innerHTML;
   const lines = el.querySelectorAll('div');
   if (lines.length > 4) lines[lines.length - 1].remove();
+}
+
+function _logClassFor(rarity) {
+  switch (rarity) {
+    case 'レア':       return 'dungeon-log-rare';
+    case 'エピック':   return 'dungeon-log-epic';
+    case 'レジェンド': return 'dungeon-log-legendary';
+    default:           return '';
+  }
+}
+
+// 拾得時の派手な演出（コモンは何もしない）。レア+はバナー、テキストも色付け
+function _celebratePickup(item, action = '入手') {
+  if (!item) return;
+  if (item.rarity !== 'コモン') {
+    showItemBanner(item, { action });
+  }
 }
 
 // ── 移動 ──
@@ -836,6 +860,7 @@ function _runEnemyTurn() {
   if (result.totalDmg > 0) {
     player.hp = Math.max(0, player.hp - result.totalDmg);
     showFloatingDamage(result.totalDmg);
+    playSfx('damage');
     refreshHUD();
     if (player.hp <= 0) {
       showResult(false);
@@ -853,36 +878,42 @@ function pickupItem(item) {
   dungeon.removeFloorItem(item);
   playSfx('pickup', { rarityTier: rarityTier(item.rarity) });
 
+  let action = '拾った';
   if (item.type === 'weapon') {
     if (!player.weapon || item.atkBonus > player.weapon.atkBonus) {
       const old = player.weapon;
       player.weapon = item;
       player.atk    = player.atkBase + item.atkBonus;
-      dungeonLog(`⚔️ ${item.name} を装備！ ATK+${item.atkBonus}`);
+      dungeonLog(`⚔️ ${item.name} を装備！ ATK+${item.atkBonus}`, { rarity: item.rarity });
       if (old && player.inventory.length < 8) player.inventory.push(old);
+      action = '装備';
     } else if (player.inventory.length < 8) {
       player.inventory.push(item);
-      dungeonLog(`🎒 ${item.name} を拾った`);
+      dungeonLog(`🎒 ${item.name} を拾った`, { rarity: item.rarity });
     } else {
       dungeonLog(`🎒 満杯！ ${item.name} を拾えなかった`);
+      return;
     }
   } else if (item.type === 'armor') {
     if (!player.armor || item.defBonus > player.armor.defBonus) {
       const old = player.armor;
       player.armor = item;
       player.def   = player.defBase + item.defBonus;
-      dungeonLog(`🛡️ ${item.name} を装備！ DEF+${item.defBonus}`);
+      dungeonLog(`🛡️ ${item.name} を装備！ DEF+${item.defBonus}`, { rarity: item.rarity });
       if (old && player.inventory.length < 8) player.inventory.push(old);
+      action = '装備';
     } else if (player.inventory.length < 8) {
       player.inventory.push(item);
-      dungeonLog(`🎒 ${item.name} を拾った`);
+      dungeonLog(`🎒 ${item.name} を拾った`, { rarity: item.rarity });
     } else {
       dungeonLog(`🎒 満杯！ ${item.name} を拾えなかった`);
+      return;
     }
   } else {
     player.inventory.push(item);
-    dungeonLog(`🎒 ${item.name} を拾った`);
+    dungeonLog(`🎒 ${item.name} を拾った`, { rarity: item.rarity });
   }
+  _celebratePickup(item, action);
 
   refreshHUD();
   dungeon.render(document.getElementById('dungeon-canvas'));
@@ -991,8 +1022,9 @@ function startBattle(mob, opts = {}) {
         drop.x = mob.x;
         drop.y = mob.y;
         dungeon.floorItems.push(drop);
-        dungeonLog(`💎 ${mob.name} は ${drop.name} を落とした！`);
+        dungeonLog(`💎 ${mob.name} は ${drop.name} を落とした！`, { rarity: drop.rarity });
         playSfx('drop', { rarityTier: rarityTier(drop.rarity) });
+        _celebratePickup(drop, 'ドロップ');
       } else {
         dungeonLog(`${mob.name} を倒した！`);
       }
@@ -1007,7 +1039,14 @@ function startBattle(mob, opts = {}) {
       dungeonLog('逃げた！');
       requestAnimationFrame(() => dungeon.render(document.getElementById('dungeon-canvas')));
     }
-  }, opts);
+  }, {
+    ...opts,
+    dungeon,                       // 戦闘中に他敵をティックさせる
+    mobRef: mob,                   // ティックから除外する戦闘中 mob
+    onTick: () => {                // 他敵が動いた後の再描画
+      dungeon.render(document.getElementById('dungeon-canvas'));
+    },
+  });
   document.getElementById('battle-log').innerHTML = '';
   battle.updateUI();
 
@@ -1372,8 +1411,9 @@ if (DEBUG) {
         drop.x = mob.x;
         drop.y = mob.y;
         dungeon.floorItems.push(drop);
-        dungeonLog(`💎 ${mob.name} は ${drop.name} を落とした！`);
+        dungeonLog(`💎 ${mob.name} は ${drop.name} を落とした！`, { rarity: drop.rarity });
         playSfx('drop', { rarityTier: rarityTier(drop.rarity) });
+        _celebratePickup(drop, 'ドロップ');
       } else {
         dungeonLog(`${mob.name} を撃破`);
       }
