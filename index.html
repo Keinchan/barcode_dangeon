@@ -158,6 +158,18 @@
     </div>
   </div>
 
+  <!-- アプリ内 alert/confirm ダイアログ（native は audio を止めるので使わない） -->
+  <div id="dialog-modal" class="dialog-modal hidden">
+    <div class="dialog-box">
+      <div id="dialog-title" class="dialog-title"></div>
+      <div id="dialog-body"  class="dialog-body"></div>
+      <div class="dialog-actions">
+        <button id="dialog-cancel" class="btn-back hidden">キャンセル</button>
+        <button id="dialog-ok"     class="btn-primary">OK</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 汎用アクション確認モーダル（装備・使用などの誤タップ防止） -->
   <div id="action-confirm-modal" class="confirm-modal hidden">
     <div class="confirm-modal-box">
@@ -220,6 +232,27 @@
       <section class="menu-section">
         <div class="menu-section-title">持ち物 <span id="menu-inv-count" class="menu-section-meta"></span></div>
         <div id="menu-inventory"></div>
+      </section>
+
+      <section class="menu-section">
+        <div class="menu-section-title">📦 ストレージ <span id="menu-storage-count" class="menu-section-meta"></span></div>
+        <div class="storage-tabs">
+          <button class="storage-tab active" data-cat="all">すべて</button>
+          <button class="storage-tab" data-cat="weapon">⚔️</button>
+          <button class="storage-tab" data-cat="armor">🛡️</button>
+          <button class="storage-tab" data-cat="potion">🧪</button>
+          <button class="storage-tab" data-cat="scroll">📜</button>
+        </div>
+        <div class="storage-controls">
+          <select id="storage-sort" class="storage-sort">
+            <option value="rarity">レア度順</option>
+            <option value="level">Lv順</option>
+            <option value="name">名前順</option>
+            <option value="recent">取得順（新→旧）</option>
+          </select>
+          <button id="btn-deposit-all" class="menu-action-btn">持ち物→ストレージ</button>
+        </div>
+        <div id="menu-storage"></div>
       </section>
 
       <section class="menu-section">

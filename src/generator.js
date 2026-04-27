@@ -244,6 +244,7 @@ export function createPlayer() {
     atkBase: 9, defBase: 3,
     atk: 9, def: 3,
     weapon: null, armor: null,
-    inventory: [],          // 最大8個
+    inventory: [],          // 最大8個（持ち物）
+    storage:   [],          // 容量無制限のアイテムボックス
   };
 }
