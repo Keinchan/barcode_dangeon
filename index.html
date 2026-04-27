@@ -223,6 +223,20 @@
       </section>
 
       <section class="menu-section">
+        <div class="menu-section-title">🔊 サウンド</div>
+        <label class="menu-audio-row">
+          <input id="menu-bgm-toggle" type="checkbox" checked />
+          <span class="menu-audio-label">BGM</span>
+          <input id="menu-bgm-volume" type="range" min="0" max="1" step="0.05" value="0.35" />
+        </label>
+        <label class="menu-audio-row">
+          <input id="menu-sfx-toggle" type="checkbox" checked />
+          <span class="menu-audio-label">効果音</span>
+          <input id="menu-sfx-volume" type="range" min="0" max="1" step="0.05" value="0.55" />
+        </label>
+      </section>
+
+      <section class="menu-section">
         <div class="menu-section-title">アカウント <span id="menu-username" class="menu-section-meta"></span></div>
         <button id="btn-logout" class="menu-logout-btn">🚪 ログアウト</button>
       </section>
@@ -346,6 +360,47 @@
         </div>
         <button id="debug-clear-inv" class="debug-action ghost">全廃棄(装備も)</button>
       </fieldset>
+
+      <fieldset class="debug-section">
+        <legend>🎵 BGM テスト</legend>
+        <div class="debug-row">
+          <select id="debug-bgm-select"></select>
+        </div>
+        <div class="debug-row">
+          <button id="debug-bgm-play" class="debug-action">再生</button>
+          <button id="debug-bgm-stop" class="debug-action ghost">停止</button>
+        </div>
+      </fieldset>
+
+      <fieldset class="debug-section">
+        <legend>🔊 SFX テスト</legend>
+        <div class="debug-row">
+          <select id="debug-sfx-select"></select>
+        </div>
+        <div class="debug-row">
+          <select id="debug-sfx-rarity">
+            <option value="0">コモン</option>
+            <option value="1">レア</option>
+            <option value="2">エピック</option>
+            <option value="3">レジェンド</option>
+          </select>
+          <button id="debug-sfx-play" class="debug-action">鳴らす</button>
+        </div>
+      </fieldset>
+
+      <fieldset class="debug-section">
+        <legend>🖼 アイコン</legend>
+        <button id="debug-icon-gallery" class="debug-action">ギャラリーを開く</button>
+      </fieldset>
+    </div>
+  </div>
+
+  <!-- アイコンギャラリーモーダル（デバッグ用） -->
+  <div id="icon-gallery-modal" class="confirm-modal hidden">
+    <div class="icon-gallery-box">
+      <div class="confirm-modal-title">🖼 アイコンギャラリー</div>
+      <div id="icon-gallery-grid" class="icon-gallery-grid"></div>
+      <button id="btn-gallery-close" class="btn-back">閉じる</button>
     </div>
   </div>
 

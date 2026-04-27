@@ -184,16 +184,18 @@ export function generateMonster(dungeonData, floor, isBoss = false) {
 }
 
 // ── フロアのアイテム生成 ──
+//   そのフロアの雑魚相当のレベルを付けて、レベル相当のステータスにする
 export function generateFloorItems(dungeonData, floor, rooms) {
-  const rng   = createRNG(hashString(`floor-items:${dungeonData.seed}:${floor}`));
-  const items = [];
+  const rng       = createRNG(hashString(`floor-items:${dungeonData.seed}:${floor}`));
+  const items     = [];
+  const itemLevel = enemyLevel(dungeonData, floor, false);
 
   rooms.slice(1, -1).forEach((room, idx) => {
     if (rng() > 0.5) return;
 
     const subHash  = hashString(`${dungeonData.barcode}:${floor}:room${idx}`);
     const subCode  = subHash.toString().padStart(13, '0').slice(0, 13);
-    const item     = generateItemFromBarcode(subCode);
+    const item     = generateItemFromBarcode(subCode, null, itemLevel);
 
     const x = room.x + 1 + Math.floor(rng() * Math.max(1, room.w - 2));
     const y = room.y + 1 + Math.floor(rng() * Math.max(1, room.h - 2));

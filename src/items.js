@@ -58,10 +58,19 @@ const SCROLLS = [
 
 // ── 装備の名前接尾辞（レアリティ毎・武器/防具共通） ──
 const NAME_SUFFIXES = {
-  コモン:     [''],
-  レア:       ['+1', 'の煌き', 'の輝き', '・改'],
-  エピック:   ['・烈', '・覇', 'の業', '・極'],
-  レジェンド: ['・神威', '・終焉', '・龍王', '・破滅'],
+  コモン:     ['', '', '', '・粗', '・古'],            // ほとんどは無印（同名のレア違いを成立させる）
+  レア:       ['', '+1', 'の煌き', 'の輝き', '・改', '・銘'],
+  エピック:   ['', '・烈', '・覇', 'の業', '・極', 'の威'],
+  レジェンド: ['', '・神威', '・終焉', '・龍王', '・破滅', 'の天嗣'],
+};
+
+// ── レアリティ別プレフィックス（接頭詞） ──
+//   稀に空文字（同名でもレア違いが出るように）
+const NAME_PREFIXES = {
+  コモン:     ['', '', '', '錆びた', '欠けた'],
+  レア:       ['', '', '練磨の', '鍛えし', '銀の'],
+  エピック:   ['', '貴き', '黄金の', '霊妙の', '英雄の'],
+  レジェンド: ['', '神器・', '冥府の', '伝説の', '神話の'],
 };
 
 // ── 装備に付くスキル / 効果（レアリティ毎） ──
@@ -115,7 +124,10 @@ const ARMOR_SKILLS = {
 // ── バーコード → アイテム生成 ──
 // 全桁合計 % 4 でアイテム種別決定
 // 0=武器  1=防具  2=回復薬  3=巻物
-export function generateItemFromBarcode(barcode, rarityOverride = null) {
+//
+// rarityOverride: レアリティを上書き（モンスターのレアリティに合わせる時など）
+// levelOverride : アイテムLv 1..100。指定時はステータスに level スケーリングが乗る
+export function generateItemFromBarcode(barcode, rarityOverride = null, levelOverride = null) {
   const rng       = createRNG(hashString('item:' + barcode));
   const digits    = barcode.split('').map(Number);
   const digitSum  = digits.reduce((a, b) => a + b, 0);
@@ -123,17 +135,28 @@ export function generateItemFromBarcode(barcode, rarityOverride = null) {
   const rarity    = rarityOverride ?? rarityFromDigit(digits[digits.length - 1]);
   const elemIdx   = parseInt(barcode.slice(3, 5), 10) % ELEMENTS.length;
   const element   = ELEMENTS[elemIdx];
+  const level     = Math.max(1, Math.min(100, levelOverride ?? 1));
 
   switch (typeIdx) {
-    case 0: return _buildWeapon(barcode, rng, rarity, element);
-    case 1: return _buildArmor(barcode, rng, rarity, element);
-    case 2: return _buildPotion(barcode, rng, rarity);
-    default: return _buildScroll(barcode, rng, rarity, element);
+    case 0: return _buildWeapon(barcode, rng, rarity, element, level);
+    case 1: return _buildArmor(barcode, rng, rarity, element, level);
+    case 2: return _buildPotion(barcode, rng, rarity, level);
+    default: return _buildScroll(barcode, rng, rarity, element, level);
   }
+}
+
+// 装備のレベル係数。Lv1で1.0、Lv100で約 4.96 になる緩いカーブ
+function _levelMult(level) {
+  return 1 + (level - 1) * 0.04;
 }
 
 function _pickSuffix(rarity, rng) {
   const list = NAME_SUFFIXES[rarity.name] ?? [''];
+  return list[Math.floor(rng() * list.length)];
+}
+
+function _pickPrefix(rarity, rng) {
+  const list = NAME_PREFIXES[rarity.name] ?? [''];
   return list[Math.floor(rng() * list.length)];
 }
 
@@ -142,12 +165,15 @@ function _pickSkill(table, rarity, rng) {
   return list[Math.floor(rng() * list.length)];
 }
 
-function _buildWeapon(barcode, rng, rarity, element) {
+function _buildWeapon(barcode, rng, rarity, element, level) {
   const base   = WEAPONS[Math.floor(rng() * WEAPONS.length)];
-  const bonus  = Math.max(1, Math.floor(base.atkBonus * rarity.mult * (0.8 + rng() * 0.4)));
+  const bonus  = Math.max(1, Math.floor(
+    base.atkBonus * rarity.mult * _levelMult(level) * (0.8 + rng() * 0.4),
+  ));
   const skill  = _pickSkill(WEAPON_SKILLS, rarity, rng);
+  const prefix = _pickPrefix(rarity, rng);
   const suffix = _pickSuffix(rarity, rng);
-  const name   = `${element}の${base.base}${suffix}`;
+  const name   = `${prefix}${element}の${base.base}${suffix}`;
   const desc   = skill.kind === 'none'
     ? `ATK +${bonus}（${element}属性）`
     : `ATK +${bonus} / ${skill.name}: ${skill.desc}`;
@@ -155,19 +181,22 @@ function _buildWeapon(barcode, rng, rarity, element) {
   return {
     type: 'weapon', barcode,
     name, emoji: base.emoji,
-    rarity: rarity.name, rarityColor: rarity.color, element,
+    rarity: rarity.name, rarityColor: rarity.color, element, level,
     atkBonus: bonus, defBonus: 0,
     skill,
     desc,
   };
 }
 
-function _buildArmor(barcode, rng, rarity, element) {
+function _buildArmor(barcode, rng, rarity, element, level) {
   const base   = ARMORS[Math.floor(rng() * ARMORS.length)];
-  const bonus  = Math.max(1, Math.floor(base.defBonus * rarity.mult * (0.8 + rng() * 0.4)));
+  const bonus  = Math.max(1, Math.floor(
+    base.defBonus * rarity.mult * _levelMult(level) * (0.8 + rng() * 0.4),
+  ));
   const skill  = _pickSkill(ARMOR_SKILLS, rarity, rng);
+  const prefix = _pickPrefix(rarity, rng);
   const suffix = _pickSuffix(rarity, rng);
-  const name   = `${element}の${base.base}${suffix}`;
+  const name   = `${prefix}${element}の${base.base}${suffix}`;
   const desc   = skill.kind === 'none'
     ? `DEF +${bonus}（${element}属性）`
     : `DEF +${bonus} / ${skill.name}: ${skill.desc}`;
@@ -175,35 +204,37 @@ function _buildArmor(barcode, rng, rarity, element) {
   return {
     type: 'armor', barcode,
     name, emoji: base.emoji,
-    rarity: rarity.name, rarityColor: rarity.color, element,
+    rarity: rarity.name, rarityColor: rarity.color, element, level,
     atkBonus: 0, defBonus: bonus,
     skill,
     desc,
   };
 }
 
-function _buildPotion(barcode, rng, rarity) {
+function _buildPotion(barcode, rng, rarity, level) {
   const base = POTIONS[Math.floor(rng() * POTIONS.length)];
-  const heal = Math.max(5, Math.floor(base.heal * rarity.mult));
+  const heal = Math.max(5, Math.floor(base.heal * rarity.mult * _levelMult(level)));
+  const prefix = _pickPrefix(rarity, rng);
   return {
     type: 'potion', barcode,
-    name: `${rarity.name}の${base.base}`,
+    name: `${prefix}${rarity.name}の${base.base}`,
     emoji: base.emoji,
-    rarity: rarity.name, rarityColor: rarity.color, element: null,
+    rarity: rarity.name, rarityColor: rarity.color, element: null, level,
     atkBonus: 0, defBonus: 0, heal,
     skill: { kind: 'none', name: '' },
     desc: `HPを${heal}回復`,
   };
 }
 
-function _buildScroll(barcode, rng, rarity, element) {
+function _buildScroll(barcode, rng, rarity, element, level) {
   const match = SCROLLS.find(s => s.element === element) ?? SCROLLS[Math.floor(rng() * SCROLLS.length)];
-  const dmg   = Math.max(5, Math.floor(match.dmg * rarity.mult));
+  const dmg   = Math.max(5, Math.floor(match.dmg * rarity.mult * _levelMult(level)));
+  const prefix = _pickPrefix(rarity, rng);
   return {
     type: 'scroll', barcode,
-    name: `${rarity.name}の${match.base}`,
+    name: `${prefix}${rarity.name}の${match.base}`,
     emoji: match.emoji,
-    rarity: rarity.name, rarityColor: rarity.color, element: match.element,
+    rarity: rarity.name, rarityColor: rarity.color, element: match.element, level,
     atkBonus: 0, defBonus: 0, dmg,
     skill: { kind: 'none', name: '' },
     desc: `敵に${dmg}の${match.element}ダメージ`,

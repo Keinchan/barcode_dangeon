@@ -38,6 +38,26 @@ import {
   setForceDrop,
   getDebugState,
 } from './debug.js';
+import {
+  startBgm,
+  stopBgm,
+  playSfx,
+  rarityTier,
+  getAudioSettings,
+  setBgmEnabled,
+  setSfxEnabled,
+  setBgmVolume,
+  setSfxVolume,
+  BGM_NAMES,
+  SFX_NAMES,
+} from './audio.js';
+import { getItemIconUrl } from './icons.js';
+
+// アイテム表示を絵文字 → 手続きアイコンに置換するためのヘルパ
+function iconImg(item, size = 38) {
+  const url = getItemIconUrl(item, 64);
+  return `<img class="item-icon" width="${size}" height="${size}" src="${url}" alt="${item.name}" />`;
+}
 
 // ── 状態 ──
 let screen       = 'title';
@@ -63,6 +83,20 @@ function show(name) {
   // タイル配置がズレて、クリック座標と表示位置が不一致になり地図が勝手に動いて見える）
   if (name === 'map') {
     requestAnimationFrame(() => invalidateMapSize());
+  }
+  _bgmForScreen(name);
+}
+
+// 画面 → BGM のマッピング。combat 中は startBattle 側で battle に切り替える
+function _bgmForScreen(name) {
+  if (combatActive) return;       // 戦闘中はそちらの BGM を維持
+  switch (name) {
+    case 'title':    startBgm('title');   break;
+    case 'map':      startBgm('map');     break;
+    case 'scanner':  startBgm('map');     break;   // スキャン中もマップ系
+    case 'dungeon':  startBgm('dungeon'); break;
+    case 'result':   stopBgm();           break;
+    default:         /* keep */           break;
   }
 }
 
@@ -216,6 +250,8 @@ function refreshMenu() {
   const u = getCurrentAuthUser();
   const label = u ? `(${u.email || 'Google: ' + (u.displayName ?? u.uid.slice(0, 6))})` : '(未ログイン)';
   document.getElementById('menu-username').textContent = label;
+  // 音量設定の現在値をUIに反映
+  _refreshAudioMenu();
   document.getElementById('menu-lv').textContent  = player.level;
   document.getElementById('menu-hp').textContent  = `${player.hp}/${player.maxHp}`;
   document.getElementById('menu-atk').textContent = player.atk;
@@ -255,6 +291,35 @@ function refreshMenu() {
   }
 }
 
+// 音声設定UI（メニュー）の現在値反映と一回限りのバインド
+let _audioMenuBound = false;
+function _refreshAudioMenu() {
+  const s = getAudioSettings();
+  const bgmChk = document.getElementById('menu-bgm-toggle');
+  const sfxChk = document.getElementById('menu-sfx-toggle');
+  const bgmVol = document.getElementById('menu-bgm-volume');
+  const sfxVol = document.getElementById('menu-sfx-volume');
+  if (!bgmChk) return;
+  bgmChk.checked = s.bgmEnabled;
+  sfxChk.checked = s.sfxEnabled;
+  bgmVol.value   = s.bgmVolume;
+  sfxVol.value   = s.sfxVolume;
+
+  if (_audioMenuBound) return;
+  _audioMenuBound = true;
+  bgmChk.addEventListener('change', e => {
+    setBgmEnabled(e.target.checked);
+    if (e.target.checked) _bgmForScreen(screen);
+  });
+  sfxChk.addEventListener('change', e => {
+    setSfxEnabled(e.target.checked);
+    if (e.target.checked) playSfx('click');
+  });
+  bgmVol.addEventListener('input', e => setBgmVolume(parseFloat(e.target.value)));
+  sfxVol.addEventListener('input', e => setSfxVolume(parseFloat(e.target.value)));
+  sfxVol.addEventListener('change', () => playSfx('click'));
+}
+
 function _statLine(item) {
   if (item.type === 'weapon') return `ATK +${item.atkBonus}（${item.element}属性）`;
   if (item.type === 'armor')  return `DEF +${item.defBonus}（${item.element}属性）`;
@@ -268,11 +333,12 @@ function _renderEquippedRow(item, slot) {
   div.className = 'menu-row';
   const skillHtml = item.skill?.name
     ? `<div class="menu-row-skill">✨ ${item.skill.name}: ${item.skill.desc}</div>` : '';
+  const lvHtml = item.level ? `<span class="menu-row-lv">Lv${item.level}</span>` : '';
   div.innerHTML = `
     <button class="menu-row-main" data-action="unequip">
-      <div class="menu-row-emoji">${item.emoji}</div>
+      <div class="menu-row-emoji">${iconImg(item, 38)}</div>
       <div class="menu-row-info">
-        <div class="menu-row-name" style="color:${item.rarityColor}">${item.name}</div>
+        <div class="menu-row-name" style="color:${item.rarityColor}">${item.name} ${lvHtml}</div>
         <div class="menu-row-stat">${_statLine(item)} / ${item.rarity}</div>
         ${skillHtml}
       </div>
@@ -345,10 +411,11 @@ function _renderSwapRow(item, swapIdx) {
   div.className = 'menu-row';
   const skillHtml = item.skill?.name
     ? `<div class="menu-row-skill">✨ ${item.skill.name}</div>` : '';
+  const lvHtml = item.level ? `<span class="menu-row-lv">Lv${item.level}</span>` : '';
   div.innerHTML = `
-    <div class="menu-row-emoji">${item.emoji}</div>
+    <div class="menu-row-emoji">${iconImg(item, 38)}</div>
     <div class="menu-row-info">
-      <div class="menu-row-name" style="color:${item.rarityColor}">${item.name}</div>
+      <div class="menu-row-name" style="color:${item.rarityColor}">${item.name} ${lvHtml}</div>
       <div class="menu-row-stat">${_statLine(item)} / ${item.rarity}</div>
       ${skillHtml}
     </div>
@@ -394,11 +461,12 @@ function _renderInventoryRow(item, idx) {
     isEquippable ? 'equip' :
     isUsableHere ? 'use' : 'none';
 
+  const lvHtml = item.level ? `<span class="menu-row-lv">Lv${item.level}</span>` : '';
   div.innerHTML = `
     <button class="menu-row-main" data-action="${action}" ${hasMainAction ? '' : 'disabled'}>
-      <div class="menu-row-emoji">${item.emoji}</div>
+      <div class="menu-row-emoji">${iconImg(item, 38)}</div>
       <div class="menu-row-info">
-        <div class="menu-row-name" style="color:${item.rarityColor}">${item.name}</div>
+        <div class="menu-row-name" style="color:${item.rarityColor}">${item.name} ${lvHtml}</div>
         <div class="menu-row-stat">${_statLine(item)} / ${item.rarity}</div>
         ${skillHtml}
       </div>
@@ -439,12 +507,13 @@ function showActionConfirm(title, item, actionLabel, onConfirm) {
   document.getElementById('confirm-title').textContent = title;
   const skillHtml = item.skill?.name
     ? `<div class="menu-row-skill">✨ ${item.skill.name}: ${item.skill.desc ?? ''}</div>` : '';
+  const lvHtml = item.level ? `<span class="menu-row-lv">Lv${item.level}</span>` : '';
   document.getElementById('confirm-detail').innerHTML = `
     <div class="menu-row" style="cursor:default">
       <div class="menu-row-main" style="background:transparent;cursor:default" disabled>
-        <div class="menu-row-emoji">${item.emoji}</div>
+        <div class="menu-row-emoji">${iconImg(item, 38)}</div>
         <div class="menu-row-info">
-          <div class="menu-row-name" style="color:${item.rarityColor}">${item.name}</div>
+          <div class="menu-row-name" style="color:${item.rarityColor}">${item.name} ${lvHtml}</div>
           <div class="menu-row-stat">${_statLine(item)} / ${item.rarity}</div>
           ${skillHtml}
         </div>
@@ -532,7 +601,9 @@ function _itemFromScan({ text, category }) {
     rarityOverride   = bumpRarity(baseRarity, 1);
   }
   const padded = text.padStart(13, '0').slice(0, 13);
-  return generateItemFromBarcode(padded, rarityOverride);
+  // スキャン取得アイテムは「プレイヤーLv相当」の強さで生成（同じバーコードでも
+  // 育っているプレイヤーには相応のステータスで出る）
+  return generateItemFromBarcode(padded, rarityOverride, player.level);
 }
 
 function _showItemResult(item, scan) {
@@ -552,11 +623,13 @@ function _showItemResult(item, scan) {
     scan.category === 'receipt' ? '（レシート系：レア度+1）' :
     scan.category === 'product' ? '（商品コード）' : '';
 
+  const lvHtml = item.level ? `<span class="item-result-lv">Lv${item.level}</span>` : '';
+
   document.getElementById('item-result').innerHTML = `
     <div class="item-result-row">
-      <div class="item-result-emoji">${item.emoji}</div>
+      <div class="item-result-emoji">${iconImg(item, 56)}</div>
       <div class="item-result-info">
-        <div class="item-result-name">${item.name}</div>
+        <div class="item-result-name">${item.name} ${lvHtml}</div>
         <div class="item-result-rarity" style="color:${item.rarityColor}">${item.rarity}</div>
       </div>
     </div>
@@ -565,6 +638,8 @@ function _showItemResult(item, scan) {
     <div class="item-result-meta">${scan.format} / ${scan.text}${categoryLabel}</div>
   `;
   document.getElementById('scan-result').classList.remove('hidden');
+  // スキャン → アイテム判明時に取得SFX（レアリティで音色変化）
+  playSfx('pickup', { rarityTier: rarityTier(item.rarity) });
 }
 
 document.getElementById('btn-back-scan').addEventListener('click', () => {
@@ -676,6 +751,7 @@ function gainXp(amount) {
     if (typeof dungeonLog === 'function' && screen === 'dungeon') {
       dungeonLog(`🎉 レベルアップ！ Lv${player.level}（HP+${HP_PER_LEVEL} ATK+${ATK_PER_LEVEL} DEF+${DEF_PER_LEVEL}）`);
     }
+    playSfx('levelup');
   }
   refreshHUD();
   if (!document.getElementById('menu-modal').classList.contains('hidden')) refreshMenu();
@@ -735,6 +811,7 @@ function move(dx, dy) {
     if (floorItem) pickupItem(floorItem);
 
     if (dungeon.atStairs(nx, ny)) {
+      playSfx('stairs');
       if (currentFloor >= dungeonData.floors) {
         dungeonClear();
       } else {
@@ -774,6 +851,7 @@ function pickupItem(item) {
     return;
   }
   dungeon.removeFloorItem(item);
+  playSfx('pickup', { rarityTier: rarityTier(item.rarity) });
 
   if (item.type === 'weapon') {
     if (!player.weapon || item.atkBonus > player.weapon.atkBonus) {
@@ -882,6 +960,10 @@ function startBattle(mob, opts = {}) {
   document.getElementById('dungeon-footer').classList.add('hidden');
   document.getElementById('combat-panel').classList.remove('hidden');
 
+  // ボス遭遇は専用 SFX、その後バトル BGM へ
+  if (mob.isBoss) playSfx('boss');
+  startBgm('battle');
+
   battle = new Battle(player, mob, (result /*, defeated (cloneのため使わない) */) => {
     // 戦闘終了：探索モードに復帰
     combatActive = false;
@@ -892,6 +974,11 @@ function startBattle(mob, opts = {}) {
     player.atk = battle.player.atk;
     player.def = battle.player.def;
     refreshHUD();
+
+    // 通常勝利・逃走時はダンジョンBGMに戻す（ボス勝利は dungeonClear 経由で result 画面）
+    if (result !== 'lose' && !(result === 'win' && mob.isBoss)) {
+      startBgm('dungeon');
+    }
 
     if (result === 'win') {
       // 元のmobリファレンスで確実に削除（cloneのdefeatedではindexOf不一致）
@@ -905,6 +992,7 @@ function startBattle(mob, opts = {}) {
         drop.y = mob.y;
         dungeon.floorItems.push(drop);
         dungeonLog(`💎 ${mob.name} は ${drop.name} を落とした！`);
+        playSfx('drop', { rarityTier: rarityTier(drop.rarity) });
       } else {
         dungeonLog(`${mob.name} を倒した！`);
       }
@@ -953,7 +1041,9 @@ function _rollMonsterDrop(mob) {
   let rarityOverride = baseRarity ?? null;
   if (mob.isBoss && baseRarity) rarityOverride = bumpRarity(baseRarity, 1);
 
-  return generateItemFromBarcode(code, rarityOverride);
+  // アイテムレベル: 落とした敵のレベルに準拠（ボスは +5 相当）
+  const itemLevel = (mob.level ?? 1) + (mob.isBoss ? 5 : 0);
+  return generateItemFromBarcode(code, rarityOverride, itemLevel);
 }
 
 document.getElementById('btn-attack').addEventListener('click', () => battle?.attack());
@@ -977,11 +1067,12 @@ function showItemModal() {
   } else {
     list.innerHTML = player.inventory.map((it, idx) => {
       const canUse = it.type === 'potion' || it.type === 'scroll';
+      const lvHtml = it.level ? `<span class="menu-row-lv">Lv${it.level}</span>` : '';
       return `
         <div class="item-row${canUse ? '' : ' disabled'}" data-idx="${idx}">
-          <span class="item-emoji">${it.emoji}</span>
+          <span class="item-emoji">${iconImg(it, 32)}</span>
           <div class="item-info">
-            <div class="item-name">${it.name}</div>
+            <div class="item-name">${it.name} ${lvHtml}</div>
             <div class="item-desc">${it.desc}</div>
           </div>
           <span class="item-rarity" style="color:${it.rarityColor}">${it.rarity}</span>
@@ -1030,6 +1121,7 @@ function showResult(isWin) {
   document.getElementById('result-body').textContent  = isWin
     ? `${dungeonData.name} を踏破した！\n（再挑戦可）`
     : 'ダンジョンで力尽きた...\nこのダンジョンで拾ったものは失われた';
+  playSfx(isWin ? 'victory' : 'defeat');
   autoSave();
 }
 
@@ -1281,6 +1373,7 @@ if (DEBUG) {
         drop.y = mob.y;
         dungeon.floorItems.push(drop);
         dungeonLog(`💎 ${mob.name} は ${drop.name} を落とした！`);
+        playSfx('drop', { rarityTier: rarityTier(drop.rarity) });
       } else {
         dungeonLog(`${mob.name} を撃破`);
       }
@@ -1403,6 +1496,97 @@ if (DEBUG) {
     await deleteSave(u.uid);
     await signOutUser();
   });
+
+  // ── 🎵 BGM テスト ──
+  const bgmSelect = document.getElementById('debug-bgm-select');
+  if (bgmSelect) {
+    bgmSelect.innerHTML = ['(自動)', ...BGM_NAMES]
+      .map(n => `<option value="${n === '(自動)' ? '' : n}">${n}</option>`)
+      .join('');
+    document.getElementById('debug-bgm-play').addEventListener('click', () => {
+      const v = bgmSelect.value;
+      if (!v) {
+        _bgmForScreen(screen);
+      } else {
+        startBgm(v);
+      }
+    });
+    document.getElementById('debug-bgm-stop').addEventListener('click', () => stopBgm());
+  }
+
+  // ── 🔊 SFX テスト ──
+  const sfxSelect = document.getElementById('debug-sfx-select');
+  if (sfxSelect) {
+    sfxSelect.innerHTML = SFX_NAMES.map(n => `<option value="${n}">${n}</option>`).join('');
+    document.getElementById('debug-sfx-play').addEventListener('click', () => {
+      const tier = parseInt(document.getElementById('debug-sfx-rarity').value, 10) || 0;
+      playSfx(sfxSelect.value, { rarityTier: tier });
+    });
+  }
+
+  // ── 🖼 アイコンギャラリー ──
+  document.getElementById('debug-icon-gallery').addEventListener('click', () => {
+    showIconGallery();
+  });
+  document.getElementById('btn-gallery-close').addEventListener('click', () => {
+    document.getElementById('icon-gallery-modal').classList.add('hidden');
+  });
+}
+
+// アイコンギャラリー：4種別×4レアリティ×3属性のサンプルを並べて目視確認
+function showIconGallery() {
+  const grid = document.getElementById('icon-gallery-grid');
+  grid.innerHTML = '';
+
+  // items.js のルール:
+  //   typeIdx = 全桁合計 % 4 (0=武器/1=防具/2=薬/3=巻物)
+  //   rarity  = 末桁 (0-4=コモン / 5-7=レア / 8=エピック / 9=レジェンド)
+  //   element = parseInt(slice(3,5)) % ELEMENTS.length
+  // それぞれを保ったままバーコードを組み立て、digits[0] で type 補正を入れる
+  function makeBarcode(typeIdx, rarityDigit, elemIdx) {
+    const digits = Array(13).fill('0');
+    const elStr  = String(elemIdx).padStart(2, '0');
+    digits[3]  = elStr[0];
+    digits[4]  = elStr[1];
+    digits[12] = String(rarityDigit);
+    let sum = 0;
+    for (let i = 1; i < 13; i++) sum += Number(digits[i]);
+    digits[0] = String(((typeIdx - sum) % 4 + 4) % 4);
+    return digits.join('');
+  }
+
+  const types = [
+    { idx: 0, label: '武器' },
+    { idx: 1, label: '防具' },
+    { idx: 2, label: '薬'   },
+    { idx: 3, label: '巻物' },
+  ];
+  const rarities = [
+    { name: 'コモン',     digit: 0 },
+    { name: 'レア',       digit: 5 },
+    { name: 'エピック',   digit: 8 },
+    { name: 'レジェンド', digit: 9 },
+  ];
+  const elemSamples = [0, 2, 4]; // 火, 地, 光
+
+  for (const t of types) {
+    for (const r of rarities) {
+      for (const elIdx of elemSamples) {
+        const barcode = makeBarcode(t.idx, r.digit, elIdx);
+        const item    = generateItemFromBarcode(barcode, null, 25);
+        const cell = document.createElement('div');
+        cell.className = 'gallery-cell';
+        cell.innerHTML = `
+          <img src="${getItemIconUrl(item, 64)}" width="56" height="56" />
+          <div class="gallery-cell-name" style="color:${item.rarityColor}">${item.name}</div>
+          <div class="gallery-cell-meta">${item.rarity} / Lv${item.level}</div>
+        `;
+        grid.appendChild(cell);
+      }
+    }
+  }
+
+  document.getElementById('icon-gallery-modal').classList.remove('hidden');
 }
 
 // デバッグパネルのセーブ状態表示

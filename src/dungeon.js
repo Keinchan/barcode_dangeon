@@ -1,6 +1,7 @@
 import { createRNG, hashString } from './rng.js';
 import { generateMonster, generateFloorItems } from './generator.js';
 import { getDebugState } from './debug.js';
+import { getItemIconCanvas } from './icons.js';
 
 const W = 21;
 const H = 19;
@@ -325,16 +326,17 @@ export class Dungeon {
     }
 
     // アイテム（現視野内のみ。既踏でも非表示にして「拾われたかも」のミスリードを避ける）
+    //   絵文字ではなく手続きアイコンを drawImage する
     for (const it of this.floorItems) {
       const dx = it.x - (px - half);
       const dy = it.y - (py - half);
       if (dx < 0 || dx >= VIEW || dy < 0 || dy >= VIEW) continue;
       if (!revealAll && !this.visible.has(`${it.x},${it.y}`)) continue;
-      const fs = Math.floor(ts * 0.6);
-      ctx.font = `${fs}px serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(it.emoji, dx * ts + ts / 2, dy * ts + ts / 2);
+      const iconSize = Math.max(20, Math.floor(ts * 0.85));
+      const icon = getItemIconCanvas(it, 64);
+      const ix = dx * ts + (ts - iconSize) / 2;
+      const iy = dy * ts + (ts - iconSize) / 2;
+      ctx.drawImage(icon, ix, iy, iconSize, iconSize);
     }
 
     // モンスター（現視野内のみ）

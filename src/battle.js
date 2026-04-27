@@ -1,5 +1,6 @@
 import { applyItem } from './items.js';
 import { showFloatingDamage, showEnemyDamage } from './ui.js';
+import { playSfx } from './audio.js';
 
 export class Battle {
   constructor(player, monster, onEnd, opts = {}) {
@@ -97,9 +98,11 @@ export class Battle {
     if (this._busy) return;
     if (this.wallPiercing) return;  // 壁越し戦闘では通常攻撃不可
     const dmg = this._calcDmg(this.player.atk, this.monster.def, 1.0);
+    const isCrit = dmg >= Math.max(2, Math.floor((this.player.atk - this.monster.def) * 1.4));
     this.monster.hp = Math.max(0, this.monster.hp - dmg);
     this.log(`⚔️ こうげき！ ${dmg} ダメージ！`);
     showEnemyDamage(dmg);
+    playSfx(isCrit ? 'crit' : 'hit');
     this.updateUI();
     this._checkEnemyDead() || this._enemyTurn();
   }
@@ -110,6 +113,7 @@ export class Battle {
     this.monster.hp = Math.max(0, this.monster.hp - dmg);
     this.log(`✨ スキル！ ${dmg} の大ダメージ！`);
     showEnemyDamage(dmg);
+    playSfx('crit');
     this.updateUI();
     this._checkEnemyDead() || this._enemyTurn();
   }
@@ -179,6 +183,7 @@ export class Battle {
     const label = this.wallPiercing ? '✨ 魔法攻撃' : '💥 攻撃';
     this.log(`${label} ${this.monster.name} の一撃！ ${dmg} ダメージ！`);
     showFloatingDamage(dmg);
+    playSfx('damage');
     this.updateUI();
     this._checkPlayerDead();
   }
@@ -200,6 +205,7 @@ export class Battle {
       this.player.hp = Math.max(0, this.player.hp - dmg);
       this.log(`☠️ ${this.monster.name} が「${sk.name}」を使った！ ${dmg} ダメージ＋毒！`);
       showFloatingDamage(dmg);
+      playSfx('damage');
       this.updateUI();
       this._checkPlayerDead();
     } else {
@@ -208,6 +214,7 @@ export class Battle {
       this.player.hp = Math.max(0, this.player.hp - dmg);
       this.log(`🔥 ${this.monster.name} が「${sk.name}」を使った！ ${dmg} ダメージ！`);
       showFloatingDamage(dmg);
+      playSfx('damage');
       this.updateUI();
       this._checkPlayerDead();
     }
