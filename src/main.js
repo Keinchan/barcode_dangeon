@@ -147,6 +147,7 @@ export function recommendedLevel(d) {
 
 // 入場前モーダル
 function requestEnterDungeon(d) {
+  playSfx('select');
   pendingDungeon = d;
   showPreDungeonModal(d);
 }
@@ -200,29 +201,35 @@ document.getElementById('btn-pre-confirm').addEventListener('click', () => {
   if (!pendingDungeon) return;
   const d = pendingDungeon;
   pendingDungeon = null;
+  playSfx('confirm');
   document.getElementById('pre-dungeon-modal').classList.add('hidden');
   enterDungeon(d);
 });
 
 document.getElementById('btn-pre-cancel').addEventListener('click', () => {
   pendingDungeon = null;
+  playSfx('click');
   document.getElementById('pre-dungeon-modal').classList.add('hidden');
 });
 
 document.getElementById('btn-pre-menu').addEventListener('click', () => {
   // メニューを上に重ねて開く（pendingDungeon は維持）
+  playSfx('click');
   openMenu();
 });
 
 document.getElementById('btn-scan').addEventListener('click', () => {
+  playSfx('click');
   show('scanner');
   launchScanner();
 });
 
 document.getElementById('btn-menu').addEventListener('click', () => {
+  playSfx('click');
   openMenu();
 });
 document.getElementById('btn-menu-close').addEventListener('click', () => {
+  playSfx('click');
   document.getElementById('menu-modal').classList.add('hidden');
   // 入場前モーダルが裏にあれば、装備変更を反映するため再描画
   if (pendingDungeon) showPreDungeonModal(pendingDungeon);
@@ -235,6 +242,7 @@ btnDungeonMenu.addEventListener('click', () => {
     alert('戦闘中はメニューを開けません');
     return;
   }
+  playSfx('click');
   openMenu();
 });
 
@@ -379,10 +387,12 @@ function _unequipDirect(slot) {
     player.inventory.push(player.weapon);
     player.weapon = null;
     player.atk    = player.atkBase;
+    playSfx('unequip');
   } else if (slot === 'armor' && player.armor) {
     player.inventory.push(player.armor);
     player.armor  = null;
     player.def    = player.defBase;
+    playSfx('unequip');
   }
 }
 
@@ -446,6 +456,7 @@ document.getElementById('btn-swap-unequip').addEventListener('click', () => {
 });
 
 document.getElementById('btn-swap-cancel').addEventListener('click', () => {
+  playSfx('click');
   document.getElementById('swap-modal').classList.add('hidden');
 });
 
@@ -495,6 +506,7 @@ function _renderInventoryRow(item, idx) {
   div.querySelector('.discard').addEventListener('click', () => {
     if (!confirm(`${item.name} を廃棄しますか？`)) return;
     player.inventory.splice(idx, 1);
+    playSfx('discard');
     refreshMenu();
     autoSave();
   });
@@ -533,6 +545,7 @@ document.getElementById('btn-confirm-ok').addEventListener('click', () => {
 });
 document.getElementById('btn-confirm-cancel').addEventListener('click', () => {
   _pendingConfirmAction = null;
+  playSfx('click');
   document.getElementById('action-confirm-modal').classList.add('hidden');
 });
 
@@ -550,6 +563,7 @@ function _usePotionFromInventory(idx) {
   if (typeof dungeonLog === 'function' && screen === 'dungeon') {
     dungeonLog(`🧪 ${item.name} を使用！ HPが${actual}回復した`);
   }
+  playSfx('drink');
   refreshHUD();
   refreshMenu();
   autoSave();
@@ -569,6 +583,7 @@ function _equipFromInventory(idx) {
     player.armor  = item;
     player.def    = player.defBase + item.defBonus;
   }
+  playSfx('equip');
   refreshHUD();
   refreshMenu();
   autoSave();
@@ -643,12 +658,14 @@ function _showItemResult(item, scan) {
 }
 
 document.getElementById('btn-back-scan').addEventListener('click', () => {
+  playSfx('click');
   stopScanner();
   pendingItem = null;
   show('map');
 });
 
 document.getElementById('btn-rescan').addEventListener('click', () => {
+  playSfx('click');
   pendingItem = null;
   launchScanner();
 });
@@ -1165,6 +1182,7 @@ function showResult(isWin) {
 }
 
 document.getElementById('btn-result-back').addEventListener('click', () => {
+  playSfx('click');
   show('map');
   autoSave();
 });
