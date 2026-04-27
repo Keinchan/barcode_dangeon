@@ -59,16 +59,19 @@ function ensureRunning() {
 }
 
 // 初回ユーザー操作で起動。iOS Safari 対策:
-//   - ジェスチャ内で AudioContext を生成 / resume する
-//   - 1サンプルの空 BufferSource を実際に start() して audio policy を確実に解除
-//     （resume() 単体だと iOS の一部バージョンでロック解除されない）
+//   - **AudioContext はこのジェスチャ内で初めて生成する**。gesture 外で生成すると
+//     その ctx は後から resume しても完全にロック解除されないケースがある（実機で
+//     確認: BGM が無音のまま、SFX 系を一度押すと初めて鳴り出す）。
+//   - 1サンプルの空 BufferSource を gesture 内で実際に start() して audio policy 解除
+//   - resume の Promise は await しない（gesture コンテキストを抜けないため）。
+//     statechange listener が pendingBgm を捕捉して再投入する。
 //   - capture フェーズで拾うことで、子要素が stopPropagation していても発火
 function unlockOnGesture() {
   let unlocked = false;
-  const fire = async () => {
+  const fire = () => {
     if (unlocked) return;
     unlocked = true;
-    const c = ensureCtx();
+    const c = ensureCtx();    // ★ ここで初めて ctx が作られる（gesture 内）
     if (!c) return;
     try {
       const buf = c.createBuffer(1, 1, 22050);
@@ -78,12 +81,7 @@ function unlockOnGesture() {
       src.start(0);
     } catch {}
     if (c.state === 'suspended') {
-      try { await c.resume(); } catch {}
-    }
-    if (pendingBgm) {
-      const name = pendingBgm;
-      pendingBgm = null;
-      startBgm(name);
+      c.resume().catch(() => {});
     }
     initFns.forEach(fn => { try { fn(); } catch {} });
     document.removeEventListener('pointerdown', fire, true);
@@ -311,15 +309,17 @@ const BGM_TRACKS = {
 //   stop 時は voice を disconnect することで、まだ未到達のスケジュール済オシレータも
 //   含めて確実に無音化する（master を絞ってすぐ戻す方式は、戻した瞬間に未到達ノートが
 //   鳴ってしまうバグがあったため廃止）。
+//
+//   重要: ctx がまだ無い／suspended の段階では絶対に ensureCtx を呼ばない。
+//   gesture 外で AudioContext を作ると iOS で恒久ロックされるケースがあるため、
+//   初回 gesture が来るまでは pendingBgm に名前を積むだけにする。
 export function startBgm(name) {
   if (!settings.bgmEnabled) { stopBgm(); pendingBgm = null; return; }
-  const c = ensureCtx();
-  if (!c) return;
-  if (c.state === 'suspended') {
-    // ジェスチャ前に呼ばれた場合は予約。ctx の statechange でリトライされる。
+  if (!ctx || ctx.state === 'suspended') {
     pendingBgm = name;
     return;
   }
+  const c = ctx;
   if (currentBgm?.name === name) return;
   stopBgm();
 
