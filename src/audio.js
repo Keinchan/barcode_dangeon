@@ -472,6 +472,51 @@ const SFX = {
     playTone(t, 1200, 0.05, { type: 'square', vol: 0.14 });
   },
 
+  // 装備時: 鞘走りのような上昇音 + ハイチャイム
+  equip() {
+    const t = ensureRunning()?.currentTime; if (t == null) return;
+    playTone(t,        660, 0.07, { type: 'triangle', vol: 0.26 });
+    playTone(t + 0.05, 990, 0.10, { type: 'triangle', vol: 0.28 });
+    playTone(t + 0.12, 1320, 0.20, { type: 'sine',    vol: 0.20 });
+  },
+
+  // 装備解除: 下降2音
+  unequip() {
+    const t = ensureRunning()?.currentTime; if (t == null) return;
+    playTone(t,        880, 0.07, { type: 'triangle', vol: 0.22 });
+    playTone(t + 0.06, 587, 0.12, { type: 'triangle', vol: 0.20 });
+  },
+
+  // 廃棄: 低い下降スイープ + 軽いノイズ
+  discard() {
+    const t = ensureRunning()?.currentTime; if (t == null) return;
+    playTone(t, 260, 0.18, { type: 'sawtooth', vol: 0.24, sweepTo: 90 });
+    playNoise(t, 0.10, { vol: 0.15, highpass: 200 });
+  },
+
+  // 薬を飲む: ノイズ＋上昇音で「ぐびっ」感
+  drink() {
+    const t = ensureRunning()?.currentTime; if (t == null) return;
+    playNoise(t, 0.18, { vol: 0.16, highpass: 1200 });
+    playTone(t + 0.04, 440, 0.14, { type: 'sine', vol: 0.22, sweepTo: 880 });
+  },
+
+  // 選択（ダンジョン選択など）: 軽快な2音上昇
+  select() {
+    const t = ensureRunning()?.currentTime; if (t == null) return;
+    playTone(t,        noteFreq(N.G, 5), 0.06, { type: 'triangle', vol: 0.22 });
+    playTone(t + 0.05, noteFreq(N.C, 6), 0.10, { type: 'triangle', vol: 0.22 });
+  },
+
+  // 確定（潜入する など、強めの GO 系）: 明るい3音
+  confirm() {
+    const t = ensureRunning()?.currentTime; if (t == null) return;
+    const seq = [N.C, N.E, N.G];
+    for (let i = 0; i < seq.length; i++) {
+      playTone(t + i * 0.06, noteFreq(seq[i], 5), 0.10, { type: 'triangle', vol: 0.24 });
+    }
+  },
+
   defeat() {
     const t = ensureRunning()?.currentTime; if (t == null) return;
     const seq = [N.G, N.F, N.E, N.D, N.C];
