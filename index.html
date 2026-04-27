@@ -11,12 +11,43 @@
 </head>
 <body>
 
+  <!-- タイトル画面（ログイン） -->
+  <div id="screen-title" class="screen active">
+    <div class="title-box">
+      <div class="title-logo">⚔️ バーコードダンジョン</div>
+
+      <div id="title-config-warning" class="title-warning hidden">
+        ⚠️ Firebase未設定です。<code>src/firebase-config.js</code> を編集してください
+      </div>
+
+      <div class="title-section">
+        <div class="title-section-label">メール / パスワード</div>
+        <input id="title-email"    type="email"    placeholder="メールアドレス" autocomplete="email" />
+        <input id="title-password" type="password" placeholder="パスワード（6文字以上）" autocomplete="current-password" />
+        <div class="title-row">
+          <button id="btn-title-login"  class="btn-primary">ログイン</button>
+          <button id="btn-title-signup" class="btn-secondary">新規登録</button>
+        </div>
+      </div>
+
+      <div class="title-section">
+        <div class="title-section-label">Google アカウント</div>
+        <button id="btn-title-google" class="btn-google">Google でログイン / 新規登録</button>
+      </div>
+
+      <div id="title-error" class="title-error hidden"></div>
+    </div>
+  </div>
+
   <!-- マップ画面 -->
-  <div id="screen-map" class="screen active">
+  <div id="screen-map" class="screen">
     <div id="map"></div>
     <div class="map-hud">
       <div class="hud-title">⚔️ バーコードダンジョン</div>
-      <button id="btn-scan" class="btn-primary">📷 バーコードをスキャン</button>
+      <div class="hud-button-row">
+        <button id="btn-scan" class="btn-primary">📷 スキャン</button>
+        <button id="btn-menu" class="btn-secondary">🎒 メニュー</button>
+      </div>
     </div>
   </div>
 
@@ -34,52 +65,200 @@
       <div class="scanner-hint">バーコードをフレームに合わせてください</div>
     </div>
     <div id="scan-result" class="hidden">
-      <div id="dungeon-preview"></div>
-      <button id="btn-enter-dungeon" class="btn-primary">ダンジョンに入る →</button>
+      <div id="item-result"></div>
+      <button id="btn-keep-item" class="btn-primary">受け取る</button>
+      <button id="btn-rescan" class="btn-back" style="margin-top:6px">もう一度スキャン</button>
     </div>
   </div>
 
-  <!-- ダンジョン画面 -->
+  <!-- ダンジョン画面（戦闘も同画面にインライン化） -->
   <div id="screen-dungeon" class="screen">
     <div class="dungeon-header">
       <div>
         <div id="dungeon-title">ダンジョン</div>
         <div id="floor-label">B1F</div>
       </div>
-      <div id="player-hp" class="hp-text">HP: 30/30</div>
+      <div class="dungeon-right-hud">
+        <div class="dungeon-hp-row">
+          <span id="player-lv" class="lv-text">Lv1</span>
+          <span id="player-hp" class="hp-text">HP: 35/35</span>
+        </div>
+        <div id="equip-display" class="equip-display">⚔️ー　🛡️ー</div>
+      </div>
+      <button id="btn-dungeon-menu" class="btn-icon-menu" title="メニュー">🎒</button>
     </div>
     <canvas id="dungeon-canvas"></canvas>
-    <div class="dungeon-footer">
+
+    <!-- ミニマップ（既踏マスを縮小表示） -->
+    <canvas id="minimap" width="84" height="76"></canvas>
+
+    <!-- 探索中フッター：D-pad（8方向）+ 探索ログ -->
+    <div class="dungeon-footer" id="dungeon-footer">
       <div id="dungeon-log"></div>
       <div class="dpad">
-        <button class="dpad-btn" data-dir="up">↑</button>
+        <div class="dpad-row">
+          <button class="dpad-btn dpad-diag" data-dir="up-left">↖</button>
+          <button class="dpad-btn" data-dir="up">↑</button>
+          <button class="dpad-btn dpad-diag" data-dir="up-right">↗</button>
+        </div>
         <div class="dpad-row">
           <button class="dpad-btn" data-dir="left">←</button>
           <button class="dpad-btn dpad-wait" data-dir="wait">待</button>
           <button class="dpad-btn" data-dir="right">→</button>
         </div>
-        <button class="dpad-btn" data-dir="down">↓</button>
+        <div class="dpad-row">
+          <button class="dpad-btn dpad-diag" data-dir="down-left">↙</button>
+          <button class="dpad-btn" data-dir="down">↓</button>
+          <button class="dpad-btn dpad-diag" data-dir="down-right">↘</button>
+        </div>
       </div>
     </div>
-  </div>
 
-  <!-- バトル画面 -->
-  <div id="screen-battle" class="screen">
-    <div class="battle-area">
-      <div class="enemy-box">
-        <div id="enemy-name">???</div>
-        <div id="enemy-sprite" class="enemy-sprite">❓</div>
-        <div class="hp-bar-wrap">
-          <div id="enemy-hp-bar" class="hp-bar" style="width:100%"></div>
+    <!-- 戦闘中パネル：敵情報・自HP・ログ・行動ボタン -->
+    <div class="combat-panel hidden" id="combat-panel">
+      <div class="combat-enemy">
+        <div class="combat-enemy-row">
+          <span id="enemy-sprite" class="enemy-sprite-mini">❓</span>
+          <div class="combat-enemy-text">
+            <div id="enemy-name" class="combat-enemy-name">???</div>
+            <div class="enemy-meta">
+              <span id="enemy-rarity">[コモン]</span>
+              <span id="enemy-element">火属性</span>
+            </div>
+          </div>
         </div>
+        <div class="hp-bar-wrap"><div id="enemy-hp-bar" class="hp-bar" style="width:100%"></div></div>
         <div id="enemy-stat-text"></div>
       </div>
+
+      <div class="combat-player">
+        <div class="combat-player-row">
+          <span>🧙 自分</span>
+          <span id="battle-player-hp">HP 35/35</span>
+        </div>
+        <div class="hp-bar-wrap"><div id="battle-player-hp-bar" class="hp-bar" style="width:100%"></div></div>
+      </div>
+
       <div id="battle-log" class="battle-log"></div>
       <div class="battle-buttons">
         <button class="btn-battle" id="btn-attack">⚔️ こうげき</button>
         <button class="btn-battle" id="btn-skill">✨ スキル</button>
         <button class="btn-battle" id="btn-item">🎒 アイテム</button>
         <button class="btn-battle" id="btn-run">🏃 にげる</button>
+      </div>
+    </div>
+
+    <!-- アイテム選択モーダル -->
+    <div id="item-modal" class="modal hidden">
+      <div class="modal-box">
+        <div class="modal-title">アイテムを使う</div>
+        <div id="item-list"></div>
+        <button id="btn-item-cancel" class="btn-back">キャンセル</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 汎用アクション確認モーダル（装備・使用などの誤タップ防止） -->
+  <div id="action-confirm-modal" class="confirm-modal hidden">
+    <div class="confirm-modal-box">
+      <div id="confirm-title" class="confirm-modal-title"></div>
+      <div id="confirm-detail" class="confirm-modal-detail"></div>
+      <div class="confirm-modal-actions">
+        <button id="btn-confirm-cancel" class="btn-back">キャンセル</button>
+        <button id="btn-confirm-ok"     class="btn-primary">確定</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ダンジョン入場前確認モーダル -->
+  <div id="pre-dungeon-modal" class="pre-dungeon-modal hidden">
+    <div class="pre-dungeon-box">
+      <div class="pre-dungeon-title">🚪 潜入確認</div>
+
+      <section class="pre-dungeon-section">
+        <div class="pre-dungeon-section-title">ダンジョン</div>
+        <div id="pre-dungeon-info"></div>
+      </section>
+
+      <section class="pre-dungeon-section">
+        <div class="pre-dungeon-section-title">プレイヤーの状態</div>
+        <div id="pre-dungeon-player"></div>
+      </section>
+
+      <div class="pre-dungeon-actions">
+        <button id="btn-pre-menu"    class="btn-secondary">🎒 メニュー</button>
+        <button id="btn-pre-cancel"  class="btn-back">戻る</button>
+        <button id="btn-pre-confirm" class="btn-primary">潜入する</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- メニューモーダル（マップ・ダンジョンの両方から開く。screen 非依存に body 直下） -->
+  <div id="menu-modal" class="menu-modal hidden">
+    <div class="menu-modal-header">
+      <button id="btn-menu-close" class="btn-back">← 閉じる</button>
+      <span class="menu-modal-title">メニュー</span>
+    </div>
+    <div class="menu-modal-body">
+      <section class="menu-section">
+        <div class="menu-section-title">🧙 ステータス</div>
+        <div class="menu-stats">
+          <div>Lv <span id="menu-lv">1</span></div>
+          <div>HP <span id="menu-hp">35/35</span></div>
+          <div>ATK <span id="menu-atk">9</span></div>
+          <div>DEF <span id="menu-def">3</span></div>
+        </div>
+        <div class="menu-xp-section">
+          <div class="menu-xp-text">XP <span id="menu-xp-current">0</span> / <span id="menu-xp-next">20</span></div>
+          <div class="menu-xp-bar-wrap"><div id="menu-xp-bar" class="menu-xp-bar"></div></div>
+        </div>
+      </section>
+      <section class="menu-section">
+        <div class="menu-section-title">装備中</div>
+        <div id="menu-equipment"></div>
+      </section>
+      <section class="menu-section">
+        <div class="menu-section-title">持ち物 <span id="menu-inv-count" class="menu-section-meta"></span></div>
+        <div id="menu-inventory"></div>
+      </section>
+
+      <section class="menu-section">
+        <div class="menu-section-title">🔊 サウンド</div>
+        <label class="menu-audio-row">
+          <input id="menu-bgm-toggle" type="checkbox" checked />
+          <span class="menu-audio-label">BGM</span>
+          <input id="menu-bgm-volume" type="range" min="0" max="1" step="0.05" value="0.35" />
+        </label>
+        <label class="menu-audio-row">
+          <input id="menu-sfx-toggle" type="checkbox" checked />
+          <span class="menu-audio-label">効果音</span>
+          <input id="menu-sfx-volume" type="range" min="0" max="1" step="0.05" value="0.55" />
+        </label>
+      </section>
+
+      <section class="menu-section">
+        <div class="menu-section-title">アカウント <span id="menu-username" class="menu-section-meta"></span></div>
+        <button id="btn-logout" class="menu-logout-btn">🚪 ログアウト</button>
+      </section>
+    </div>
+
+    <!-- 装備交換モーダル（メニューに重ねるサブモーダル） -->
+    <div id="swap-modal" class="swap-modal hidden">
+      <div class="swap-modal-box">
+        <div class="swap-modal-title">装備を交換</div>
+        <div class="swap-modal-current">
+          <div class="swap-modal-label">現在装備中</div>
+          <div id="swap-current"></div>
+        </div>
+        <div class="swap-modal-arrow">↕</div>
+        <div class="swap-modal-candidates">
+          <div class="swap-modal-label">交換候補</div>
+          <div id="swap-candidates"></div>
+        </div>
+        <div class="swap-modal-actions">
+          <button id="btn-swap-unequip" class="btn-back">外して持ち物に</button>
+          <button id="btn-swap-cancel"  class="btn-back">キャンセル</button>
+        </div>
       </div>
     </div>
   </div>
@@ -91,6 +270,137 @@
       <div id="result-title"></div>
       <div id="result-body"></div>
       <button id="btn-result-back" class="btn-primary">マップに戻る</button>
+    </div>
+  </div>
+
+  <!-- デバッグパネル（?debug=1 で表示） -->
+  <div id="debug-panel" class="debug-panel hidden">
+    <div class="debug-panel-header">
+      <span>🛠<span class="debug-panel-label"> DEBUG</span></span>
+      <button id="debug-toggle" class="debug-mini-btn" title="折り畳み">−</button>
+    </div>
+    <div id="debug-panel-body" class="debug-panel-body">
+      <fieldset class="debug-section">
+        <legend>📷 モックスキャン</legend>
+        <input id="debug-scan-text" type="text" placeholder="バーコード文字列 (8〜13桁)" value="4901234567890" />
+        <select id="debug-scan-format">
+          <option value="EAN_13">EAN_13 / JAN-13</option>
+          <option value="EAN_8">EAN_8 / JAN-8</option>
+          <option value="UPC_A">UPC_A</option>
+          <option value="CODE_128">CODE_128（レシート系）</option>
+          <option value="ITF">ITF（書籍系）</option>
+        </select>
+        <button id="debug-mock-scan" class="debug-action">スキャン実行</button>
+      </fieldset>
+
+      <fieldset class="debug-section">
+        <legend>📍 モックGPS</legend>
+        <div class="debug-row">
+          <input id="debug-gps-lat" type="number" step="0.0001" placeholder="lat"   value="35.6762" />
+          <input id="debug-gps-lng" type="number" step="0.0001" placeholder="lng"   value="139.6503" />
+        </div>
+        <div class="debug-row">
+          <button id="debug-set-gps"  class="debug-action">この座標に移動</button>
+          <button id="debug-clear-gps" class="debug-action ghost">解除</button>
+        </div>
+        <div id="debug-gps-status" class="debug-meta">実GPSを使用中</div>
+      </fieldset>
+
+      <fieldset class="debug-section">
+        <legend>⚙️ オプション</legend>
+        <label class="debug-row">
+          <input id="debug-bypass" type="checkbox" />
+          <span>入場距離(80m)を無視</span>
+        </label>
+        <label class="debug-row">
+          <input id="debug-disable-ai" type="checkbox" />
+          <span>敵AIを停止</span>
+        </label>
+        <label class="debug-row">
+          <input id="debug-reveal" type="checkbox" />
+          <span>ダンジョン全可視化</span>
+        </label>
+        <label class="debug-row">
+          <input id="debug-force-drop" type="checkbox" />
+          <span>敵撃破で必ずドロップ</span>
+        </label>
+        <button id="debug-kill-adj" class="debug-action ghost">隣接敵を撃破(ドロップ判定込)</button>
+      </fieldset>
+
+      <fieldset class="debug-section">
+        <legend>💾 セーブ</legend>
+        <div class="debug-row">
+          <button id="debug-save-now"   class="debug-action">セーブ強制</button>
+          <button id="debug-clear-all"  class="debug-action ghost">全データ消去</button>
+        </div>
+        <div id="debug-save-status" class="debug-meta">未ログイン</div>
+      </fieldset>
+
+      <fieldset class="debug-section">
+        <legend>📈 レベル</legend>
+        <div class="debug-row">
+          <input id="debug-lv-amount" type="number" min="1" max="99" value="1" />
+          <button id="debug-lv-up" class="debug-action">Lv +N</button>
+        </div>
+        <div class="debug-row">
+          <button id="debug-lv-max"   class="debug-action">Lv 100</button>
+          <button id="debug-lv-reset" class="debug-action ghost">Lv 1</button>
+        </div>
+      </fieldset>
+
+      <fieldset class="debug-section">
+        <legend>🎒 インベントリ操作</legend>
+        <div class="debug-row">
+          <button id="debug-add-weapon" class="debug-action">⚔️武器</button>
+          <button id="debug-add-armor"  class="debug-action">🛡️防具</button>
+        </div>
+        <div class="debug-row">
+          <button id="debug-add-potion" class="debug-action">🧪薬</button>
+          <button id="debug-add-scroll" class="debug-action">📜巻物</button>
+        </div>
+        <button id="debug-clear-inv" class="debug-action ghost">全廃棄(装備も)</button>
+      </fieldset>
+
+      <fieldset class="debug-section">
+        <legend>🎵 BGM テスト</legend>
+        <div class="debug-row">
+          <select id="debug-bgm-select"></select>
+        </div>
+        <div class="debug-row">
+          <button id="debug-bgm-play" class="debug-action">再生</button>
+          <button id="debug-bgm-stop" class="debug-action ghost">停止</button>
+        </div>
+      </fieldset>
+
+      <fieldset class="debug-section">
+        <legend>🔊 SFX テスト</legend>
+        <div class="debug-row">
+          <select id="debug-sfx-select"></select>
+        </div>
+        <div class="debug-row">
+          <select id="debug-sfx-rarity">
+            <option value="0">コモン</option>
+            <option value="1">レア</option>
+            <option value="2">エピック</option>
+            <option value="3">レジェンド</option>
+          </select>
+          <button id="debug-sfx-play" class="debug-action">鳴らす</button>
+        </div>
+      </fieldset>
+
+      <fieldset class="debug-section">
+        <legend>🖼 アイコン</legend>
+        <button id="debug-icon-gallery" class="debug-action">ギャラリーを開く</button>
+      </fieldset>
+    </div>
+  </div>
+
+  <!-- アイコンギャラリーモーダル（デバッグ用） -->
+  <div id="icon-gallery-modal" class="confirm-modal hidden">
+    <div class="icon-gallery-box">
+      <div class="confirm-modal-title">🖼 アイコンギャラリー</div>
+      <div id="icon-gallery-grid" class="icon-gallery-grid"></div>
+      <button id="btn-gallery-close" class="btn-back">閉じる</button>
     </div>
   </div>
 

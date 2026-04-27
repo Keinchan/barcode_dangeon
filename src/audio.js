@@ -1,0 +1,458 @@
+// ─────────────────────────────────────────────
+// Web Audio API ベースの BGM / SFX エンジン
+//   - 外部音源ファイルを使わず、すべて手続き的に合成
+//   - iOS Safari は user gesture でないと AudioContext が動かないので、
+//     初回タップで lazy 起動する
+//   - 設定（ON/OFF・音量）は localStorage に永続化
+// ─────────────────────────────────────────────
+
+const STORAGE_KEY = 'real_hide:audio:v1';
+
+const settings = {
+  bgmEnabled: true,
+  sfxEnabled: true,
+  bgmVolume:  0.35,
+  sfxVolume:  0.55,
+};
+loadSettings();
+
+let ctx          = null;        // AudioContext
+let masterBgm    = null;        // BGM 用 GainNode
+let masterSfx    = null;        // SFX 用 GainNode
+let currentBgm   = null;        // { name, stop }
+let pendingBgm   = null;        // ctx 起動前に要求されたら覚えておく
+const initFns    = new Set();   // 起動完了通知
+
+// ─── 初期化 ───
+function ensureCtx() {
+  if (ctx) return ctx;
+  const Ctor = window.AudioContext || window.webkitAudioContext;
+  if (!Ctor) return null;
+  ctx = new Ctor();
+  masterBgm = ctx.createGain();
+  masterSfx = ctx.createGain();
+  masterBgm.gain.value = settings.bgmEnabled ? settings.bgmVolume : 0;
+  masterSfx.gain.value = settings.sfxEnabled ? settings.sfxVolume : 0;
+  masterBgm.connect(ctx.destination);
+  masterSfx.connect(ctx.destination);
+  return ctx;
+}
+
+function ensureRunning() {
+  const c = ensureCtx();
+  if (!c) return null;
+  if (c.state === 'suspended') c.resume();
+  return c;
+}
+
+// 初回ユーザー操作で起動
+function unlockOnGesture() {
+  const fire = () => {
+    ensureRunning();
+    if (pendingBgm) {
+      const name = pendingBgm;
+      pendingBgm = null;
+      startBgm(name);
+    }
+    initFns.forEach(fn => { try { fn(); } catch {} });
+    document.removeEventListener('pointerdown', fire);
+    document.removeEventListener('keydown',     fire);
+    document.removeEventListener('touchstart',  fire);
+  };
+  document.addEventListener('pointerdown', fire, { once: true });
+  document.addEventListener('keydown',     fire, { once: true });
+  document.addEventListener('touchstart',  fire, { once: true });
+}
+unlockOnGesture();
+
+// ─── 設定 ───
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    Object.assign(settings, JSON.parse(raw));
+  } catch {}
+}
+
+function persist() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)); } catch {}
+}
+
+export function getAudioSettings() {
+  return { ...settings };
+}
+
+export function setBgmEnabled(v) {
+  settings.bgmEnabled = !!v;
+  persist();
+  if (masterBgm) masterBgm.gain.value = settings.bgmEnabled ? settings.bgmVolume : 0;
+  if (!settings.bgmEnabled) stopBgm();
+}
+
+export function setSfxEnabled(v) {
+  settings.sfxEnabled = !!v;
+  persist();
+  if (masterSfx) masterSfx.gain.value = settings.sfxEnabled ? settings.sfxVolume : 0;
+}
+
+export function setBgmVolume(v) {
+  settings.bgmVolume = Math.max(0, Math.min(1, v));
+  persist();
+  if (masterBgm && settings.bgmEnabled) masterBgm.gain.value = settings.bgmVolume;
+}
+
+export function setSfxVolume(v) {
+  settings.sfxVolume = Math.max(0, Math.min(1, v));
+  persist();
+  if (masterSfx && settings.sfxEnabled) masterSfx.gain.value = settings.sfxVolume;
+}
+
+// ─── 音階（A4=440 を基準にした半音テーブル） ───
+//   note: 0=C, 1=C#, ..., 11=B  / octave: 4 が中央オクターブ
+function noteFreq(note, octave) {
+  // C4 = MIDI 60 = 261.63Hz
+  const midi = 12 * (octave + 1) + note;
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
+const N = { C:0, Db:1, D:2, Eb:3, E:4, F:5, Gb:6, G:7, Ab:8, A:9, Bb:10, B:11 };
+
+// ─── 単音再生（BGM の各ノート / SFX 共通のラッパー）───
+function playTone(at, freq, dur, opts = {}) {
+  if (!ctx) return;
+  const dest   = opts.dest ?? masterSfx;
+  const type   = opts.type ?? 'square';
+  const vol    = opts.vol ?? 0.4;
+  const attack = opts.attack ?? 0.01;
+  const decay  = opts.decay  ?? Math.max(0.05, dur * 0.6);
+
+  const osc = ctx.createOscillator();
+  const g   = ctx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  if (opts.sweepTo) {
+    osc.frequency.linearRampToValueAtTime(opts.sweepTo, at + dur);
+  }
+  g.gain.setValueAtTime(0, at);
+  g.gain.linearRampToValueAtTime(vol, at + attack);
+  g.gain.exponentialRampToValueAtTime(0.0001, at + Math.max(attack + 0.01, decay));
+  osc.connect(g).connect(dest);
+  osc.start(at);
+  osc.stop(at + Math.max(attack + 0.01, decay) + 0.05);
+  return { osc, g };
+}
+
+function playNoise(at, dur, opts = {}) {
+  if (!ctx) return;
+  const dest = opts.dest ?? masterSfx;
+  const vol  = opts.vol ?? 0.25;
+  const len  = Math.max(0.01, dur);
+  const buf  = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * len), ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(vol, at);
+  g.gain.exponentialRampToValueAtTime(0.001, at + len);
+  // ハイパスでパチパチ感を残す
+  if (opts.highpass) {
+    const f = ctx.createBiquadFilter();
+    f.type = 'highpass';
+    f.frequency.value = opts.highpass;
+    src.connect(f).connect(g).connect(dest);
+  } else {
+    src.connect(g).connect(dest);
+  }
+  src.start(at);
+  src.stop(at + len + 0.02);
+}
+
+// ─── BGM トラック定義 ───
+//   各トラック: { bpm, beats, build(t0, beat) }
+//   beat: 1拍の秒数。build は相対 t を返さず、絶対時刻でスケジュールする
+const BGM_TRACKS = {
+  // タイトル: 落ち着いたメジャーキーのアルペジオ
+  title: {
+    loopBeats: 16,
+    bpm: 90,
+    schedule(t0, beat, dest) {
+      // C major: C, E, G, C, B, G, E, C ...
+      const notes = [
+        N.C, N.E, N.G, N.B,  N.C, N.G, N.E, N.G,
+        N.A, N.E, N.G, N.B,  N.G, N.E, N.C, N.E,
+      ];
+      for (let i = 0; i < notes.length; i++) {
+        playTone(t0 + i * beat, noteFreq(notes[i], 5), beat * 0.9, {
+          type: 'triangle', vol: 0.18, dest, attack: 0.02, decay: beat * 0.85,
+        });
+      }
+      // ベース
+      const bass = [N.C, N.C, N.G, N.G,  N.A, N.A, N.F, N.G];
+      for (let i = 0; i < bass.length; i++) {
+        playTone(t0 + i * beat * 2, noteFreq(bass[i], 3), beat * 1.6, {
+          type: 'sine', vol: 0.18, dest, attack: 0.02, decay: beat * 1.6,
+        });
+      }
+    },
+  },
+
+  // マップ: 軽快な歩行リズム
+  map: {
+    loopBeats: 16,
+    bpm: 110,
+    schedule(t0, beat, dest) {
+      const lead = [
+        N.E, N.G, N.A, N.G,  N.E, N.D, N.E, N.G,
+        N.E, N.G, N.A, N.B,  N.A, N.G, N.E, N.D,
+      ];
+      for (let i = 0; i < lead.length; i++) {
+        playTone(t0 + i * beat, noteFreq(lead[i], 5), beat * 0.8, {
+          type: 'square', vol: 0.14, dest, attack: 0.005, decay: beat * 0.7,
+        });
+      }
+      const bass = [N.A, N.E, N.A, N.E,  N.A, N.E, N.D, N.E];
+      for (let i = 0; i < bass.length; i++) {
+        playTone(t0 + i * beat * 2, noteFreq(bass[i], 3), beat * 1.7, {
+          type: 'triangle', vol: 0.22, dest, attack: 0.01, decay: beat * 1.6,
+        });
+      }
+    },
+  },
+
+  // ダンジョン: 暗めのマイナーキードローン
+  dungeon: {
+    loopBeats: 16,
+    bpm: 80,
+    schedule(t0, beat, dest) {
+      // A minor: A, C, E, G の組み合わせ
+      const lead = [
+        N.A, N.E, N.A, N.C,  N.E, N.D, N.C, N.E,
+        N.A, N.G, N.A, N.C,  N.E, N.G, N.E, N.C,
+      ];
+      for (let i = 0; i < lead.length; i++) {
+        const oct = i % 4 === 0 ? 5 : 4;
+        playTone(t0 + i * beat, noteFreq(lead[i], oct), beat * 1.0, {
+          type: 'triangle', vol: 0.15, dest, attack: 0.05, decay: beat * 0.95,
+        });
+      }
+      // ベースドローン
+      const bass = [N.A, N.A, N.F, N.G,  N.A, N.A, N.D, N.E];
+      for (let i = 0; i < bass.length; i++) {
+        playTone(t0 + i * beat * 2, noteFreq(bass[i], 2), beat * 1.9, {
+          type: 'sine', vol: 0.28, dest, attack: 0.05, decay: beat * 1.9,
+        });
+      }
+    },
+  },
+
+  // バトル: 速いマイナー攻めパターン
+  battle: {
+    loopBeats: 16,
+    bpm: 150,
+    schedule(t0, beat, dest) {
+      const lead = [
+        N.A, N.E, N.A, N.C,  N.E, N.A, N.E, N.C,
+        N.G, N.D, N.G, N.B,  N.D, N.G, N.D, N.B,
+      ];
+      for (let i = 0; i < lead.length; i++) {
+        playTone(t0 + i * beat, noteFreq(lead[i], 5), beat * 0.85, {
+          type: 'square', vol: 0.16, dest, attack: 0.005, decay: beat * 0.75,
+        });
+      }
+      const bass = [N.A, N.A, N.A, N.G,  N.A, N.A, N.F, N.G];
+      for (let i = 0; i < bass.length; i++) {
+        playTone(t0 + i * beat * 2, noteFreq(bass[i], 3), beat * 1.3, {
+          type: 'sawtooth', vol: 0.18, dest, attack: 0.01, decay: beat * 1.0,
+        });
+      }
+      // 16分のキック相当
+      for (let i = 0; i < 16; i++) {
+        if (i % 2 === 0) playNoise(t0 + i * beat, beat * 0.1, { vol: 0.18, dest, highpass: 1500 });
+      }
+    },
+  },
+};
+
+// ─── BGM 再生 ───
+export function startBgm(name) {
+  if (!settings.bgmEnabled) { stopBgm(); pendingBgm = null; return; }
+  const c = ensureCtx();
+  if (!c) return;
+  if (c.state === 'suspended') {
+    // ジェスチャ前に呼ばれた場合は予約
+    pendingBgm = name;
+    return;
+  }
+  if (currentBgm?.name === name) return;
+  stopBgm();
+
+  const track = BGM_TRACKS[name];
+  if (!track) return;
+
+  const beat    = 60 / track.bpm;
+  const loopSec = track.loopBeats * beat;
+  let cancelled = false;
+  let nextStart = c.currentTime + 0.05;
+  let timer     = null;
+
+  const scheduleOne = () => {
+    if (cancelled) return;
+    track.schedule(nextStart, beat, masterBgm);
+    nextStart += loopSec;
+    // ループを切れ目なくつなぐため、半ループ前に再スケジュール
+    const aheadMs = Math.max(50, (nextStart - c.currentTime - loopSec * 0.5) * 1000);
+    timer = setTimeout(scheduleOne, aheadMs);
+  };
+  scheduleOne();
+
+  currentBgm = {
+    name,
+    stop() {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      // 鳴り続けている発振器を断つために一度 BGM ゲインを 0 に絞り、すぐ戻す
+      if (masterBgm) {
+        const at = c.currentTime;
+        masterBgm.gain.cancelScheduledValues(at);
+        masterBgm.gain.setValueAtTime(masterBgm.gain.value, at);
+        masterBgm.gain.linearRampToValueAtTime(0, at + 0.06);
+        // 0.1s 後に元の音量に戻す
+        setTimeout(() => {
+          if (!masterBgm) return;
+          masterBgm.gain.setValueAtTime(0, c.currentTime);
+          masterBgm.gain.linearRampToValueAtTime(
+            settings.bgmEnabled ? settings.bgmVolume : 0,
+            c.currentTime + 0.05,
+          );
+        }, 120);
+      }
+    },
+  };
+}
+
+export function stopBgm() {
+  pendingBgm = null;
+  if (currentBgm) currentBgm.stop();
+  currentBgm = null;
+}
+
+export function getCurrentBgmName() {
+  return currentBgm?.name ?? null;
+}
+
+// ─── SFX ───
+//   レアリティ補正なし。レア度別の差はアイテム取得時のレア度引数で出す
+const SFX = {
+  pickup(opts = {}) {
+    const t = ensureRunning()?.currentTime; if (t == null) return;
+    // レアリティで音色変更
+    const tier = opts.rarityTier ?? 0;     // 0..3
+    const base = 600 + tier * 120;
+    playTone(t,         base,        0.10, { type: 'triangle', vol: 0.32 });
+    playTone(t + 0.08,  base * 1.5,  0.13, { type: 'triangle', vol: 0.28 });
+    if (tier >= 2) {
+      playTone(t + 0.18, base * 2.0, 0.18, { type: 'sine',     vol: 0.22 });
+    }
+    if (tier >= 3) {
+      playTone(t + 0.32, base * 2.5, 0.22, { type: 'sine',     vol: 0.20 });
+    }
+  },
+
+  drop(opts = {}) {
+    const t = ensureRunning()?.currentTime; if (t == null) return;
+    const tier = opts.rarityTier ?? 0;
+    playTone(t, 280 + tier * 60, 0.16, {
+      type: 'sawtooth', vol: 0.28, sweepTo: 700 + tier * 200,
+    });
+    playTone(t + 0.12, 600 + tier * 100, 0.18, { type: 'triangle', vol: 0.22 });
+  },
+
+  levelup() {
+    const t = ensureRunning()?.currentTime; if (t == null) return;
+    const seq = [N.C, N.E, N.G, N.C];
+    for (let i = 0; i < seq.length; i++) {
+      playTone(t + i * 0.09, noteFreq(seq[i], i === 3 ? 6 : 5), 0.18, {
+        type: 'triangle', vol: 0.32,
+      });
+    }
+    playNoise(t + 0.36, 0.12, { vol: 0.18, highpass: 4000 });
+  },
+
+  hit() {
+    const t = ensureRunning()?.currentTime; if (t == null) return;
+    playNoise(t, 0.08, { vol: 0.32, highpass: 1200 });
+    playTone(t, 220, 0.10, { type: 'square', vol: 0.22, sweepTo: 110 });
+  },
+
+  crit() {
+    const t = ensureRunning()?.currentTime; if (t == null) return;
+    playNoise(t, 0.10, { vol: 0.40, highpass: 800 });
+    playTone(t, 880, 0.16, { type: 'square', vol: 0.30, sweepTo: 200 });
+  },
+
+  damage() {
+    const t = ensureRunning()?.currentTime; if (t == null) return;
+    playTone(t, 200, 0.20, { type: 'sawtooth', vol: 0.30, sweepTo: 80 });
+    playNoise(t, 0.14, { vol: 0.20, highpass: 400 });
+  },
+
+  stairs() {
+    const t = ensureRunning()?.currentTime; if (t == null) return;
+    playTone(t,        noteFreq(N.G, 4), 0.12, { type: 'triangle', vol: 0.28 });
+    playTone(t + 0.10, noteFreq(N.E, 4), 0.14, { type: 'triangle', vol: 0.26 });
+    playTone(t + 0.22, noteFreq(N.C, 4), 0.20, { type: 'triangle', vol: 0.24 });
+  },
+
+  boss() {
+    const t = ensureRunning()?.currentTime; if (t == null) return;
+    playTone(t,        80,  0.30, { type: 'sawtooth', vol: 0.40 });
+    playTone(t + 0.10, 110, 0.30, { type: 'sawtooth', vol: 0.36 });
+    playNoise(t + 0.30, 0.40, { vol: 0.25, highpass: 200 });
+  },
+
+  click() {
+    const t = ensureRunning()?.currentTime; if (t == null) return;
+    playTone(t, 1200, 0.05, { type: 'square', vol: 0.14 });
+  },
+
+  defeat() {
+    const t = ensureRunning()?.currentTime; if (t == null) return;
+    const seq = [N.G, N.F, N.E, N.D, N.C];
+    for (let i = 0; i < seq.length; i++) {
+      playTone(t + i * 0.12, noteFreq(seq[i], 4), 0.22, {
+        type: 'triangle', vol: 0.26,
+      });
+    }
+  },
+
+  victory() {
+    const t = ensureRunning()?.currentTime; if (t == null) return;
+    const seq = [N.C, N.E, N.G, N.C, N.G, N.C];
+    for (let i = 0; i < seq.length; i++) {
+      playTone(t + i * 0.10, noteFreq(seq[i], i >= 3 ? 6 : 5), 0.18, {
+        type: 'triangle', vol: 0.30,
+      });
+    }
+  },
+};
+
+export function playSfx(name, opts) {
+  if (!settings.sfxEnabled) return;
+  const fn = SFX[name];
+  if (!fn) return;
+  ensureRunning();
+  fn(opts);
+}
+
+// レアリティ名→tier 0..3 ヘルパ（呼び出し側で楽できるように）
+export function rarityTier(rarityName) {
+  switch (rarityName) {
+    case 'レア':       return 1;
+    case 'エピック':   return 2;
+    case 'レジェンド': return 3;
+    default:           return 0;
+  }
+}
+
+export const BGM_NAMES = Object.keys(BGM_TRACKS);
+export const SFX_NAMES = Object.keys(SFX);
