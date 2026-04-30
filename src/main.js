@@ -494,9 +494,10 @@ function _refreshStorageUI() {
 
   let arr = player.storage.map((it, origIdx) => ({ it, origIdx }));
   if (_storageCat !== 'all') {
-    // 'potion' タブには HP / MP の両方を含める（種別タブを増やしすぎないため）
+    // 'potion' タブには HP / MP の両方を、'scroll' タブには通常巻物 + 不思議系を含める
     arr = arr.filter(x => x.it.type === _storageCat
-      || (_storageCat === 'potion' && x.it.type === 'mpPotion'));
+      || (_storageCat === 'potion' && x.it.type === 'mpPotion')
+      || (_storageCat === 'scroll' && x.it.type === 'mysteryScroll'));
   }
   arr = _sortStorageRows(arr, _storageSort);
 
@@ -651,8 +652,9 @@ function _refreshAudioMenu() {
 function _statLine(item) {
   if (item.type === 'weapon') return `ATK +${item.atkBonus}（${item.element}属性）`;
   if (item.type === 'armor')  return `DEF +${item.defBonus}（${item.element}属性）`;
-  if (item.type === 'potion')   return `HP +${item.heal} 回復`;
-  if (item.type === 'mpPotion') return `MP +${item.mpHeal} 回復`;
+  if (item.type === 'potion')        return `HP +${item.heal} 回復`;
+  if (item.type === 'mpPotion')      return `MP +${item.mpHeal} 回復`;
+  if (item.type === 'mysteryScroll') return item.desc;
   if (item.type === 'scroll') return `${item.element}属性 ${item.dmg}ダメージ`;
   return '';
 }
@@ -787,11 +789,14 @@ function _renderInventoryRow(item, idx) {
   const skillHtml = item.skill?.name
     ? `<div class="menu-row-skill">✨ ${item.skill.name}</div>` : '';
   const isEquippable = item.type === 'weapon' || item.type === 'armor';
-  const isUsableHere = (item.type === 'potion' || item.type === 'mpPotion') && screen === 'dungeon' && !combatActive;
+  const isUsableHere =
+    (item.type === 'potion' || item.type === 'mpPotion' || item.type === 'mysteryScroll')
+    && screen === 'dungeon' && !combatActive;
   const hasMainAction = isEquippable || isUsableHere;
   const action =
-    isEquippable ? 'equip' :
-    isUsableHere ? 'use' : 'none';
+    isEquippable                ? 'equip' :
+    item.type === 'mysteryScroll' ? 'mystery' :
+    isUsableHere                ? 'use'   : 'none';
 
   const lvHtml    = item.level ? `<span class="menu-row-lv">Lv${item.level}</span>` : '';
   const countHtml = (isStackable(item) && (item.count ?? 1) > 1)
@@ -817,12 +822,19 @@ function _renderInventoryRow(item, idx) {
           _equipFromInventory(idx);
         });
       } else if (action === 'use') {
-        if (player.hp >= player.maxHp) {
-          showAlert('HPが満タンです');
-          return;
+        // 薬は HP/MP 満タン時にアラート（消費を防ぐ）。MP 薬は MP 側で判定
+        if (item.type === 'potion' && player.hp >= player.maxHp) {
+          showAlert('HPが満タンです'); return;
+        }
+        if (item.type === 'mpPotion' && (player.mp ?? 0) >= (player.maxMp ?? 0)) {
+          showAlert('MPが満タンです'); return;
         }
         showActionConfirm(`${item.name} を使いますか？`, item, '使う', () => {
           _usePotionFromInventory(idx);
+        });
+      } else if (action === 'mystery') {
+        showActionConfirm(`${item.name} を読みますか？\n${item.desc}`, item, '読む', () => {
+          _useMysteryScrollFromInventory(idx);
         });
       }
     });
@@ -876,6 +888,30 @@ document.getElementById('btn-confirm-cancel').addEventListener('click', () => {
   playSfx('click');
   document.getElementById('action-confirm-modal').classList.add('hidden');
 });
+
+// 不思議系巻物の使用：効果フラグを dungeon に書き込み再描画。フロアでのみ使える
+function _useMysteryScrollFromInventory(idx) {
+  const item = player.inventory[idx];
+  if (!item || item.type !== 'mysteryScroll') return;
+  if (!dungeon || screen !== 'dungeon' || combatActive) {
+    showAlert('巻物はダンジョン探索中にしか使えません');
+    return;
+  }
+  switch (item.effect) {
+    case 'reveal-stairs':  dungeon.revealStairs  = true; break;
+    case 'reveal-enemies': dungeon.revealEnemies = true; break;
+    case 'reveal-items':   dungeon.revealItems   = true; break;
+    case 'reveal-all':     dungeon.revealFloor   = true; break;
+    default: showAlert('効果不明な巻物'); return;
+  }
+  takeOneFromInventory(idx);
+  dungeonLog(`📜 ${item.name} を読んだ！効果は今のフロアに有効`);
+  playSfx('crit');
+  refreshHUD();
+  refreshMenu();
+  dungeon.render(document.getElementById('dungeon-canvas'));
+  autoSave();
+}
 
 function _usePotionFromInventory(idx) {
   const item = player.inventory[idx];
