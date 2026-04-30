@@ -18,6 +18,7 @@ import {
   isStackable, stackKey, materialForRarity,
   PATTERN_OFFSETS, PATTERN_DESC, findSkillById, elementMatchup, matchupLabel,
   shopPriceFor,
+  ENHANCE_RECIPES, applyEnhanceRecipe, fuseLegendaries,
 } from './items.js';
 import { hashString } from './rng.js';
 import { Dungeon } from './dungeon.js';
@@ -454,6 +455,8 @@ function refreshMenu() {
 
   // ストレージ
   _refreshStorageUI();
+  // 合成
+  _refreshSynthesisUI();
 }
 
 // ─── ストレージ UI ───
@@ -1008,6 +1011,179 @@ function _executeSkill(skill) {
   // 行動後の敵ターン
   _runEnemyTurn();
   autoSave();
+}
+
+// ─────────────────────────────────────────────
+// 合成（武器強化 + レジェンド融合）
+// ─────────────────────────────────────────────
+//   インベントリ + ストレージから武器を一覧表示し、対応する素材を持っていれば
+//   強化ボタンが押せる。確定で素材消費 + 武器置換。
+//   同名レジェンド武器 2 個 を持っているとレジェンド融合のレシピもサジェスト。
+
+function _countMaterial(name) {
+  let n = 0;
+  for (const arr of [player.inventory, player.storage]) {
+    for (const it of arr ?? []) {
+      if (it?.type === 'material' && it.name === name) n += (it.count ?? 1);
+    }
+  }
+  return n;
+}
+
+// 指定名の素材を N 個消費（インベントリ優先、不足分はストレージから）
+function _consumeMaterial(name, count) {
+  let need = count;
+  for (const arr of [player.inventory, player.storage]) {
+    if (need <= 0) break;
+    for (let i = arr.length - 1; i >= 0 && need > 0; i--) {
+      const it = arr[i];
+      if (it?.type !== 'material' || it.name !== name) continue;
+      const take = Math.min(it.count ?? 1, need);
+      it.count = (it.count ?? 1) - take;
+      need -= take;
+      if ((it.count ?? 0) <= 0) arr.splice(i, 1);
+    }
+  }
+  return need === 0;
+}
+
+// 全武器列挙（インベントリ＋ストレージ＋装備中）。idxRef は { src: 'inv'|'sto'|'eq', idx }
+function _allWeaponsForCraft() {
+  const out = [];
+  if (player.weapon) out.push({ item: player.weapon, ref: { src: 'eq', idx: -1 } });
+  (player.inventory ?? []).forEach((it, idx) => {
+    if (it?.type === 'weapon') out.push({ item: it, ref: { src: 'inv', idx } });
+  });
+  (player.storage ?? []).forEach((it, idx) => {
+    if (it?.type === 'weapon') out.push({ item: it, ref: { src: 'sto', idx } });
+  });
+  return out;
+}
+
+function _replaceWeaponAt(ref, newWeapon) {
+  if (ref.src === 'eq') {
+    player.weapon = newWeapon;
+    player.atk    = player.atkBase + newWeapon.atkBonus;
+  } else if (ref.src === 'inv') {
+    player.inventory[ref.idx] = newWeapon;
+  } else {
+    player.storage[ref.idx] = newWeapon;
+  }
+}
+function _removeWeaponAt(ref) {
+  if (ref.src === 'eq') {
+    player.weapon = null;
+    player.atk    = player.atkBase;
+  } else if (ref.src === 'inv') {
+    player.inventory.splice(ref.idx, 1);
+  } else {
+    player.storage.splice(ref.idx, 1);
+  }
+}
+
+function _refreshSynthesisUI() {
+  const grid = document.getElementById('synthesis-list');
+  if (!grid) return;
+  const weapons = _allWeaponsForCraft();
+  if (weapons.length === 0) {
+    grid.innerHTML = '<div class="menu-empty">武器を持っていません</div>';
+    document.getElementById('synthesis-fuse').classList.add('hidden');
+    return;
+  }
+
+  grid.innerHTML = '';
+  for (const { item, ref } of weapons) {
+    const recipe = ENHANCE_RECIPES[item.rarity];
+    const matCount = recipe ? _countMaterial(recipe.matName) : 0;
+    const canDo    = recipe && matCount >= recipe.matCount;
+    const requirement = recipe
+      ? `${recipe.matName}×${recipe.matCount}（所持 ${matCount}）→ ATK×${recipe.mult.toFixed(2)}`
+      : '対応レシピなし';
+
+    const div = document.createElement('div');
+    div.className = 'menu-row';
+    const where = ref.src === 'eq' ? '【装備中】' : ref.src === 'inv' ? '【持ち物】' : '【ストレージ】';
+    div.innerHTML = `
+      <div class="menu-row-emoji">${iconImg(item, 38)}</div>
+      <div class="menu-row-info">
+        <div class="menu-row-name" style="color:${item.rarityColor}">${item.name} <span class="menu-row-lv">${where}</span></div>
+        <div class="menu-row-stat">ATK +${item.atkBonus} / ${item.rarity}</div>
+        <div class="menu-row-skill">🛠 ${requirement}</div>
+      </div>
+      <div class="menu-row-actions">
+        <button class="menu-action-btn" ${canDo ? '' : 'disabled'}>強化</button>
+      </div>
+    `;
+    if (canDo) {
+      div.querySelector('button').addEventListener('click', () => {
+        showActionConfirm(`${item.name} を強化しますか？\n\n${recipe.matName}×${recipe.matCount} を消費`,
+          item, '強化', () => {
+            if (!_consumeMaterial(recipe.matName, recipe.matCount)) {
+              showAlert('素材消費に失敗（途中で減った？）'); return;
+            }
+            const upgraded = applyEnhanceRecipe(item, recipe);
+            _replaceWeaponAt(ref, upgraded);
+            playSfx('levelup');
+            refreshHUD();
+            refreshMenu();
+            autoSave();
+            showItemBanner({
+              ...upgraded, rarity: item.rarity, rarityColor: item.rarityColor,
+            }, { action: '強化完了' });
+          });
+      });
+    }
+    grid.appendChild(div);
+  }
+
+  // レジェンド武器の融合候補
+  const legendaries = weapons.filter(w => w.item.rarity === 'レジェンド');
+  const fuseBtn = document.getElementById('synthesis-fuse');
+  // 同名（接尾辞 +xxx を除く）でグルーピング
+  const groups = new Map();
+  for (const w of legendaries) {
+    const key = w.item.name.replace(/\+.*$/, '').replace(/・神話$/, '');
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(w);
+  }
+  const fusable = [...groups.values()].filter(arr => arr.length >= 2);
+  if (fusable.length === 0) {
+    fuseBtn.classList.add('hidden');
+  } else {
+    fuseBtn.classList.remove('hidden');
+    fuseBtn.textContent = `🌟 同名レジェンド融合 (${fusable.length} 種)`;
+    fuseBtn.onclick = () => _openFuseModal(fusable);
+  }
+}
+
+function _openFuseModal(fusable) {
+  // 簡易: 一番上のグループの先頭 2 つを融合
+  const group = fusable[0];
+  const [a, b] = [group[0], group[1]];
+  showActionConfirm(
+    `「${a.item.name}」と「${b.item.name}」を融合させ、神話級武器を作成しますか？\n\n` +
+    `両方の武器を消費します（強い方のステータスを基準に ATK×1.8）。`,
+    a.item, '融合', () => {
+      const fused = fuseLegendaries(a.item, b.item);
+      if (!fused) { showAlert('融合できませんでした'); return; }
+      // refを破壊する順番に注意：indexのずれを避けるため、後半 b を先に削除
+      // src 'eq' は単一なので、両方が eq になることはない
+      const order = [a, b].sort((x, y) => {
+        // storage を先、inventory を次、eq を最後（idx 大きい順）
+        const score = ref => (ref.src === 'sto' ? 2 : ref.src === 'inv' ? 1 : 0) * 1000 + ref.idx;
+        return score(y.ref) - score(x.ref);
+      });
+      _removeWeaponAt(order[0].ref);
+      _removeWeaponAt(order[1].ref);
+      // 融合品はインベントリへ（満杯ならストレージ）
+      if (canAddToInventory(fused)) addToInventory(fused);
+      else                          addToStorage(fused);
+      playSfx('levelup');
+      refreshHUD();
+      refreshMenu();
+      autoSave();
+      showItemBanner({ ...fused, rarity: 'レジェンド', rarityColor: '#ffe082' }, { action: '神話級！' });
+    });
 }
 
 // ─────────────────────────────────────────────
