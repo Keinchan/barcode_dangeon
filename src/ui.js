@@ -1,29 +1,98 @@
-// プレイヤー頭上にダメージをフロート表示（canvas中央＝プレイヤーアイコン、赤）
-export function showFloatingDamage(amount) {
+// プレイヤー頭上にダメージをフロート表示（canvas中央＝プレイヤーアイコン、赤）。
+// opts.kind: 'normal' | 'crit' | 'effective' | 'weak' でスケールと色を変える
+export function showFloatingDamage(amount, opts = {}) {
   const canvas = document.getElementById('dungeon-canvas');
   if (!canvas) return;
   const rect = canvas.getBoundingClientRect();
   const el = document.createElement('div');
-  el.className = 'damage-float';
-  el.textContent = `-${amount}`;
+  el.className = `damage-float ${_dmgFloatClass(opts.kind)}`;
+  el.textContent = opts.kind === 'crit' ? `-${amount}!!` : `-${amount}`;
   el.style.left = (rect.left + rect.width / 2) + 'px';
   el.style.top  = (rect.top + rect.height / 2 - 18) + 'px';
+  el.style.fontSize = _dmgFontSize(amount, opts.kind) + 'px';
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 1300);
 }
 
 // 敵に与えたダメージを戦闘パネル上の敵情報ボックス上端付近にフロート表示（緑）
-export function showEnemyDamage(amount) {
+export function showEnemyDamage(amount, opts = {}) {
   const target = document.querySelector('.combat-enemy');
   if (!target) return;
   const rect = target.getBoundingClientRect();
   const el = document.createElement('div');
-  el.className = 'damage-float damage-float-enemy';
-  el.textContent = `-${amount}`;
+  el.className = `damage-float damage-float-enemy ${_dmgFloatClass(opts.kind)}`;
+  el.textContent = opts.kind === 'crit' ? `-${amount}!!` : `-${amount}`;
   el.style.left = (rect.left + rect.width / 2) + 'px';
   el.style.top  = (rect.top + 6) + 'px';
+  el.style.fontSize = _dmgFontSize(amount, opts.kind) + 'px';
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 1300);
+}
+
+// ダメージ数値の見た目を kind 別に振り分け（スケール／色／アニメ）
+function _dmgFloatClass(kind) {
+  switch (kind) {
+    case 'crit':      return 'damage-crit';
+    case 'effective': return 'damage-effective';
+    case 'weak':      return 'damage-weak';
+    default:          return '';
+  }
+}
+function _dmgFontSize(amount, kind) {
+  // 大ダメージほど数値も大きく。クリ・効果絶大はさらに底上げ
+  let base = 22 + Math.min(20, amount / 6);
+  if (kind === 'crit')      base += 8;
+  if (kind === 'effective') base += 4;
+  if (kind === 'weak')      base -= 2;
+  return Math.round(base);
+}
+
+// 画面全体の白フラッシュ（一瞬）。クリティカル / 大技で使う
+export function hitFlash(opts = {}) {
+  const div = document.createElement('div');
+  div.className = 'vfx-hitflash';
+  div.style.background = opts.color ?? 'rgba(255,255,255,0.55)';
+  document.body.appendChild(div);
+  setTimeout(() => div.remove(), 140);
+}
+
+// 画面シェイク。amount: ピクセル幅、duration: ms
+export function screenShake(amount = 8, duration = 280) {
+  const root = document.body;
+  const start = performance.now();
+  const tick = () => {
+    const t = performance.now() - start;
+    if (t >= duration) {
+      root.style.transform = '';
+      return;
+    }
+    const decay = 1 - t / duration;
+    const dx = (Math.random() * 2 - 1) * amount * decay;
+    const dy = (Math.random() * 2 - 1) * amount * decay;
+    root.style.transform = `translate(${dx}px, ${dy}px)`;
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+// 敵撃破の爆散（複数演出を組み合わせ）。死亡時の派手な締めくくり用
+export function deathBurst(target, opts = {}) {
+  const r = _rectOf(target);
+  if (!r) return;
+  const cx = r.left + r.width / 2;
+  const cy = r.top  + r.height / 2;
+  const color = opts.color ?? '#ff7043';
+  // 中央の閃光
+  _spawn(`<div class="vfx-explosion" style="left:${cx}px;top:${cy}px;
+    --c1:${color};--c2:rgba(255,255,255,0.95)"></div>`, document.body, 850);
+  // 大量火花
+  sparkSpray(target, { count: 20, color });
+  sparkSpray(target, { count: 14, color: '#ffe082' });
+  // 拡大リング 2 段
+  _spawn(`<div class="vfx-ring vfx-ring-1" style="left:${cx}px;top:${cy}px;--c:${color}"></div>`, document.body, 700);
+  setTimeout(() => {
+    _spawn(`<div class="vfx-ring vfx-ring-2" style="left:${cx}px;top:${cy}px;--c:rgba(255,255,255,0.85)"></div>`, document.body, 600);
+  }, 90);
 }
 
 // レア度に応じて取得アイテムを派手に告知。
@@ -126,7 +195,7 @@ export function sparkSpray(target, opts = {}) {
   if (!r) return;
   const cx = r.left + r.width  / 2;
   const cy = r.top  + r.height / 2;
-  const count = opts.count ?? 8;
+  const count = opts.count ?? 12;     // デフォ 8 → 12 に増量
   const color = opts.color ?? '#ffd54f';
   const wrap = document.createElement('div');
   wrap.className = 'vfx-wrap';
@@ -136,15 +205,15 @@ export function sparkSpray(target, opts = {}) {
     const p = document.createElement('span');
     p.className = 'vfx-spark';
     const angle = (Math.PI * 2) * (i / count) + Math.random() * 0.4;
-    const dist  = 22 + Math.random() * 18;
+    const dist  = 28 + Math.random() * 28;     // 飛距離も広げる
     p.style.background  = color;
-    p.style.boxShadow   = `0 0 6px ${color}`;
+    p.style.boxShadow   = `0 0 8px ${color}`;
     p.style.setProperty('--vx', Math.cos(angle) * dist + 'px');
     p.style.setProperty('--vy', Math.sin(angle) * dist + 'px');
     wrap.appendChild(p);
   }
   document.body.appendChild(wrap);
-  setTimeout(() => wrap.remove(), 600);
+  setTimeout(() => wrap.remove(), 700);
 }
 
 export function explosion(target, opts = {}) {
@@ -155,9 +224,10 @@ export function explosion(target, opts = {}) {
   const color = opts.color ?? '#ff7043';
   const html = `<div class="vfx-explosion" style="left:${cx}px;top:${cy}px;
     --c1:${color};--c2:rgba(255,255,255,0.9)"></div>`;
-  _spawn(html, document.body, 700);
-  // パーティクルも一緒に
-  sparkSpray(target, { count: 12, color });
+  _spawn(html, document.body, 750);
+  // パーティクルも一緒に（増量）
+  sparkSpray(target, { count: 16, color });
+  sparkSpray(target, { count: 8,  color: '#fff' });
 }
 
 export function shockwave(target, opts = {}) {

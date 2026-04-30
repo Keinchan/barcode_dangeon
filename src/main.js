@@ -23,7 +23,10 @@ import {
 import { hashString } from './rng.js';
 import { Dungeon } from './dungeon.js';
 import { Battle } from './battle.js';
-import { showFloatingDamage, showItemBanner, shockwave, magicCircle, playerVfxAnchor } from './ui.js';
+import {
+  showFloatingDamage, showItemBanner, shockwave, magicCircle, playerVfxAnchor,
+  hitFlash, screenShake, deathBurst, sparkSpray, explosion,
+} from './ui.js';
 import {
   isFirebaseConfigured,
   subscribeAuth,
@@ -985,6 +988,25 @@ function _executeSkill(skill) {
 
   dungeonLog(`✨ 技「${skill.name}」発動！ ${hits.length} 体に命中（MP -${skill.mpCost}）`);
   playSfx('crit');
+
+  // 範囲技 VFX: 全画面フラッシュ + シェイク + 命中マスごとに小爆発を時間差で
+  hitFlash({ color: 'rgba(124,77,255,0.45)' });
+  screenShake(Math.min(14, 6 + hits.length * 2), 350);
+  const canvas = document.getElementById('dungeon-canvas');
+  const cRect  = canvas.getBoundingClientRect();
+  const ts     = canvas.width / 11;
+  const half   = 5;
+  hits.forEach((h, i) => {
+    setTimeout(() => {
+      const tx = h.m.x - (px - half);
+      const ty = h.m.y - (py - half);
+      const sx = cRect.left + tx * ts + ts / 2;
+      const sy = cRect.top  + ty * ts + ts / 2;
+      const anchor = { left: sx - 18, top: sy - 18, width: 36, height: 36 };
+      explosion(anchor, { color: '#b070dd' });
+      if (h.m.hp <= 0) deathBurst(anchor, { color: h.m.rarityColor ?? '#ff7043' });
+    }, 60 + i * 70);
+  });
 
   // 死亡した敵を一括処理（XP・ゴールド・ドロップ）
   const dead = dungeon.monsters.filter(m => m.hp <= 0);
