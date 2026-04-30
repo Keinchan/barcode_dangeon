@@ -431,6 +431,31 @@ html, body {
 .hp-text { font-size: 15px; color: var(--success); font-weight: bold; }
 .mp-text { font-size: 14px; color: #4dc4ff; font-weight: bold; }
 
+/* ダンジョンフッターのわざボタン（左下） */
+.btn-waza {
+  position: absolute;
+  left: 14px;
+  bottom: 70px;
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  padding: 10px 16px;
+  border-radius: 18px;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  box-shadow: 0 0 12px var(--primary-glow);
+  z-index: 5;
+}
+.btn-waza:active { transform: scale(0.96); }
+
+.modal-meta {
+  font-size: 12px;
+  color: #9adfff;
+  font-weight: normal;
+  margin-left: 8px;
+}
+
 /* スタックアイテムの個数表示（×N） */
 .menu-row-count {
   display: inline-block;

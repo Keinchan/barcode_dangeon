@@ -457,9 +457,9 @@ export class Dungeon {
       const dim = !revealAll && !inSight;
       if (dim) ctx.globalAlpha = 0.55;
 
-      // ゴールドの山・不思議系巻物・素材は絵文字描画
+      // ゴールドの山・不思議系巻物・素材・技の書は絵文字描画
       // （手続きアイコンは武器/防具/薬/巻物のみ。それ以外は emoji フォールバック）
-      if (it.type === 'gold' || it.type === 'mysteryScroll' || it.type === 'material') {
+      if (it.type === 'gold' || it.type === 'mysteryScroll' || it.type === 'material' || it.type === 'skillBook') {
         const fs = Math.floor(ts * 0.6);
         ctx.font = `${fs}px serif`;
         ctx.textAlign = 'center';
