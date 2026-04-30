@@ -11,10 +11,12 @@ import {
   HP_PER_LEVEL,
   ATK_PER_LEVEL,
   DEF_PER_LEVEL,
+  SKILL_SLOTS_MAX,
 } from './generator.js';
 import {
   generateItemFromBarcode, rarityFromDigit, bumpRarity, RARITIES, migrateElement,
   isStackable, stackKey, materialForRarity,
+  PATTERN_OFFSETS, PATTERN_DESC, findSkillById, elementMatchup, matchupLabel,
 } from './items.js';
 import { hashString } from './rng.js';
 import { Dungeon } from './dungeon.js';
@@ -494,10 +496,10 @@ function _refreshStorageUI() {
 
   let arr = player.storage.map((it, origIdx) => ({ it, origIdx }));
   if (_storageCat !== 'all') {
-    // 'potion' タブには HP / MP の両方を、'scroll' タブには通常巻物 + 不思議系を含める
+    // 'potion' タブには HP / MP の両方を、'scroll' タブには通常巻物 + 不思議系 + 技の書も含める
     arr = arr.filter(x => x.it.type === _storageCat
       || (_storageCat === 'potion' && x.it.type === 'mpPotion')
-      || (_storageCat === 'scroll' && x.it.type === 'mysteryScroll'));
+      || (_storageCat === 'scroll' && (x.it.type === 'mysteryScroll' || x.it.type === 'skillBook')));
   }
   arr = _sortStorageRows(arr, _storageSort);
 
@@ -655,6 +657,7 @@ function _statLine(item) {
   if (item.type === 'potion')        return `HP +${item.heal} 回復`;
   if (item.type === 'mpPotion')      return `MP +${item.mpHeal} 回復`;
   if (item.type === 'mysteryScroll') return item.desc;
+  if (item.type === 'skillBook')     return `📕 ${item.skillName} を習得`;
   if (item.type === 'scroll') return `${item.element}属性 ${item.dmg}ダメージ`;
   return '';
 }
@@ -792,11 +795,13 @@ function _renderInventoryRow(item, idx) {
   const isUsableHere =
     (item.type === 'potion' || item.type === 'mpPotion' || item.type === 'mysteryScroll')
     && screen === 'dungeon' && !combatActive;
-  const hasMainAction = isEquippable || isUsableHere;
+  const isLearnable = item.type === 'skillBook';   // 場所問わず学べる
+  const hasMainAction = isEquippable || isUsableHere || isLearnable;
   const action =
-    isEquippable                ? 'equip' :
+    isEquippable                  ? 'equip'   :
+    isLearnable                   ? 'learn'   :
     item.type === 'mysteryScroll' ? 'mystery' :
-    isUsableHere                ? 'use'   : 'none';
+    isUsableHere                  ? 'use'     : 'none';
 
   const lvHtml    = item.level ? `<span class="menu-row-lv">Lv${item.level}</span>` : '';
   const countHtml = (isStackable(item) && (item.count ?? 1) > 1)
@@ -835,6 +840,10 @@ function _renderInventoryRow(item, idx) {
       } else if (action === 'mystery') {
         showActionConfirm(`${item.name} を読みますか？\n${item.desc}`, item, '読む', () => {
           _useMysteryScrollFromInventory(idx);
+        });
+      } else if (action === 'learn') {
+        showActionConfirm(`${item.name} を読んで「${item.skillName}」を習得しますか？\n${item.skillDesc}`, item, '習得する', () => {
+          _learnSkillFromBook(idx);
         });
       }
     });
@@ -887,6 +896,162 @@ document.getElementById('btn-confirm-cancel').addEventListener('click', () => {
   _pendingConfirmAction = null;
   playSfx('click');
   document.getElementById('action-confirm-modal').classList.add('hidden');
+});
+
+// ─────────────────────────────────────────────
+// 技の書 / 技発動
+// ─────────────────────────────────────────────
+function _learnSkillFromBook(idx) {
+  const item = player.inventory[idx];
+  if (!item || item.type !== 'skillBook') return;
+  if (!Array.isArray(player.skills)) player.skills = [];
+
+  // 既に同じ技を習得済み？ → 上書き不要、消費だけしてアラート
+  if (player.skills.find(s => s.id === item.skillId)) {
+    showAlert(`${item.skillName} は既に習得済みです`);
+    return;
+  }
+
+  const skillSpec = findSkillById(item.skillId);
+  if (!skillSpec) { showAlert('技データが見つかりませんでした'); return; }
+
+  // スロットが空いていれば即習得。満杯なら忘れる技を選ばせる
+  if (player.skills.length < SKILL_SLOTS_MAX) {
+    player.skills.push({ ...skillSpec });
+    takeOneFromInventory(idx);
+    playSfx('levelup');
+    showAlert(`✨ ${skillSpec.name} を習得した！`);
+    refreshMenu();
+    autoSave();
+    return;
+  }
+
+  // 満杯：簡易的に「忘れる技を選ぶ」リストを表示
+  _openForgetSkillModal(skillSpec, idx);
+}
+
+function _openForgetSkillModal(newSkill, bookIdx) {
+  const list = player.skills.map((s, i) =>
+    `${i + 1}. ${s.name}（${s.pattern}型 / MP-${s.mpCost}）`,
+  ).join('\n');
+  showConfirm(
+    `技スロットが満杯（${SKILL_SLOTS_MAX}/${SKILL_SLOTS_MAX}）。\n\n` +
+    `習得したい技: ${newSkill.name}（${newSkill.pattern}型 / MP-${newSkill.mpCost}）\n\n` +
+    `現在の技:\n${list}\n\n` +
+    `1 番目の技を忘れて新しい技を覚えますか？\n（順番指定の UI は今後追加予定）`,
+    { okLabel: '1 番を忘れる', cancelLabel: 'やめる' },
+  ).then(ok => {
+    if (!ok) return;
+    player.skills[0] = { ...newSkill };
+    takeOneFromInventory(bookIdx);
+    playSfx('levelup');
+    showAlert(`📕 1 番目の技を忘れ、${newSkill.name} を習得しました`);
+    refreshMenu();
+    autoSave();
+  });
+}
+
+// 技を発動（ダンジョン探索中、戦闘パネル中ではなく）
+function _executeSkill(skill) {
+  if (!dungeon || screen !== 'dungeon' || combatActive) {
+    showAlert('技はダンジョン探索中にだけ使えます');
+    return;
+  }
+  if ((player.mp ?? 0) < skill.mpCost) {
+    showAlert(`MP が足りません（必要 ${skill.mpCost}）`);
+    return;
+  }
+  player.mp = Math.max(0, (player.mp ?? 0) - skill.mpCost);
+
+  const offsets = PATTERN_OFFSETS[skill.pattern] ?? [];
+  const px = dungeon.playerPos.x;
+  const py = dungeon.playerPos.y;
+  const hits = [];
+
+  for (const [dx, dy] of offsets) {
+    const m = dungeon.monsterAt(px + dx, py + dy);
+    if (!m) continue;
+    const matchup = elementMatchup(skill.element, m.element);
+    const base = Math.max(1, Math.floor(player.atk * skill.dmgMult) - m.def);
+    const dmg  = Math.max(1, Math.floor((base + Math.floor(Math.random() * Math.max(1, base * 0.4)))
+      * matchup));
+    m.hp = Math.max(0, m.hp - dmg);
+    hits.push({ m, dmg, matchup });
+  }
+
+  dungeonLog(`✨ 技「${skill.name}」発動！ ${hits.length} 体に命中（MP -${skill.mpCost}）`);
+  playSfx('crit');
+
+  // 死亡した敵を一括処理（XP・ゴールド・ドロップ）
+  const dead = dungeon.monsters.filter(m => m.hp <= 0);
+  for (const m of dead) {
+    dungeon.removeMonster(m);
+    gainXp(_xpFromMonster(m));
+    const gold = rollGoldDropFromMonster(m);
+    if (gold > 0) {
+      player.gold = (player.gold ?? 0) + gold;
+      dungeonLog(`🪙 ${m.name} は ${gold} ゴールドを落とした`);
+    }
+    const matDrop = _rollMaterialDrop(m);
+    if (matDrop) _autoCollectDrop(matDrop);
+    const drop = _rollMonsterDrop(m);
+    if (drop) {
+      drop.x = m.x; drop.y = m.y;
+      dungeon.floorItems.push(drop);
+      dungeonLog(`💎 ${m.name} は ${drop.name} を落とした！`, { rarity: drop.rarity });
+    }
+  }
+
+  refreshHUD();
+  dungeon.render(document.getElementById('dungeon-canvas'));
+  // 行動後の敵ターン
+  _runEnemyTurn();
+  autoSave();
+}
+
+// わざボタン → モーダル表示
+function _openWazaModal() {
+  if (!dungeon || screen !== 'dungeon' || combatActive) {
+    showAlert('技はダンジョン探索中にだけ使えます'); return;
+  }
+  const skills = Array.isArray(player.skills) ? player.skills : [];
+  const list   = document.getElementById('waza-list');
+  document.getElementById('waza-mp-status').textContent =
+    `(MP ${player.mp ?? 0}/${player.maxMp ?? 0})`;
+
+  if (skills.length === 0) {
+    list.innerHTML = '<div style="text-align:center;color:#888;padding:14px">技をまだ覚えていない<br><small>📕 技の書を「読む」と習得できる</small></div>';
+  } else {
+    list.innerHTML = skills.map((s, i) => {
+      const lowMp = (player.mp ?? 0) < s.mpCost;
+      return `
+        <div class="item-row${lowMp ? ' disabled' : ''}" data-idx="${i}">
+          <span class="item-emoji">📕</span>
+          <div class="item-info">
+            <div class="item-name" style="color:${RARITIES.find(r => r.name === s.rarity)?.color ?? '#ddd'}">${s.name}</div>
+            <div class="item-desc">${PATTERN_DESC[s.pattern]} / 威力×${s.dmgMult} / ${s.element}属性 / MP -${s.mpCost}${lowMp ? ' ⚠️不足' : ''}</div>
+          </div>
+          <span class="item-rarity" style="color:${RARITIES.find(r => r.name === s.rarity)?.color ?? '#ddd'}">${s.rarity}</span>
+        </div>`;
+    }).join('');
+    list.querySelectorAll('.item-row:not(.disabled)').forEach(row => {
+      row.addEventListener('click', () => {
+        const i = parseInt(row.dataset.idx, 10);
+        const s = skills[i];
+        document.getElementById('waza-modal').classList.add('hidden');
+        _executeSkill(s);
+      });
+    });
+  }
+  document.getElementById('waza-modal').classList.remove('hidden');
+}
+document.getElementById('btn-waza').addEventListener('click', () => {
+  playSfx('click');
+  _openWazaModal();
+});
+document.getElementById('btn-waza-cancel').addEventListener('click', () => {
+  playSfx('click');
+  document.getElementById('waza-modal').classList.add('hidden');
 });
 
 // 不思議系巻物の使用：効果フラグを dungeon に書き込み再描画。フロアでのみ使える
@@ -1662,6 +1827,7 @@ function autoSave() {
       gold:       player.gold       ?? 0,
       platinum:   player.platinum   ?? 0,
       scanBudget: player.scanBudget ?? null,
+      skills:     player.skills     ?? [],
     },
     clearedSeeds: Array.from(clearedSet),
     savedAt: Date.now(),
@@ -1686,6 +1852,7 @@ function _applySave(data) {
   _migrateItemElements(player);
   // 旧セーブのスタック未対応データを集約（count 付与 + 同種重複統合）
   _consolidateStacks(player);
+  if (!Array.isArray(player.skills)) player.skills = [];
   clearedSet.clear();
   if (Array.isArray(data.clearedSeeds)) {
     for (const s of data.clearedSeeds) clearedSet.add(s);

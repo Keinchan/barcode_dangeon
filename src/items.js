@@ -408,6 +408,91 @@ export function randomMysteryScroll(rng = Math.random) {
   return                makeMysteryScroll(MYSTERY_SCROLLS[3]);
 }
 
+// ─────────────────────────────────────────────
+// 技の書（スキルブック）と技ライブラリ
+// ─────────────────────────────────────────────
+//   使用すると永続的に技を習得（最大 4 スロット）。技は MP を消費して
+//   攻撃パターン A/B/C/D の範囲ダメージを与える（バトルパネルではなく
+//   ダンジョン探索中に発動。複数モンスターを巻き込める）。
+//
+//   pattern:
+//     A = プレイヤーの周囲十字 4 マス（上下左右）
+//     B = プレイヤーの周囲 8 マス（王将の移動範囲）
+//     C = 4 方向に 2 マスまでの直線（飛び道具）
+//     D = チェビシェフ距離 2 以内の全 24 マス（広範囲）
+export const PATTERN_DESC = {
+  A: 'A型: 上下左右の隣 4 マス',
+  B: 'B型: 周囲 8 マス（王将）',
+  C: 'C型: 4 方向 2 マス先まで（直線飛び道具）',
+  D: 'D型: 周囲 2 マス全範囲',
+};
+
+export const PATTERN_OFFSETS = {
+  A: [[0,-1],[0,1],[-1,0],[1,0]],
+  B: [[-1,-1],[0,-1],[1,-1],[-1,0],[1,0],[-1,1],[0,1],[1,1]],
+  C: [[0,-1],[0,-2],[0,1],[0,2],[-1,0],[-2,0],[1,0],[2,0]],
+  D: (() => {
+    const out = [];
+    for (let dy = -2; dy <= 2; dy++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        out.push([dx, dy]);
+      }
+    }
+    return out;
+  })(),
+};
+
+export const SKILLS_LIBRARY = [
+  // コモン
+  { id: 'sweep',     name: '薙ぎ払い',   pattern: 'A', dmgMult: 1.0, mpCost: 6,  element: '棒人間',     rarity: 'コモン',     desc: '十字隣接 4 マスを薙ぐ' },
+  { id: 'jab',       name: '小突き',     pattern: 'C', dmgMult: 0.8, mpCost: 5,  element: '棒人間',     rarity: 'コモン',     desc: '直線 2 マスを軽く突く' },
+  // レア
+  { id: 'whirl',     name: '回転斬り',   pattern: 'B', dmgMult: 1.2, mpCost: 10, element: '落書き',     rarity: 'レア',       desc: '周囲 8 マスを攻撃' },
+  { id: 'pierce',    name: '貫通弾',     pattern: 'C', dmgMult: 1.5, mpCost: 12, element: 'ピクセル',   rarity: 'レア',       desc: '直線 2 マス先まで貫く' },
+  // エピック
+  { id: 'snipe',     name: '影狙撃',     pattern: 'C', dmgMult: 2.5, mpCost: 14, element: '影絵',       rarity: 'エピック',   desc: '4方向 2 マス先（高威力）' },
+  { id: 'storm',     name: '虹嵐',       pattern: 'D', dmgMult: 1.4, mpCost: 18, element: 'ホログラム', rarity: 'エピック',   desc: '周囲 2 マス全範囲' },
+  // レジェンド
+  { id: 'doom',      name: '終末の折り', pattern: 'D', dmgMult: 2.5, mpCost: 28, element: '折り紙',     rarity: 'レジェンド', desc: '広範囲・高威力' },
+  { id: 'overdrive', name: '神無双',     pattern: 'B', dmgMult: 3.0, mpCost: 22, element: '棒人間',     rarity: 'レジェンド', desc: '周囲 8 マスを必殺' },
+];
+
+export function findSkillById(id) {
+  return SKILLS_LIBRARY.find(s => s.id === id) ?? null;
+}
+
+// 技の書アイテム（読むと技を習得）
+export function makeSkillBook(skillId) {
+  const skill = findSkillById(skillId);
+  if (!skill) return null;
+  const rarity = RARITIES.find(r => r.name === skill.rarity) ?? RARITIES[0];
+  return {
+    type:        'skillBook',
+    skillId:     skill.id,
+    name:        `${skill.name}の書`,
+    emoji:       '📕',
+    rarity:      rarity.name,
+    rarityColor: rarity.color,
+    element:     skill.element,
+    level:       1,
+    desc:        `${PATTERN_DESC[skill.pattern]} / 威力×${skill.dmgMult} / MP -${skill.mpCost}`,
+    skillName:   skill.name,
+    skillDesc:   skill.desc,
+    count:       1,
+  };
+}
+
+// レアリティに応じた技の書をランダムに選ぶ
+export function randomSkillBook(rng = Math.random, mobRarity = null) {
+  const r = typeof rng === 'function' ? rng() : Math.random();
+  const candidates = mobRarity
+    ? SKILLS_LIBRARY.filter(s => s.rarity === mobRarity)
+    : SKILLS_LIBRARY;
+  const pool = candidates.length > 0 ? candidates : SKILLS_LIBRARY;
+  return makeSkillBook(pool[Math.floor(r * pool.length)].id);
+}
+
 // ── アイテム使用（バトル中） ──
 // 戻り値: { msg, healAmt, dmgAmt, mpHealAmt, consumed }
 export function applyItem(item, player, monster) {

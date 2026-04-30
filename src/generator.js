@@ -1,5 +1,5 @@
 import { createRNG, hashString } from './rng.js';
-import { RARITIES, ELEMENTS, rarityFromDigit, generateItemFromBarcode, randomMysteryScroll } from './items.js';
+import { RARITIES, ELEMENTS, rarityFromDigit, generateItemFromBarcode, randomMysteryScroll, randomSkillBook } from './items.js';
 
 // ── モンスタープール ──
 const MONSTER_POOL = [
@@ -202,6 +202,17 @@ export function generateFloorItems(dungeonData, floor, rooms) {
     items.push(scroll);
   }
 
+  // 技の書：このフロアに 1 個（15% 確率）配置
+  if (rng() <= 0.15 && rooms.length > 2) {
+    const room = rooms[1 + Math.floor(rng() * Math.max(1, rooms.length - 2))];
+    const book = randomSkillBook(rng, dungeonData.rarityBase.name);
+    if (book) {
+      book.x = room.x + 1 + Math.floor(rng() * Math.max(1, room.w - 2));
+      book.y = room.y + 1 + Math.floor(rng() * Math.max(1, room.h - 2));
+      items.push(book);
+    }
+  }
+
   rooms.slice(1, -1).forEach((room, idx) => {
     // 通常アイテム（出現率 50% → 70%）
     if (rng() <= 0.7) {
@@ -285,8 +296,11 @@ export function createPlayer() {
     inventory: [],          // 最大8個（持ち物）
     storage:   [],          // 容量無制限のアイテムボックス
     gold:      0,           // 所持金（敵撃破・床落ちで増加。死亡しても持ち越し）
+    skills:    [],          // 習得済み技 [{ id, name, pattern, dmgMult, mpCost, element, rarity, desc }]
   };
 }
+
+export const SKILL_SLOTS_MAX = 4;
 
 // 敵撃破時のゴールド報酬（決定論的ではなくランダム要素を含む）
 export function rollGoldDropFromMonster(mob) {
