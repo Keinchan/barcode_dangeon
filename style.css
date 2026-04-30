@@ -431,6 +431,18 @@ html, body {
 .hp-text { font-size: 15px; color: var(--success); font-weight: bold; }
 .mp-text { font-size: 14px; color: #4dc4ff; font-weight: bold; }
 
+/* スタックアイテムの個数表示（×N） */
+.menu-row-count {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.08);
+  color: #ffd54f;
+  font-size: 12px;
+  font-weight: bold;
+}
+
 #dungeon-canvas {
   display: block;
   margin: 8px auto;
