@@ -24,8 +24,57 @@ export function bumpRarity(rarity, steps = 1) {
   return RARITIES[Math.min(RARITIES.length - 1, idx + steps)];
 }
 
-// ── 属性 ──
-export const ELEMENTS = ['火', '水', '地', '風', '光', '闇'];
+// ── 属性（手描き / グラフィック系の奇抜な 6 属性） ──
+//   従来の 火/水/地/風/光/闇 を「絵的なスタイル」属性に刷新。
+//   棒人間 = もっとも素朴。落書き = 雑なエネルギー塊。影絵 = 影 + 毒。
+//   ピクセル = 8bit 系。ホログラム = 光と幻。折り紙 = 紙の鋭利。
+//
+//   ELEMENTS の長さは 6 のまま（バーコード由来の `% ELEMENTS.length` を維持）。
+//   旧セーブは ELEMENT_LEGACY_MAP で新表記にマッピングしてロード時に変換する。
+export const ELEMENTS = ['棒人間', '落書き', '影絵', 'ピクセル', 'ホログラム', '折り紙'];
+
+// 旧属性 → 新属性。同じ index 順を維持しているので、既存の
+// 「digit % 6 → element」由来の決定論性も保たれる。
+export const ELEMENT_LEGACY_MAP = {
+  '火': '棒人間',
+  '水': '落書き',
+  '地': '折り紙',
+  '風': 'ピクセル',
+  '光': 'ホログラム',
+  '闇': '影絵',
+};
+
+// 既存アイテム/モンスターの element 文字列が旧表記なら新表記に書き換える
+export function migrateElement(element) {
+  if (!element) return element;
+  return ELEMENT_LEGACY_MAP[element] ?? element;
+}
+
+// 属性相性（攻撃側 → 防御側 = ダメージ倍率）。
+// 6 属性のサークルマッチアップ：A → B が 1.5 倍なら逆 B → A は 0.7 倍。
+//   棒人間 > ピクセル > ホログラム > 影絵 > 折り紙 > 落書き > 棒人間 …
+const _STRONG_AGAINST = {
+  '棒人間':     'ピクセル',
+  'ピクセル':   'ホログラム',
+  'ホログラム': '影絵',
+  '影絵':       '折り紙',
+  '折り紙':     '落書き',
+  '落書き':     '棒人間',
+};
+
+export function elementMatchup(attacker, defender) {
+  if (!attacker || !defender) return 1.0;
+  if (_STRONG_AGAINST[attacker] === defender) return 1.5;
+  if (_STRONG_AGAINST[defender] === attacker) return 0.7;
+  return 1.0;
+}
+
+// 効果の言い回し（バトルログ表示用）
+export function matchupLabel(mult) {
+  if (mult >= 1.5) return '効果絶大！';
+  if (mult <= 0.7) return '効果今ひとつ...';
+  return '';
+}
 
 // ── ベース武器 / 防具 ──
 const WEAPONS = [
@@ -48,12 +97,14 @@ const POTIONS = [
   { base: '大回復薬', emoji: '💉', heal: 55 },
 ];
 
+// 巻物は新属性に対応した 6 種類。それぞれ ELEMENTS 内の 1 属性とリンクする
 const SCROLLS = [
-  { base: '炎の巻物', emoji: '📜', dmg: 15, element: '火' },
-  { base: '氷の巻物', emoji: '📋', dmg: 13, element: '水' },
-  { base: '雷の巻物', emoji: '⚡', dmg: 20, element: '風' },
-  { base: '闇の巻物', emoji: '🌑', dmg: 28, element: '闇' },
-  { base: '光の巻物', emoji: '✨', dmg: 18, element: '光' },
+  { base: '棒の巻物',     emoji: '🥢', dmg: 14, element: '棒人間' },
+  { base: 'ペンの巻物',   emoji: '✏️', dmg: 22, element: '落書き' },
+  { base: '影の巻物',     emoji: '👤', dmg: 18, element: '影絵' },
+  { base: 'ドットの巻物', emoji: '🟦', dmg: 16, element: 'ピクセル' },
+  { base: '虹の巻物',     emoji: '🌈', dmg: 20, element: 'ホログラム' },
+  { base: '紙の巻物',     emoji: '📄', dmg: 17, element: '折り紙' },
 ];
 
 // ── 装備の名前接尾辞（レアリティ毎・武器/防具共通） ──

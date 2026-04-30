@@ -12,7 +12,7 @@ import {
   ATK_PER_LEVEL,
   DEF_PER_LEVEL,
 } from './generator.js';
-import { generateItemFromBarcode, rarityFromDigit, bumpRarity, RARITIES } from './items.js';
+import { generateItemFromBarcode, rarityFromDigit, bumpRarity, RARITIES, migrateElement } from './items.js';
 import { hashString } from './rng.js';
 import { Dungeon } from './dungeon.js';
 import { Battle } from './battle.js';
@@ -1519,11 +1519,29 @@ function _applySave(data) {
   if (typeof player.gold !== 'number') player.gold = 0;
   // 旧セーブ互換: platinum / scanBudget の正規化（日次リセットも内側で実施）
   ensureScanBudget(player);
+  // 旧属性 (火/水/...) を新属性 (棒人間/落書き/...) にマイグレート
+  _migrateItemElements(player);
   clearedSet.clear();
   if (Array.isArray(data.clearedSeeds)) {
     for (const s of data.clearedSeeds) clearedSet.add(s);
   }
   refreshHUD();
+}
+
+// 旧属性表記のアイテムを新属性表記にインプレースで書き換える。
+// ELEMENT_LEGACY_MAP に該当しない値はスルー（既に新表記）。アイコンは新表記の
+// element をキーにキャッシュされるため、書き換え後の getItemIconUrl は自動で
+// 新カラーで再描画される。
+function _migrateItemElements(p) {
+  const fix = it => {
+    if (!it) return;
+    if (it.element) it.element = migrateElement(it.element);
+    if (it.skill?.element) it.skill.element = migrateElement(it.skill.element);
+  };
+  fix(p.weapon);
+  fix(p.armor);
+  for (const it of p.inventory ?? []) fix(it);
+  for (const it of p.storage   ?? []) fix(it);
 }
 
 function _setError(msg) {
