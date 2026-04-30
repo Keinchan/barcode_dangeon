@@ -1,4 +1,4 @@
-import { initMap, refreshPin, setPlayerPosition, invalidateMapSize } from './map.js';
+import { initMap, refreshPin, setPlayerPosition, invalidateMapSize, recenterOnPlayer } from './map.js';
 import { startScanner, stopScanner, getPosition, categoryOfFormat } from './scanner.js';
 import {
   createPlayer,
@@ -81,9 +81,15 @@ function show(name) {
   document.getElementById('screen-' + name).classList.add('active');
   screen = name;
   // マップを表示する時は Leaflet のサイズキャッシュを更新（非表示中に初期化されると
-  // タイル配置がズレて、クリック座標と表示位置が不一致になり地図が勝手に動いて見える）
+  // タイル配置がズレて、クリック座標と表示位置が不一致になり地図が勝手に動いて見える）。
+  // また、ダンジョン入場〜離脱の間に GPS が大きく動いた場合に「地図中心は古い場所
+  // のまま、新しいダンジョンが画面外」になるのを防ぐため、強制的にプレイヤー位置に
+  // 再センタリングする。
   if (name === 'map') {
-    requestAnimationFrame(() => invalidateMapSize());
+    requestAnimationFrame(() => {
+      invalidateMapSize();
+      recenterOnPlayer();
+    });
   }
   _bgmForScreen(name);
 }
