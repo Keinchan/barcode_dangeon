@@ -175,7 +175,11 @@ export class Battle {
     if (this.monster.hp > 0) return false;
     this.log(`✨ ${this.monster.name} を倒した！`);
     this._busy = true;
-    setTimeout(() => this.onEnd('win', this.monster), 900);
+    // 1撃キル時も周囲の他敵に最後の1ティック（移動・魔法）を与えてから勝利演出。
+    // これがないと「強い武器ができた途端に他の敵が完全に静止」して見える。
+    this._tickOtherEnemies(() => {
+      setTimeout(() => this.onEnd('win', this.monster), 600);
+    });
     return true;
   }
 
@@ -198,14 +202,18 @@ export class Battle {
     }, 550);
   }
 
-  _tickOtherEnemies() {
-    if (!this.dungeon) { this._busy = false; return; }
+  // onComplete: 省略すると通常の敵ターン終了として _busy=false に戻す。
+  // 指定すると tick 完了後にそれを呼び出し、_busy は呼び出し側の責務にする
+  // （勝利確定後の演出など、戦闘を閉じる前に1ティック挟みたい時に利用）
+  _tickOtherEnemies(onComplete) {
+    const finish = onComplete ?? (() => { this._busy = false; });
+    if (!this.dungeon) { finish(); return; }
     const r = this.dungeon.tickEnemies(this.player, { excludeMob: this.mobRef });
     if (this.onTick) { try { this.onTick(r); } catch {} }
 
     const magics = r.events.filter(e => e.type === 'magic');
     if (magics.length === 0) {
-      this._busy = false;
+      finish();
       return;
     }
 
@@ -217,7 +225,7 @@ export class Battle {
       const ev = magics[i++];
       if (!ev) {
         this.updateUI();
-        this._busy = false;
+        finish();
         return;
       }
       this.player.hp = Math.max(0, this.player.hp - ev.dmg);
@@ -231,7 +239,7 @@ export class Battle {
         return;
       }
       if (i < magics.length) setTimeout(step, STEP_MS);
-      else { this._busy = false; }
+      else { this.updateUI(); finish(); }
     };
     step();
   }
