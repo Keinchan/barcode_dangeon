@@ -338,6 +338,8 @@ function refreshMenu() {
   _refreshAudioMenu();
   document.getElementById('menu-lv').textContent  = player.level;
   document.getElementById('menu-hp').textContent  = `${player.hp}/${player.maxHp}`;
+  const menuMp = document.getElementById('menu-mp');
+  if (menuMp) menuMp.textContent = `${player.mp ?? 0}/${player.maxMp ?? 0}`;
   document.getElementById('menu-atk').textContent = player.atk;
   document.getElementById('menu-def').textContent = player.def;
   const menuGold = document.getElementById('menu-gold');
@@ -423,7 +425,11 @@ function _refreshStorageUI() {
   grid.innerHTML = '';
 
   let arr = player.storage.map((it, origIdx) => ({ it, origIdx }));
-  if (_storageCat !== 'all') arr = arr.filter(x => x.it.type === _storageCat);
+  if (_storageCat !== 'all') {
+    // 'potion' タブには HP / MP の両方を含める（種別タブを増やしすぎないため）
+    arr = arr.filter(x => x.it.type === _storageCat
+      || (_storageCat === 'potion' && x.it.type === 'mpPotion'));
+  }
   arr = _sortStorageRows(arr, _storageSort);
 
   if (arr.length === 0) {
@@ -569,7 +575,8 @@ function _refreshAudioMenu() {
 function _statLine(item) {
   if (item.type === 'weapon') return `ATK +${item.atkBonus}（${item.element}属性）`;
   if (item.type === 'armor')  return `DEF +${item.defBonus}（${item.element}属性）`;
-  if (item.type === 'potion') return `HP +${item.heal} 回復`;
+  if (item.type === 'potion')   return `HP +${item.heal} 回復`;
+  if (item.type === 'mpPotion') return `MP +${item.mpHeal} 回復`;
   if (item.type === 'scroll') return `${item.element}属性 ${item.dmg}ダメージ`;
   return '';
 }
@@ -704,7 +711,7 @@ function _renderInventoryRow(item, idx) {
   const skillHtml = item.skill?.name
     ? `<div class="menu-row-skill">✨ ${item.skill.name}</div>` : '';
   const isEquippable = item.type === 'weapon' || item.type === 'armor';
-  const isUsableHere = item.type === 'potion' && screen === 'dungeon' && !combatActive;
+  const isUsableHere = (item.type === 'potion' || item.type === 'mpPotion') && screen === 'dungeon' && !combatActive;
   const hasMainAction = isEquippable || isUsableHere;
   const action =
     isEquippable ? 'equip' :
@@ -794,19 +801,30 @@ document.getElementById('btn-confirm-cancel').addEventListener('click', () => {
 
 function _usePotionFromInventory(idx) {
   const item = player.inventory[idx];
-  if (!item || item.type !== 'potion') return;
-  if (player.hp >= player.maxHp) {
-    showAlert('HPが満タンです');
+  if (!item) return;
+  if (item.type === 'potion') {
+    if (player.hp >= player.maxHp) { showAlert('HPが満タンです'); return; }
+    const before = player.hp;
+    player.hp = Math.min(player.maxHp, player.hp + item.heal);
+    const actual = player.hp - before;
+    player.inventory.splice(idx, 1);
+    if (typeof dungeonLog === 'function' && screen === 'dungeon') {
+      dungeonLog(`🧪 ${item.name} を使用！ HPが${actual}回復した`);
+    }
+    playSfx('drink');
+  } else if (item.type === 'mpPotion') {
+    if ((player.mp ?? 0) >= (player.maxMp ?? 0)) { showAlert('MPが満タンです'); return; }
+    const before = player.mp ?? 0;
+    player.mp = Math.min(player.maxMp ?? 0, before + item.mpHeal);
+    const actual = player.mp - before;
+    player.inventory.splice(idx, 1);
+    if (typeof dungeonLog === 'function' && screen === 'dungeon') {
+      dungeonLog(`🔵 ${item.name} を使用！ MPが${actual}回復した`);
+    }
+    playSfx('drink');
+  } else {
     return;
   }
-  const before = player.hp;
-  player.hp = Math.min(player.maxHp, player.hp + item.heal);
-  const actual = player.hp - before;
-  player.inventory.splice(idx, 1);
-  if (typeof dungeonLog === 'function' && screen === 'dungeon') {
-    dungeonLog(`🧪 ${item.name} を使用！ HPが${actual}回復した`);
-  }
-  playSfx('drink');
   refreshHUD();
   refreshMenu();
   autoSave();
@@ -868,7 +886,8 @@ function _showItemResult(item, scan) {
   const statsLine =
     item.type === 'weapon' ? `ATK +${item.atkBonus}（${item.element}属性）` :
     item.type === 'armor'  ? `DEF +${item.defBonus}（${item.element}属性）` :
-    item.type === 'potion' ? `HP +${item.heal} 回復` :
+    item.type === 'potion'   ? `HP +${item.heal} 回復`   :
+    item.type === 'mpPotion' ? `MP +${item.mpHeal} 回復` :
     item.type === 'scroll' ? `${item.element}属性 ${item.dmg}ダメージ` : '';
 
   const skillBlock = item.skill?.name
@@ -973,7 +992,8 @@ function enterDungeon(data) {
     atk:       player.atk,
     def:       player.def,
   };
-  player.hp    = player.maxHp;     // 入場時に全回復
+  player.hp    = player.maxHp;     // 入場時に HP/MP 全回復
+  player.mp    = player.maxMp ?? 0;
   currentFloor = 1;
   loadFloor(1);
   show('dungeon');
@@ -985,14 +1005,19 @@ function loadFloor(floor) {
   dungeon = new Dungeon(dungeonData, floor);
   document.getElementById('dungeon-title').textContent = dungeonData.name;
   document.getElementById('floor-label').textContent   = `B${floor}F`;
+  // フロア進入時に MP 全回復（HP は据え置き）。スキル/技を毎フロアで気軽に振れる
+  // よう、ローグライクの「フロア境界＝休憩」の感覚に合わせる
+  player.mp = player.maxMp ?? 0;
   refreshHUD();
-  dungeonLog(`B${floor}F に入った`);
+  dungeonLog(`B${floor}F に入った（MP 全回復）`);
   dungeon.render(document.getElementById('dungeon-canvas'));
 }
 
 function refreshHUD() {
   document.getElementById('player-lv').textContent = `Lv${player.level}`;
   document.getElementById('player-hp').textContent = `HP: ${player.hp}/${player.maxHp}`;
+  const mpEl = document.getElementById('player-mp');
+  if (mpEl) mpEl.textContent = `MP: ${player.mp ?? 0}/${player.maxMp ?? 0}`;
   const wName = player.weapon ? `${player.weapon.emoji} +${player.weapon.atkBonus}` : '⚔️ ー';
   const aName = player.armor  ? `${player.armor.emoji} +${player.armor.defBonus}`  : '🛡️ ー';
   document.getElementById('equip-display').textContent = `${wName}　${aName}`;
@@ -1296,6 +1321,7 @@ function startBattle(mob, opts = {}) {
     document.getElementById('dungeon-footer').classList.remove('hidden');
 
     player.hp  = battle.player.hp;
+    player.mp  = battle.player.mp ?? player.mp;
     player.atk = battle.player.atk;
     player.def = battle.player.def;
     refreshHUD();
@@ -1412,7 +1438,7 @@ function showItemModal() {
     list.innerHTML = '<div style="text-align:center;color:#888;padding:12px">アイテムを持っていない</div>';
   } else {
     list.innerHTML = player.inventory.map((it, idx) => {
-      const canUse = it.type === 'potion' || it.type === 'scroll';
+      const canUse = it.type === 'potion' || it.type === 'mpPotion' || it.type === 'scroll';
       const lvHtml = it.level ? `<span class="menu-row-lv">Lv${it.level}</span>` : '';
       return `
         <div class="item-row${canUse ? '' : ' disabled'}" data-idx="${idx}">
@@ -1491,6 +1517,8 @@ function autoSave() {
       xp: player.xp,
       hp: player.hp,
       maxHp: player.maxHp,
+      mp: player.mp,
+      maxMp: player.maxMp,
       atkBase: player.atkBase,
       defBase: player.defBase,
       atk: player.atk,
@@ -1517,6 +1545,9 @@ function _applySave(data) {
   // 旧セーブ互換: storage が無いケース
   if (!Array.isArray(player.storage)) player.storage = [];
   if (typeof player.gold !== 'number') player.gold = 0;
+  // 旧セーブ互換: maxMp / mp が未設定 → レベル相当の値を埋め込み
+  if (typeof player.maxMp !== 'number') player.maxMp = statsForLevel(player.level || 1).maxMp;
+  if (typeof player.mp    !== 'number') player.mp    = player.maxMp;
   // 旧セーブ互換: platinum / scanBudget の正規化（日次リセットも内側で実施）
   ensureScanBudget(player);
   clearedSet.clear();
