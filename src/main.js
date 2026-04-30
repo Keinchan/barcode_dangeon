@@ -1373,10 +1373,10 @@ function _rollMonsterDrop(mob) {
   const dbg = getDebugState();
   const dropChance = dbg.forceDrop ? 1 :
     mob.isBoss               ? 1.0 :
-    mob.rarity === 'レジェンド' ? 0.8 :
-    mob.rarity === 'エピック'   ? 0.5 :
-    mob.rarity === 'レア'       ? 0.3 :
-    0.2;
+    mob.rarity === 'レジェンド' ? 0.95 :
+    mob.rarity === 'エピック'   ? 0.7  :
+    mob.rarity === 'レア'       ? 0.5  :
+    0.4;
   if (Math.random() > dropChance) return null;
 
   const seed = hashString(`drop:${dungeonData.seed}:${currentFloor}:${mob.x}:${mob.y}`);

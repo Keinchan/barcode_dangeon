@@ -205,22 +205,27 @@ html, body {
   letter-spacing: 1px;
 }
 
-/* マップ HUD のゴールド表示（タイトルとボタンの間に薄板で表示） */
+/* マップ HUD のゴールド表示（タイトルとボタンの間。少し大きめ・金色グロウ付き） */
 .hud-gold {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: bold;
   color: #ffd54f;
-  background: rgba(0,0,0,0.55);
-  padding: 4px 12px;
+  background: rgba(0,0,0,0.6);
+  padding: 5px 14px;
   border-radius: 14px;
   letter-spacing: 0.5px;
+  text-shadow: 0 0 6px rgba(255,213,79,0.55);
+  box-shadow: 0 0 10px rgba(255,213,79,0.18);
 }
 
-/* ダンジョンヘッダ右側のゴールド表示 */
+/* ダンジョンヘッダ右側のゴールド表示。改行して別行にし、HPと並列で常に視認できる */
 .gold-text {
-  font-size: 13px;
+  font-size: 14px;
   color: #ffd54f;
   font-weight: bold;
+  flex-basis: 100%;
+  text-shadow: 0 0 4px rgba(255,213,79,0.5);
+  margin-top: 2px;
 }
 
 /* メニューのステータス枠内ゴールド行 */
