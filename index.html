@@ -45,6 +45,7 @@
     <div class="map-hud">
       <div class="hud-title">⚔️ バーコードダンジョン</div>
       <div id="map-gold-display" class="hud-gold">🪙 0</div>
+      <div id="map-scan-status" class="hud-scan-status">📷 0/5　💎 0</div>
       <div class="hud-button-row">
         <button id="btn-scan" class="btn-primary">📷 スキャン</button>
         <button id="btn-menu" class="btn-secondary">🎒 メニュー</button>
@@ -57,6 +58,7 @@
     <div class="scanner-header">
       <button id="btn-back-scan" class="btn-back">← 戻る</button>
       <span>バーコードをスキャン</span>
+      <span id="scanner-status" class="scanner-status">本日 0/5　💎 0</span>
     </div>
     <div id="scanner-wrap">
       <video id="scanner-video" autoplay muted playsinline></video>
@@ -259,6 +261,12 @@
       </section>
 
       <section class="menu-section">
+        <div class="menu-section-title">💎 通貨・スキャン</div>
+        <div id="menu-scan-status" class="menu-scan-status">📷 0/5　💎 0</div>
+        <button id="btn-buy-platinum" class="menu-action-btn">プラチナ結晶を購入（テスト）</button>
+      </section>
+
+      <section class="menu-section">
         <div class="menu-section-title">🔊 サウンド</div>
         <label class="menu-audio-row">
           <input id="menu-bgm-toggle" type="checkbox" checked />
@@ -379,6 +387,17 @@
           <button id="debug-gold-give" class="debug-action">+N 付与</button>
         </div>
         <button id="debug-gold-clear" class="debug-action ghost">所持金 0 にする</button>
+      </fieldset>
+
+      <fieldset class="debug-section">
+        <legend>💎 プラチナ / スキャン</legend>
+        <div class="debug-row">
+          <input id="debug-platinum-amount" type="number" min="1" max="9999" value="10" />
+          <button id="debug-platinum-give" class="debug-action">+N 結晶</button>
+        </div>
+        <div class="debug-row">
+          <button id="debug-scan-reset" class="debug-action">本日のスキャン回数リセット</button>
+        </div>
       </fieldset>
 
       <fieldset class="debug-section">
