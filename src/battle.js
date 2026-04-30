@@ -4,8 +4,31 @@ import {
   showFloatingDamage, showEnemyDamage,
   sparkSpray, explosion, shockwave, magicCircle,
   playerVfxAnchor, enemyVfxAnchor,
+  hitFlash, screenShake, deathBurst,
 } from './ui.js';
 import { playSfx } from './audio.js';
+
+// 属性 → 16進カラー（VFX 色の統一に使用）。ui.js の magicCircle と同色テーブル
+function _elementHexColor(element) {
+  switch (element) {
+    case '棒人間':     return '#c5c5d4';
+    case '落書き':     return '#ff6b6b';
+    case '影絵':       return '#5b5b78';
+    case 'ピクセル':   return '#4dc4ff';
+    case 'ホログラム': return '#b070dd';
+    case '折り紙':     return '#ffd54f';
+    default: return null;
+  }
+}
+// 16進 → rgba(...) で alpha 指定（簡易）
+function _alphaize(hex, a = 0.6) {
+  const m = hex.match(/^#([0-9a-f]{6})$/i);
+  if (!m) return hex;
+  const r = parseInt(m[1].slice(0,2), 16);
+  const g = parseInt(m[1].slice(2,4), 16);
+  const b = parseInt(m[1].slice(4,6), 16);
+  return `rgba(${r},${g},${b},${a})`;
+}
 
 export class Battle {
   constructor(player, monster, onEnd, opts = {}) {
@@ -124,15 +147,29 @@ export class Battle {
     const matchup = elementMatchup(this.player.weapon?.element, this.monster.element);
     const dmg = this._calcDmg(this.player.atk, this.monster.def, matchup);
     const isCrit = dmg >= Math.max(2, Math.floor((this.player.atk - this.monster.def) * 1.4 * matchup));
+    const isEffective = matchup >= 1.5;
+    const isWeak      = matchup <= 0.7;
     this.monster.hp = Math.max(0, this.monster.hp - dmg);
     const matchLbl = matchupLabel(matchup);
     this.log(`⚔️ こうげき！ ${dmg} ダメージ！${matchLbl ? '　' + matchLbl : ''}`);
-    showEnemyDamage(dmg);
+    const dmgKind = isCrit ? 'crit' : isEffective ? 'effective' : isWeak ? 'weak' : 'normal';
+    showEnemyDamage(dmg, { kind: dmgKind });
     playSfx(isCrit ? 'crit' : 'hit');
-    // VFX: クリティカルは爆発、通常は火花
+    // VFX: クリティカルは爆発+全画面フラッシュ+シェイク、通常は火花。属性色を反映
     const enemyAt = enemyVfxAnchor();
-    if (isCrit) explosion(enemyAt, { color: '#ff7043' });
-    else        sparkSpray(enemyAt, { color: '#ffd54f', count: 8 });
+    const elColor = _elementHexColor(this.player.weapon?.element);
+    if (isCrit) {
+      hitFlash({ color: 'rgba(255,213,79,0.55)' });
+      screenShake(10, 320);
+      explosion(enemyAt, { color: elColor ?? '#ff7043' });
+      sparkSpray(enemyAt, { count: 18, color: '#fff' });
+    } else if (isEffective) {
+      screenShake(5, 200);
+      sparkSpray(enemyAt, { color: elColor ?? '#ffd54f', count: 14 });
+      sparkSpray(enemyAt, { color: '#fff', count: 6 });
+    } else {
+      sparkSpray(enemyAt, { color: elColor ?? '#ffd54f', count: 10 });
+    }
     this.updateUI();
     this._checkEnemyDead() || this._enemyTurn();
   }
@@ -148,14 +185,19 @@ export class Battle {
     const dmg = this._calcDmg(this.player.atk, this.monster.def, 2.0 * matchup);
     this.monster.hp = Math.max(0, this.monster.hp - dmg);
     const matchLbl = matchupLabel(matchup);
+    const isEffective = matchup >= 1.5;
     this.log(`✨ スキル！ ${dmg} の大ダメージ！（MP -${SKILL_MP_COST}）${matchLbl ? '　' + matchLbl : ''}`);
-    showEnemyDamage(dmg);
+    showEnemyDamage(dmg, { kind: isEffective ? 'crit' : 'effective' });
     playSfx('crit');
-    // VFX: 武器属性の魔法陣 → 爆発
+    // VFX: 武器属性の魔法陣 → 爆発（クリ相当）+ 全画面フラッシュ + シェイク
     const enemyAt = enemyVfxAnchor();
     const elem = this.player.weapon?.element ?? this.player.weapon?.skill?.element;
+    const elColor = _elementHexColor(elem);
+    hitFlash({ color: 'rgba(255,138,101,0.45)' });
+    screenShake(8, 280);
     magicCircle(enemyAt, elem);
-    setTimeout(() => explosion(enemyAt, { color: '#ff8a65' }), 350);
+    setTimeout(() => explosion(enemyAt, { color: elColor ?? '#ff8a65' }), 320);
+    setTimeout(() => sparkSpray(enemyAt, { color: '#fff', count: 14 }), 380);
     this.updateUI();
     this._checkEnemyDead() || this._enemyTurn();
   }
@@ -200,13 +242,14 @@ export class Battle {
     if (this.monster.hp > 0) return false;
     this.log(`✨ ${this.monster.name} を倒した！`);
     this._busy = true;
+    // 撃破演出: 全画面フラッシュ + シェイク + 拡大リング + 大量火花
+    const enemyAt = enemyVfxAnchor();
+    hitFlash({ color: 'rgba(255,213,79,0.45)' });
+    screenShake(this.monster.isBoss ? 14 : 8, this.monster.isBoss ? 480 : 320);
+    deathBurst(enemyAt, { color: this.monster.rarityColor ?? '#ff7043' });
     // 1撃キル時も周囲の他敵に最後の1ティック（移動・魔法）を与えてから勝利演出。
-    // これがないと「強い武器ができた途端に他の敵が完全に静止」して見える。
-    //
     // initialDelay: プレイヤーの致命アタック VFX（火花・爆発）と他敵の魔法演出が
-    // 同フレームで重なって表示される問題があったため、最初の魔法 1 件目までに
-    // 500ms 待機させて順番化する。通常の敵ターン経由なら _enemyTurn で 550+380ms
-    // 既に挟まっているので 0 のままで OK。
+    // 同フレームで重なるのを避けるため、最初の魔法 1 件目までに 500ms 待機。
     this._tickOtherEnemies(() => {
       setTimeout(() => this.onEnd('win', this.monster), 600);
     }, { initialDelay: 500 });
@@ -282,16 +325,28 @@ export class Battle {
   _enemyBasicAttack() {
     const matchup = elementMatchup(this.monster.element, this.player.armor?.element);
     const dmg = this._calcDmg(this.monster.atk, this.player.def, matchup);
+    const isEffective = matchup >= 1.5;
+    const isWeak      = matchup <= 0.7;
     this.player.hp = Math.max(0, this.player.hp - dmg);
     const label = this.wallPiercing ? '✨ 魔法攻撃' : '💥 攻撃';
     const matchLbl = matchupLabel(matchup);
     this.log(`${label} ${this.monster.name} の一撃！ ${dmg} ダメージ！${matchLbl ? '　' + matchLbl : ''}`);
-    showFloatingDamage(dmg);
+    const dmgKind = isEffective ? 'crit' : isWeak ? 'weak' : 'normal';
+    showFloatingDamage(dmg, { kind: dmgKind });
     playSfx('damage');
-    // VFX: 被ダメ衝撃波（壁越しは魔法陣も）
+    // VFX: 被ダメ衝撃波（属性色）+ 効果絶大ならフラッシュ + 軽いシェイク
     const playerAt = playerVfxAnchor();
-    shockwave(playerAt, { color: 'rgba(255,82,82,0.65)' });
+    const elColor  = _elementHexColor(this.monster.element);
+    shockwave(playerAt, { color: elColor ? _alphaize(elColor, 0.65) : 'rgba(255,82,82,0.65)' });
     if (this.wallPiercing) magicCircle(playerAt, this.monster.element);
+    if (isEffective) {
+      hitFlash({ color: 'rgba(255,82,82,0.4)' });
+      screenShake(7, 240);
+      sparkSpray(playerAt, { color: elColor ?? '#ff5252', count: 14 });
+    } else {
+      screenShake(3, 140);
+      sparkSpray(playerAt, { color: elColor ?? '#ff5252', count: 8 });
+    }
     this.updateUI();
     this._checkPlayerDead();
   }
