@@ -493,6 +493,59 @@ export function randomSkillBook(rng = Math.random, mobRarity = null) {
   return makeSkillBook(pool[Math.floor(r * pool.length)].id);
 }
 
+// ─────────────────────────────────────────────
+// アイテム合成（武器強化 + 特定レアレシピ）
+// ─────────────────────────────────────────────
+//   ベース仕様: 武器を選び、対応するレアリティの素材を消費して atkBonus を強化、
+//   名前に接尾辞をつける。素材種別はレアリティで決まり、素材数も固定。
+//
+//   特殊レシピ: 同名レジェンド武器 ×2 → 神話級武器
+//   （atkBonus 1.8 倍 + 接尾辞「神話」を付与）
+
+// 武器レアリティ → 必要素材
+export const ENHANCE_RECIPES = {
+  'コモン':     { matName: '鉄片',     matCount: 2, mult: 1.30, suffix: '+鉄',   keepRarity: true,  newRarityName: null },
+  'レア':       { matName: '魔石',     matCount: 2, mult: 1.40, suffix: '+魔',   keepRarity: true,  newRarityName: null },
+  'エピック':   { matName: '神秘の塵', matCount: 2, mult: 1.50, suffix: '+塵',   keepRarity: true,  newRarityName: null },
+  'レジェンド': { matName: '神龍の鱗', matCount: 1, mult: 1.60, suffix: '+龍',   keepRarity: true,  newRarityName: null },
+};
+
+// 強化武器を生成（元武器 + レシピ）。新しいオブジェクトを返す（元は呼び出し側で消費）
+export function applyEnhanceRecipe(weapon, recipe) {
+  const newAtk = Math.max(weapon.atkBonus + 1, Math.floor(weapon.atkBonus * recipe.mult));
+  const baseName = weapon.name.replace(/\+.*$/, ''); // 既存の +xxx を剥がしてから付け直す
+  return {
+    ...weapon,
+    atkBonus: newAtk,
+    name:     `${baseName}${recipe.suffix}`,
+    desc:     weapon.skill?.kind === 'none' || !weapon.skill?.name
+      ? `ATK +${newAtk}（${weapon.element}属性）`
+      : `ATK +${newAtk} / ${weapon.skill.name}: ${weapon.skill.desc}`,
+  };
+}
+
+// 同名レジェンド武器 ×2 → 神話級。新オブジェクトを返す
+export function fuseLegendaries(weaponA, weaponB) {
+  if (!weaponA || !weaponB) return null;
+  if (weaponA.rarity !== 'レジェンド' || weaponB.rarity !== 'レジェンド') return null;
+  const baseA = weaponA.name.replace(/\+.*$/, '').replace(/神話$/, '');
+  const baseB = weaponB.name.replace(/\+.*$/, '').replace(/神話$/, '');
+  if (baseA !== baseB) return null;
+  const stronger = (weaponA.atkBonus >= weaponB.atkBonus) ? weaponA : weaponB;
+  const newAtk = Math.floor(stronger.atkBonus * 1.8);
+  return {
+    ...stronger,
+    atkBonus: newAtk,
+    name:     `${baseA}・神話`,
+    rarity:   'レジェンド',          // 表示はレジェンド扱い、内部接尾辞で識別
+    rarityColor: '#ffe082',
+    isMythic: true,
+    desc:     stronger.skill?.kind === 'none' || !stronger.skill?.name
+      ? `ATK +${newAtk}（${stronger.element}属性）/ 神話級`
+      : `ATK +${newAtk} / ${stronger.skill.name}: ${stronger.skill.desc} / 神話級`,
+  };
+}
+
 // ── ショップ価格 ──
 // レアリティと種別から購入価格（ゴールド）を算出。ダンジョンレアリティで倍率がかかる
 const _SHOP_BASE = {
