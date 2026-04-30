@@ -431,6 +431,17 @@ export class Dungeon {
       const dy = it.y - (py - half);
       if (dx < 0 || dx >= VIEW || dy < 0 || dy >= VIEW) continue;
       if (!revealAll && !this.visible.has(`${it.x},${it.y}`)) continue;
+
+      // ゴールドの山は絵文字 + 数値表記で描画（手続きアイコンは武器/防具/薬/巻物のみ）
+      if (it.type === 'gold') {
+        const fs = Math.floor(ts * 0.6);
+        ctx.font = `${fs}px serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('🪙', dx * ts + ts / 2, dy * ts + ts / 2);
+        continue;
+      }
+
       const iconSize = Math.max(20, Math.floor(ts * 0.85));
       const icon = getItemIconCanvas(it, 64);
       const ix = dx * ts + (ts - iconSize) / 2;

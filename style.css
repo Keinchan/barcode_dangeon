@@ -205,6 +205,32 @@ html, body {
   letter-spacing: 1px;
 }
 
+/* マップ HUD のゴールド表示（タイトルとボタンの間に薄板で表示） */
+.hud-gold {
+  font-size: 14px;
+  font-weight: bold;
+  color: #ffd54f;
+  background: rgba(0,0,0,0.55);
+  padding: 4px 12px;
+  border-radius: 14px;
+  letter-spacing: 0.5px;
+}
+
+/* ダンジョンヘッダ右側のゴールド表示 */
+.gold-text {
+  font-size: 13px;
+  color: #ffd54f;
+  font-weight: bold;
+}
+
+/* メニューのステータス枠内ゴールド行 */
+.menu-gold-line {
+  color: #ffd54f;
+  font-weight: bold;
+  grid-column: 1 / -1;       /* 4 列レイアウトでも 1 行占有 */
+  text-align: left;
+}
+
 /* ── BUTTONS ── */
 .btn-primary {
   background: var(--primary);
