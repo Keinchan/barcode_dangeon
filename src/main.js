@@ -12,7 +12,10 @@ import {
   ATK_PER_LEVEL,
   DEF_PER_LEVEL,
 } from './generator.js';
-import { generateItemFromBarcode, rarityFromDigit, bumpRarity, RARITIES, migrateElement } from './items.js';
+import {
+  generateItemFromBarcode, rarityFromDigit, bumpRarity, RARITIES, migrateElement,
+  isStackable, stackKey, materialForRarity,
+} from './items.js';
 import { hashString } from './rng.js';
 import { Dungeon } from './dungeon.js';
 import { Battle } from './battle.js';
@@ -63,6 +66,71 @@ import {
   DAILY_FREE_SCANS,
   PLATINUM_STUB_GRANT,
 } from './scan-budget.js';
+
+// ─────────────────────────────────────────────
+// インベントリのスタック操作
+// ─────────────────────────────────────────────
+//   isStackable(item) が true の場合、同じ stackKey のスタックに合算する。
+//   非スタックは個体差があるので必ず別スロット。
+//   capacity 指定時は新規スタック作成のみ枠を消費する（既存スタックへの加算は枠外）。
+// インベントリに追加できるか事前判定（スタックなら既存に合算可能なので true）
+function canAddToInventory(item) {
+  if (isStackable(item)) {
+    const ex = player.inventory.find(it => isStackable(it) && stackKey(it) === stackKey(item));
+    if (ex) return true;
+  }
+  return player.inventory.length < 8;
+}
+
+function _addToList(list, item, capacity) {
+  if (!item) return { ok: false, msg: 'invalid' };
+  const incomingCount = item.count ?? 1;
+  if (isStackable(item)) {
+    const key = stackKey(item);
+    const ex  = list.find(it => isStackable(it) && stackKey(it) === key);
+    if (ex) {
+      ex.count = (ex.count ?? 1) + incomingCount;
+      return { ok: true, stacked: true };
+    }
+  }
+  if (capacity != null && list.length >= capacity) return { ok: false, msg: 'full' };
+  // 新規追加。スタック対象は count 必須にする
+  const entry = isStackable(item) ? { ...item, count: incomingCount } : { ...item };
+  list.push(entry);
+  return { ok: true, stacked: false };
+}
+function addToInventory(item) { return _addToList(player.inventory, item, 8); }
+function addToStorage(item)   { return _addToList(player.storage,   item, null); }
+
+// 指定 idx のアイテムを 1 個取り出す。スタックなら count -= 1、最後の 1 個 or
+// 非スタックなら splice で除去。返り値は count=1 のシングルアイテム
+function takeOneFromInventory(idx) {
+  const it = player.inventory[idx];
+  if (!it) return null;
+  if (isStackable(it) && (it.count ?? 1) > 1) {
+    it.count -= 1;
+    return { ...it, count: 1 };
+  }
+  return player.inventory.splice(idx, 1)[0];
+}
+
+// セーブロード時の互換: 既存配列に count を埋め、同 stackKey の重複を 1 スタックに集約
+function _consolidateStacks(p) {
+  for (const arrName of ['inventory', 'storage']) {
+    const arr = p[arrName];
+    if (!Array.isArray(arr)) continue;
+    const merged = [];
+    for (const it of arr) {
+      if (typeof it.count !== 'number' && isStackable(it)) it.count = 1;
+      if (isStackable(it)) {
+        const ex = merged.find(m => isStackable(m) && stackKey(m) === stackKey(it));
+        if (ex) { ex.count = (ex.count ?? 1) + (it.count ?? 1); continue; }
+      }
+      merged.push(it);
+    }
+    p[arrName] = merged;
+  }
+}
 
 // アイテム表示を絵文字 → 手続きアイコンに置換するためのヘルパ
 function iconImg(item, size = 38) {
@@ -473,10 +541,12 @@ function _renderStorageRow(item, idx) {
   const skillHtml = item.skill?.name
     ? `<div class="menu-row-skill">✨ ${item.skill.name}</div>` : '';
   const lvHtml = item.level ? `<span class="menu-row-lv">Lv${item.level}</span>` : '';
+  const countHtml = (isStackable(item) && (item.count ?? 1) > 1)
+    ? `<span class="menu-row-count">×${item.count}</span>` : '';
   div.innerHTML = `
     <div class="menu-row-emoji">${iconImg(item, 38)}</div>
     <div class="menu-row-info">
-      <div class="menu-row-name" style="color:${item.rarityColor}">${item.name} ${lvHtml}</div>
+      <div class="menu-row-name" style="color:${item.rarityColor}">${item.name} ${lvHtml} ${countHtml}</div>
       <div class="menu-row-stat">${_statLine(item)} / ${item.rarity}</div>
       ${skillHtml}
     </div>
@@ -486,20 +556,25 @@ function _renderStorageRow(item, idx) {
     </div>
   `;
   div.querySelector('.withdraw').addEventListener('click', () => {
-    if (player.inventory.length >= 8) {
-      showAlert('持ち物が満杯です');
-      return;
-    }
-    const it = player.storage.splice(idx, 1)[0];
+    // スタック対象なら持ち物の同じスタックに合流できるので満杯でも OK な場合あり
+    const probe = player.storage[idx];
+    if (!probe) return;
+    if (!canAddToInventory(probe)) { showAlert('持ち物が満杯です'); return; }
+    // 1 個だけ取り出してインベントリへ
+    const it = isStackable(probe) && (probe.count ?? 1) > 1
+      ? (probe.count -= 1, { ...probe, count: 1 })
+      : player.storage.splice(idx, 1)[0];
     if (it) {
-      player.inventory.push(it);
+      addToInventory(it);
       playSfx('equip');
       refreshMenu();
       autoSave();
     }
   });
   div.querySelector('.discard').addEventListener('click', async () => {
-    const ok = await showConfirm(`${item.name} を廃棄しますか？`, { danger: true, okLabel: '廃棄' });
+    const cnt = (isStackable(item) && (item.count ?? 1) > 1)
+      ? `（×${item.count} まとめて）` : '';
+    const ok = await showConfirm(`${item.name}${cnt} を廃棄しますか？`, { danger: true, okLabel: '廃棄' });
     if (!ok) return;
     player.storage.splice(idx, 1);
     playSfx('discard');
@@ -509,11 +584,12 @@ function _renderStorageRow(item, idx) {
   return div;
 }
 
-// 持ち物 → ストレージ単品送り（_renderInventoryRow にボタンを追加するヘルパ）
+// 持ち物 → ストレージ単品送り（_renderInventoryRow にボタンを追加するヘルパ）。
+// スタックなら 1 個だけ送る（残りはインベントリ側のスタックに残る）。
 function _depositToStorage(idx) {
-  const it = player.inventory.splice(idx, 1)[0];
+  const it = takeOneFromInventory(idx);
   if (!it) return;
-  player.storage.push(it);
+  addToStorage(it);
   playSfx('discard');
   refreshMenu();
   autoSave();
@@ -524,10 +600,10 @@ function _depositToStorage(idx) {
 function _autoCollectDrop(drop) {
   if (!Array.isArray(player.storage)) player.storage = [];
   let toStorage = false;
-  if (player.inventory.length < 8) {
-    player.inventory.push(drop);
+  if (canAddToInventory(drop)) {
+    addToInventory(drop);
   } else {
-    player.storage.push(drop);
+    addToStorage(drop);
     toStorage = true;
   }
   playSfx('drop', { rarityTier: rarityTier(drop.rarity) });
@@ -717,12 +793,14 @@ function _renderInventoryRow(item, idx) {
     isEquippable ? 'equip' :
     isUsableHere ? 'use' : 'none';
 
-  const lvHtml = item.level ? `<span class="menu-row-lv">Lv${item.level}</span>` : '';
+  const lvHtml    = item.level ? `<span class="menu-row-lv">Lv${item.level}</span>` : '';
+  const countHtml = (isStackable(item) && (item.count ?? 1) > 1)
+    ? `<span class="menu-row-count">×${item.count}</span>` : '';
   div.innerHTML = `
     <button class="menu-row-main" data-action="${action}" ${hasMainAction ? '' : 'disabled'}>
       <div class="menu-row-emoji">${iconImg(item, 38)}</div>
       <div class="menu-row-info">
-        <div class="menu-row-name" style="color:${item.rarityColor}">${item.name} ${lvHtml}</div>
+        <div class="menu-row-name" style="color:${item.rarityColor}">${item.name} ${lvHtml} ${countHtml}</div>
         <div class="menu-row-stat">${_statLine(item)} / ${item.rarity}</div>
         ${skillHtml}
       </div>
@@ -807,7 +885,7 @@ function _usePotionFromInventory(idx) {
     const before = player.hp;
     player.hp = Math.min(player.maxHp, player.hp + item.heal);
     const actual = player.hp - before;
-    player.inventory.splice(idx, 1);
+    takeOneFromInventory(idx);
     if (typeof dungeonLog === 'function' && screen === 'dungeon') {
       dungeonLog(`🧪 ${item.name} を使用！ HPが${actual}回復した`);
     }
@@ -817,7 +895,7 @@ function _usePotionFromInventory(idx) {
     const before = player.mp ?? 0;
     player.mp = Math.min(player.maxMp ?? 0, before + item.mpHeal);
     const actual = player.mp - before;
-    player.inventory.splice(idx, 1);
+    takeOneFromInventory(idx);
     if (typeof dungeonLog === 'function' && screen === 'dungeon') {
       dungeonLog(`🔵 ${item.name} を使用！ MPが${actual}回復した`);
     }
@@ -954,7 +1032,7 @@ function _acquireItem(item) {
       const old = player.weapon;
       player.weapon = item;
       player.atk    = player.atkBase + item.atkBonus;
-      if (old && player.inventory.length < 8) player.inventory.push(old);
+      if (old) addToInventory(old);
       return `⚔️ ${item.name} を装備！`;
     }
   } else if (item.type === 'armor') {
@@ -962,14 +1040,12 @@ function _acquireItem(item) {
       const old = player.armor;
       player.armor = item;
       player.def   = player.defBase + item.defBonus;
-      if (old && player.inventory.length < 8) player.inventory.push(old);
+      if (old) addToInventory(old);
       return `🛡️ ${item.name} を装備！`;
     }
   }
-  if (player.inventory.length >= 8) {
-    return `🎒 持ち物が満杯！ ${item.name} を諦めた...`;
-  }
-  player.inventory.push(item);
+  const r = addToInventory(item);
+  if (!r.ok) return `🎒 持ち物が満杯！ ${item.name} を諦めた...`;
   return `🎒 ${item.name} を入手！`;
 }
 
@@ -1190,10 +1266,14 @@ function pickupItem(item) {
     return;
   }
 
-  if (player.inventory.length >= 8 && item.type !== 'weapon' && item.type !== 'armor') {
+  // 装備品は装備に置き換えられる可能性があるので満杯でも拾う（古い装備が
+  // 持ち物に押し戻される時に追加で空きが必要にはなるが、その時点で再評価）。
+  // 非装備で持ち物に入れられない場合はここで弾く。
+  if (item.type !== 'weapon' && item.type !== 'armor' && !canAddToInventory(item)) {
     dungeonLog(`🎒 満杯！ ${item.name} を拾えなかった`);
     return;
   }
+
   dungeon.removeFloorItem(item);
   playSfx('pickup', { rarityTier: rarityTier(item.rarity) });
 
@@ -1204,14 +1284,12 @@ function pickupItem(item) {
       player.weapon = item;
       player.atk    = player.atkBase + item.atkBonus;
       dungeonLog(`⚔️ ${item.name} を装備！ ATK+${item.atkBonus}`, { rarity: item.rarity });
-      if (old && player.inventory.length < 8) player.inventory.push(old);
+      if (old) addToInventory(old);
       action = '装備';
-    } else if (player.inventory.length < 8) {
-      player.inventory.push(item);
-      dungeonLog(`🎒 ${item.name} を拾った`, { rarity: item.rarity });
     } else {
-      dungeonLog(`🎒 満杯！ ${item.name} を拾えなかった`);
-      return;
+      const r = addToInventory(item);
+      if (!r.ok) { dungeonLog(`🎒 満杯！ ${item.name} を拾えなかった`); return; }
+      dungeonLog(`🎒 ${item.name} を拾った`, { rarity: item.rarity });
     }
   } else if (item.type === 'armor') {
     if (!player.armor || item.defBonus > player.armor.defBonus) {
@@ -1219,18 +1297,17 @@ function pickupItem(item) {
       player.armor = item;
       player.def   = player.defBase + item.defBonus;
       dungeonLog(`🛡️ ${item.name} を装備！ DEF+${item.defBonus}`, { rarity: item.rarity });
-      if (old && player.inventory.length < 8) player.inventory.push(old);
+      if (old) addToInventory(old);
       action = '装備';
-    } else if (player.inventory.length < 8) {
-      player.inventory.push(item);
-      dungeonLog(`🎒 ${item.name} を拾った`, { rarity: item.rarity });
     } else {
-      dungeonLog(`🎒 満杯！ ${item.name} を拾えなかった`);
-      return;
+      const r = addToInventory(item);
+      if (!r.ok) { dungeonLog(`🎒 満杯！ ${item.name} を拾えなかった`); return; }
+      dungeonLog(`🎒 ${item.name} を拾った`, { rarity: item.rarity });
     }
   } else {
-    player.inventory.push(item);
-    dungeonLog(`🎒 ${item.name} を拾った`, { rarity: item.rarity });
+    const r = addToInventory(item);
+    if (!r.ok) { dungeonLog(`🎒 満杯！ ${item.name} を拾えなかった`); return; }
+    dungeonLog(`🎒 ${item.name} を拾った${r.stacked ? '（同種を持っていたのでまとめた）' : ''}`, { rarity: item.rarity });
   }
   _celebratePickup(item, action);
 
@@ -1343,6 +1420,11 @@ function startBattle(mob, opts = {}) {
         dungeonLog(`🪙 ${mob.name} は ${gold} ゴールドを落とした`);
         refreshHUD();
       }
+      // 素材ドロップ（装備ドロップとは独立）
+      const mat = _rollMaterialDrop(mob);
+      if (mat) {
+        _autoCollectDrop(mat);
+      }
       // ドロップ判定
       const drop = _rollMonsterDrop(mob);
       if (drop) {
@@ -1394,6 +1476,15 @@ window.addEventListener('resize', () => {
   }
 });
 
+// モンスター撃破時の素材ドロップ（装備ドロップと独立）。15% で発生し、
+// モンスターのレアリティに対応した素材 1 個。合成・ショップで使う想定。
+function _rollMaterialDrop(mob) {
+  const dbg = getDebugState();
+  const chance = dbg.forceDrop ? 1 : 0.15;
+  if (Math.random() > chance) return null;
+  return materialForRarity(mob.rarity);
+}
+
 // モンスター撃破時のドロップ判定
 function _rollMonsterDrop(mob) {
   const dbg = getDebugState();
@@ -1440,11 +1531,12 @@ function showItemModal() {
     list.innerHTML = player.inventory.map((it, idx) => {
       const canUse = it.type === 'potion' || it.type === 'mpPotion' || it.type === 'scroll';
       const lvHtml = it.level ? `<span class="menu-row-lv">Lv${it.level}</span>` : '';
+      const cnt    = (isStackable(it) && (it.count ?? 1) > 1) ? `<span class="menu-row-count">×${it.count}</span>` : '';
       return `
         <div class="item-row${canUse ? '' : ' disabled'}" data-idx="${idx}">
           <span class="item-emoji">${iconImg(it, 32)}</span>
           <div class="item-info">
-            <div class="item-name">${it.name} ${lvHtml}</div>
+            <div class="item-name">${it.name} ${lvHtml} ${cnt}</div>
             <div class="item-desc">${it.desc}</div>
           </div>
           <span class="item-rarity" style="color:${it.rarityColor}">${it.rarity}</span>
@@ -1454,9 +1546,13 @@ function showItemModal() {
     list.querySelectorAll('.item-row:not(.disabled)').forEach(row => {
       row.addEventListener('click', () => {
         const idx  = parseInt(row.dataset.idx, 10);
-        const item = player.inventory[idx];
-        player.inventory.splice(idx, 1);
+        const item = takeOneFromInventory(idx);
+        if (!item) return;
         document.getElementById('item-modal').classList.add('hidden');
+        // battle 内では this.player.inventory が clone され同一参照。
+        // takeOneFromInventory が player.inventory を変更したので battle 側にも
+        // 反映させる必要がある（戦闘終了時に inventory を書き戻していないため）
+        battle.player.inventory = player.inventory;
         battle.useItem(item);
       });
     });
@@ -1552,6 +1648,8 @@ function _applySave(data) {
   ensureScanBudget(player);
   // 旧属性 (火/水/...) を新属性 (棒人間/落書き/...) にマイグレート
   _migrateItemElements(player);
+  // 旧セーブのスタック未対応データを集約（count 付与 + 同種重複統合）
+  _consolidateStacks(player);
   clearedSet.clear();
   if (Array.isArray(data.clearedSeeds)) {
     for (const s of data.clearedSeeds) clearedSet.add(s);

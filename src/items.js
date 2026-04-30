@@ -322,6 +322,53 @@ function _buildScroll(barcode, rng, rarity, element, level) {
   };
 }
 
+// ── スタック判定 ──
+// 武器・防具は個体差があるので非スタック。それ以外（薬・MP薬・巻物・素材）は
+// 同種・同名・同レア・同Lv なら 1 スロットに count としてまとめる。
+export function isStackable(item) {
+  if (!item) return false;
+  return item.type === 'potion'
+      || item.type === 'mpPotion'
+      || item.type === 'scroll'
+      || item.type === 'material';
+}
+
+export function stackKey(item) {
+  return `${item.type}|${item.name}|${item.rarity}|${item.level ?? 1}`;
+}
+
+// ── 合成・ショップ等で使う素材アイテム ──
+//   レア度ごとに 1 種類用意。スキャン由来ではなくモンスター撃破ドロップで入手。
+//   合成レシピは feat/item-synthesis 側で定義。
+export const MATERIALS = [
+  { name: '鉄片',       emoji: '⛓️',  rarity: 'コモン',     desc: '合成の基本素材' },
+  { name: '魔石',       emoji: '💠',  rarity: 'レア',       desc: '魔力を込めた小さな石' },
+  { name: '神秘の塵',   emoji: '✨',  rarity: 'エピック',   desc: '稀に風に舞う幻の素材' },
+  { name: '神龍の鱗',   emoji: '🐉',  rarity: 'レジェンド', desc: '伝説の竜から剥がれた一片' },
+];
+
+// 素材アイテムを生成（スタック可能）
+export function makeMaterial(spec) {
+  const rarity = RARITIES.find(r => r.name === spec.rarity) ?? RARITIES[0];
+  return {
+    type:        'material',
+    name:        spec.name,
+    emoji:       spec.emoji,
+    rarity:      rarity.name,
+    rarityColor: rarity.color,
+    element:     null,
+    level:       1,
+    desc:        spec.desc,
+    count:       1,
+  };
+}
+
+// 指定レアリティに対応する素材を返す（無ければコモン）
+export function materialForRarity(rarityName) {
+  const m = MATERIALS.find(s => s.rarity === rarityName) ?? MATERIALS[0];
+  return makeMaterial(m);
+}
+
 // ── アイテム使用（バトル中） ──
 // 戻り値: { msg, healAmt, dmgAmt, mpHealAmt, consumed }
 export function applyItem(item, player, monster) {
