@@ -1684,14 +1684,16 @@ if (DEBUG) {
   document.getElementById('debug-add-scroll').addEventListener('click', () => debugAddItem('scroll'));
 
   document.getElementById('debug-clear-inv').addEventListener('click', async () => {
-    const ok = await showConfirm('インベントリと装備を全廃棄します', { danger: true, okLabel: '全廃棄' });
+    const ok = await showConfirm('インベントリ・装備・ストレージを全廃棄します', { danger: true, okLabel: '全廃棄' });
     if (!ok) return;
     player.inventory = [];
+    player.storage   = [];
     player.weapon = null;
     player.armor  = null;
     player.atk    = player.atkBase;
     player.def    = player.defBase;
     if (!document.getElementById('menu-modal').classList.contains('hidden')) refreshMenu();
+    autoSave();
   });
 
   // レベル操作
