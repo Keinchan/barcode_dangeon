@@ -184,24 +184,46 @@ export function generateMonster(dungeonData, floor, isBoss = false) {
 }
 
 // ── フロアのアイテム生成 ──
-//   そのフロアの雑魚相当のレベルを付けて、レベル相当のステータスにする
+//   そのフロアの雑魚相当のレベルを付けて、レベル相当のステータスにする。
+//   各部屋に通常アイテムが落ちる確率と独立に、ゴールドの山も配置する。
 export function generateFloorItems(dungeonData, floor, rooms) {
   const rng       = createRNG(hashString(`floor-items:${dungeonData.seed}:${floor}`));
   const items     = [];
   const itemLevel = enemyLevel(dungeonData, floor, false);
 
   rooms.slice(1, -1).forEach((room, idx) => {
-    if (rng() > 0.5) return;
+    // 通常アイテム
+    if (rng() <= 0.5) {
+      const subHash  = hashString(`${dungeonData.barcode}:${floor}:room${idx}`);
+      const subCode  = subHash.toString().padStart(13, '0').slice(0, 13);
+      const item     = generateItemFromBarcode(subCode, null, itemLevel);
+      const x = room.x + 1 + Math.floor(rng() * Math.max(1, room.w - 2));
+      const y = room.y + 1 + Math.floor(rng() * Math.max(1, room.h - 2));
+      item.x = x; item.y = y;
+      items.push(item);
+    }
 
-    const subHash  = hashString(`${dungeonData.barcode}:${floor}:room${idx}`);
-    const subCode  = subHash.toString().padStart(13, '0').slice(0, 13);
-    const item     = generateItemFromBarcode(subCode, null, itemLevel);
-
-    const x = room.x + 1 + Math.floor(rng() * Math.max(1, room.w - 2));
-    const y = room.y + 1 + Math.floor(rng() * Math.max(1, room.h - 2));
-    item.x = x;
-    item.y = y;
-    items.push(item);
+    // ゴールドの山（部屋ごと 35% で出現）。アイテムスロットを消費しないため
+    // 持ち物満杯でも拾える「即時加算アイテム」扱い
+    if (rng() <= 0.35) {
+      const amount = Math.max(3, Math.floor((8 + itemLevel * 2) * (0.6 + rng() * 0.8)));
+      let gx = room.x + 1 + Math.floor(rng() * Math.max(1, room.w - 2));
+      let gy = room.y + 1 + Math.floor(rng() * Math.max(1, room.h - 2));
+      // 同じマスに通常アイテムが居れば 1 マス避ける（重なって描画されると見えない）
+      const collide = items.find(it => it.x === gx && it.y === gy);
+      if (collide) {
+        gx = Math.min(room.x + room.w - 2, gx + 1);
+      }
+      items.push({
+        type: 'gold',
+        name: `${amount} ゴールド`,
+        emoji: '🪙',
+        amount,
+        rarity: 'コモン',
+        rarityColor: '#ffd54f',
+        x: gx, y: gy,
+      });
+    }
   });
 
   return items;
@@ -246,5 +268,21 @@ export function createPlayer() {
     weapon: null, armor: null,
     inventory: [],          // 最大8個（持ち物）
     storage:   [],          // 容量無制限のアイテムボックス
+    gold:      0,           // 所持金（敵撃破・床落ちで増加。死亡しても持ち越し）
   };
+}
+
+// 敵撃破時のゴールド報酬（決定論的ではなくランダム要素を含む）
+export function rollGoldDropFromMonster(mob) {
+  const lvl  = mob.level ?? 1;
+  const rar  = mob.rarity;
+  const base = 5 + lvl * 2;
+  const rarBonus =
+    rar === 'レジェンド' ? 60 :
+    rar === 'エピック'   ? 22 :
+    rar === 'レア'       ? 8  :
+    0;
+  const bossMul = mob.isBoss ? 3 : 1;
+  const roll = 0.7 + Math.random() * 0.6;   // 0.7〜1.3
+  return Math.max(1, Math.floor((base + rarBonus) * bossMul * roll));
 }

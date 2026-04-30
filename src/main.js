@@ -6,6 +6,7 @@ import {
   xpRequiredForLevel,
   statsForLevel,
   enemyLevel,
+  rollGoldDropFromMonster,
   MAX_LEVEL,
   HP_PER_LEVEL,
   ATK_PER_LEVEL,
@@ -271,6 +272,8 @@ function refreshMenu() {
   document.getElementById('menu-hp').textContent  = `${player.hp}/${player.maxHp}`;
   document.getElementById('menu-atk').textContent = player.atk;
   document.getElementById('menu-def').textContent = player.def;
+  const menuGold = document.getElementById('menu-gold');
+  if (menuGold) menuGold.textContent = `🪙 ${player.gold ?? 0}`;
 
   // XP表示
   if (player.level >= MAX_LEVEL) {
@@ -922,6 +925,13 @@ function refreshHUD() {
   const wName = player.weapon ? `${player.weapon.emoji} +${player.weapon.atkBonus}` : '⚔️ ー';
   const aName = player.armor  ? `${player.armor.emoji} +${player.armor.defBonus}`  : '🛡️ ー';
   document.getElementById('equip-display').textContent = `${wName}　${aName}`;
+
+  // ゴールド表示はマップ HUD と ダンジョンヘッダの両方にある（無ければスキップ）
+  const goldStr = `🪙 ${player.gold ?? 0}`;
+  const dungeonGold = document.getElementById('player-gold');
+  if (dungeonGold) dungeonGold.textContent = goldStr;
+  const mapGold = document.getElementById('map-gold-display');
+  if (mapGold) mapGold.textContent = goldStr;
 }
 
 // XP獲得＆レベルアップ
@@ -1071,6 +1081,17 @@ function _runEnemyTurn() {
 }
 
 function pickupItem(item) {
+  // ゴールドはインベントリスロットを消費しない、即時加算
+  if (item.type === 'gold') {
+    dungeon.removeFloorItem(item);
+    player.gold = (player.gold ?? 0) + item.amount;
+    dungeonLog(`🪙 ${item.amount} ゴールドを拾った（合計 ${player.gold}）`);
+    playSfx('pickup', { rarityTier: 0 });
+    refreshHUD();
+    autoSave();
+    return;
+  }
+
   if (player.inventory.length >= 8 && item.type !== 'weapon' && item.type !== 'armor') {
     dungeonLog(`🎒 満杯！ ${item.name} を拾えなかった`);
     return;
@@ -1216,6 +1237,13 @@ function startBattle(mob, opts = {}) {
       dungeon.removeMonster(mob);
       // XP獲得
       gainXp(_xpFromMonster(mob));
+      // ゴールドドロップ（アイテムドロップとは独立）
+      const gold = rollGoldDropFromMonster(mob);
+      if (gold > 0) {
+        player.gold = (player.gold ?? 0) + gold;
+        dungeonLog(`🪙 ${mob.name} は ${gold} ゴールドを落とした`);
+        refreshHUD();
+      }
       // ドロップ判定
       const drop = _rollMonsterDrop(mob);
       if (drop) {
@@ -1398,6 +1426,7 @@ function autoSave() {
       armor: player.armor,
       inventory: player.inventory,
       storage:   player.storage ?? [],
+      gold:      player.gold    ?? 0,
     },
     clearedSeeds: Array.from(clearedSet),
     savedAt: Date.now(),
@@ -1412,6 +1441,7 @@ function _applySave(data) {
   Object.assign(player, data.player);
   // 旧セーブ互換: storage が無いケース
   if (!Array.isArray(player.storage)) player.storage = [];
+  if (typeof player.gold !== 'number') player.gold = 0;
   clearedSet.clear();
   if (Array.isArray(data.clearedSeeds)) {
     for (const s of data.clearedSeeds) clearedSet.add(s);
@@ -1617,6 +1647,11 @@ if (DEBUG) {
     for (const mob of adj) {
       dungeon.removeMonster(mob);
       gainXp(_xpFromMonster(mob));
+      const gold = rollGoldDropFromMonster(mob);
+      if (gold > 0) {
+        player.gold = (player.gold ?? 0) + gold;
+        dungeonLog(`🪙 ${mob.name} は ${gold} ゴールドを落とした`);
+      }
       const drop = _rollMonsterDrop(mob);
       if (drop) {
         drop.x = mob.x;
@@ -1688,6 +1723,21 @@ if (DEBUG) {
   document.getElementById('debug-add-armor' ).addEventListener('click', () => debugAddItem('armor'));
   document.getElementById('debug-add-potion').addEventListener('click', () => debugAddItem('potion'));
   document.getElementById('debug-add-scroll').addEventListener('click', () => debugAddItem('scroll'));
+
+  // ゴールド操作
+  document.getElementById('debug-gold-give').addEventListener('click', () => {
+    const n = Math.max(1, parseInt(document.getElementById('debug-gold-amount').value, 10) || 0);
+    player.gold = (player.gold ?? 0) + n;
+    refreshHUD();
+    if (!document.getElementById('menu-modal').classList.contains('hidden')) refreshMenu();
+    autoSave();
+  });
+  document.getElementById('debug-gold-clear').addEventListener('click', () => {
+    player.gold = 0;
+    refreshHUD();
+    if (!document.getElementById('menu-modal').classList.contains('hidden')) refreshMenu();
+    autoSave();
+  });
 
   document.getElementById('debug-clear-inv').addEventListener('click', async () => {
     const ok = await showConfirm('インベントリ・装備・ストレージを全廃棄します', { danger: true, okLabel: '全廃棄' });

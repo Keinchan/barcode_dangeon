@@ -44,6 +44,7 @@
     <div id="map"></div>
     <div class="map-hud">
       <div class="hud-title">⚔️ バーコードダンジョン</div>
+      <div id="map-gold-display" class="hud-gold">🪙 0</div>
       <div class="hud-button-row">
         <button id="btn-scan" class="btn-primary">📷 スキャン</button>
         <button id="btn-menu" class="btn-secondary">🎒 メニュー</button>
@@ -82,6 +83,7 @@
         <div class="dungeon-hp-row">
           <span id="player-lv" class="lv-text">Lv1</span>
           <span id="player-hp" class="hp-text">HP: 35/35</span>
+          <span id="player-gold" class="gold-text">🪙 0</span>
         </div>
         <div id="equip-display" class="equip-display">⚔️ー　🛡️ー</div>
       </div>
@@ -219,6 +221,7 @@
           <div>HP <span id="menu-hp">35/35</span></div>
           <div>ATK <span id="menu-atk">9</span></div>
           <div>DEF <span id="menu-def">3</span></div>
+          <div id="menu-gold" class="menu-gold-line">🪙 0</div>
         </div>
         <div class="menu-xp-section">
           <div class="menu-xp-text">XP <span id="menu-xp-current">0</span> / <span id="menu-xp-next">20</span></div>
@@ -367,6 +370,15 @@
           <button id="debug-clear-all"  class="debug-action ghost">全データ消去</button>
         </div>
         <div id="debug-save-status" class="debug-meta">未ログイン</div>
+      </fieldset>
+
+      <fieldset class="debug-section">
+        <legend>🪙 ゴールド</legend>
+        <div class="debug-row">
+          <input id="debug-gold-amount" type="number" min="1" max="999999" value="100" />
+          <button id="debug-gold-give" class="debug-action">+N 付与</button>
+        </div>
+        <button id="debug-gold-clear" class="debug-action ghost">所持金 0 にする</button>
       </fieldset>
 
       <fieldset class="debug-section">
