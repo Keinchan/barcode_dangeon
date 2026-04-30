@@ -53,6 +53,15 @@ import {
 } from './audio.js';
 import { getItemIconUrl } from './icons.js';
 import { showAlert, showConfirm } from './dialog.js';
+import {
+  ensureScanBudget,
+  getScanStatus,
+  tryConsumeScan,
+  addPlatinum,
+  debugResetDailyScans,
+  DAILY_FREE_SCANS,
+  PLATINUM_STUB_GRANT,
+} from './scan-budget.js';
 
 // アイテム表示を絵文字 → 手続きアイコンに置換するためのヘルパ
 function iconImg(item, size = 38) {
@@ -225,11 +234,70 @@ document.getElementById('btn-pre-menu').addEventListener('click', () => {
   openMenu();
 });
 
-document.getElementById('btn-scan').addEventListener('click', () => {
+document.getElementById('btn-scan').addEventListener('click', async () => {
   playSfx('click');
+  // スキャン上限チェック。0/5 + 結晶も無ければ開始させない。
+  // 結晶があれば使うか確認、無料枠があればそのまま消費。
+  if (!await _consumeScanQuota()) return;
   show('scanner');
   launchScanner();
 });
+
+// スキャンクオータを 1 回消費。無料枠が残っていれば true、結晶がある場合は確認、
+// どちらも無ければ購入を促して false。
+async function _consumeScanQuota() {
+  ensureScanBudget(player);
+  const s = getScanStatus(player);
+  if (s.freeRemaining > 0) {
+    tryConsumeScan(player);
+    autoSave();
+    _refreshScanStatusUI();
+    return true;
+  }
+  // 無料枠尽きている → 結晶があれば確認
+  if (s.platinum > 0) {
+    const ok = await showConfirm(
+      `今日の無料スキャンを使い切りました（${s.dailyMax}/${s.dailyMax}）。\n` +
+      `プラチナ結晶 1 個を消費して +1 スキャンしますか？\n` +
+      `（所持: 💎${s.platinum}）`,
+      { okLabel: '結晶を使う', cancelLabel: 'やめる' },
+    );
+    if (!ok) return false;
+    const r = tryConsumeScan(player);
+    autoSave();
+    _refreshScanStatusUI();
+    return r.ok;
+  }
+  // 結晶も無い → 購入導線
+  const buy = await showConfirm(
+    `今日のスキャン上限（${s.dailyMax}/${s.dailyMax}）に達しました。\n` +
+    `プラチナ結晶を購入しますか？\n\n` +
+    `※ テストビルドのため購入ボタンで ${PLATINUM_STUB_GRANT} 個付与（実決済は未実装）`,
+    { okLabel: `${PLATINUM_STUB_GRANT}個購入`, cancelLabel: 'やめる' },
+  );
+  if (!buy) return false;
+  // TODO: 本番では Stripe / Apple IAP / Google Play Billing に差し替え。
+  addPlatinum(player, PLATINUM_STUB_GRANT);
+  autoSave();
+  _refreshScanStatusUI();
+  await showAlert(
+    `💎${PLATINUM_STUB_GRANT} を付与しました（テストビルド）。\n` +
+    `もう一度「スキャン」を押してください。`,
+  );
+  return false;   // 一旦 UI を戻して再タップさせる
+}
+
+// スキャン残量・結晶残量の UI 反映（マップ HUD・スキャナーヘッダ・メニュー）
+function _refreshScanStatusUI() {
+  const s = getScanStatus(player);
+  const text = `📷 ${s.used}/${s.dailyMax}　💎 ${s.platinum}`;
+  const mapEl     = document.getElementById('map-scan-status');
+  const scannerEl = document.getElementById('scanner-status');
+  const menuEl    = document.getElementById('menu-scan-status');
+  if (mapEl)     mapEl.textContent     = text;
+  if (scannerEl) scannerEl.textContent = `本日 ${s.used}/${s.dailyMax}　💎 ${s.platinum}`;
+  if (menuEl)    menuEl.textContent    = text;
+}
 
 document.getElementById('btn-menu').addEventListener('click', () => {
   playSfx('click');
@@ -283,6 +351,9 @@ function refreshMenu() {
     document.getElementById('menu-xp-next').textContent    = need;
     document.getElementById('menu-xp-bar').style.width = `${Math.min(100, (player.xp / need) * 100)}%`;
   }
+
+  // 通貨・スキャン状況
+  _refreshScanStatusUI();
 
   // 装備中
   const eq = document.getElementById('menu-equipment');
@@ -922,6 +993,8 @@ function refreshHUD() {
   const wName = player.weapon ? `${player.weapon.emoji} +${player.weapon.atkBonus}` : '⚔️ ー';
   const aName = player.armor  ? `${player.armor.emoji} +${player.armor.defBonus}`  : '🛡️ ー';
   document.getElementById('equip-display').textContent = `${wName}　${aName}`;
+
+  _refreshScanStatusUI();
 }
 
 // XP獲得＆レベルアップ
@@ -1398,6 +1471,8 @@ function autoSave() {
       armor: player.armor,
       inventory: player.inventory,
       storage:   player.storage ?? [],
+      platinum:   player.platinum   ?? 0,
+      scanBudget: player.scanBudget ?? null,
     },
     clearedSeeds: Array.from(clearedSet),
     savedAt: Date.now(),
@@ -1412,6 +1487,8 @@ function _applySave(data) {
   Object.assign(player, data.player);
   // 旧セーブ互換: storage が無いケース
   if (!Array.isArray(player.storage)) player.storage = [];
+  // 旧セーブ互換: platinum / scanBudget の正規化（日次リセットも内側で実施）
+  ensureScanBudget(player);
   clearedSet.clear();
   if (Array.isArray(data.clearedSeeds)) {
     for (const s of data.clearedSeeds) clearedSet.add(s);
@@ -1490,6 +1567,8 @@ subscribeAuth(async user => {
       clearedSet.clear();
     }
     _isLoadingSave = false;
+    // 初回ログイン後または日付跨ぎ後のリセット反映（_applySave 内でも呼ぶが保険）
+    ensureScanBudget(player);
     show('map');
     refreshHUD();
     _updateDebugSaveStatus();
@@ -1508,6 +1587,21 @@ subscribeAuth(async user => {
 if (!isFirebaseConfigured()) {
   document.getElementById('title-config-warning').classList.remove('hidden');
 }
+
+// メニューの「プラチナ結晶を購入（テスト）」ボタン。
+// TODO: 本番では Stripe / Apple IAP / Google Play Billing に差し替え。
+document.getElementById('btn-buy-platinum').addEventListener('click', async () => {
+  const ok = await showConfirm(
+    `プラチナ結晶を購入しますか？\n\n` +
+    `※ テストビルドのため購入ボタンで ${PLATINUM_STUB_GRANT} 個付与（実決済は未実装）`,
+    { okLabel: `${PLATINUM_STUB_GRANT}個購入`, cancelLabel: 'キャンセル' },
+  );
+  if (!ok) return;
+  addPlatinum(player, PLATINUM_STUB_GRANT);
+  autoSave();
+  refreshMenu();
+  await showAlert(`💎${PLATINUM_STUB_GRANT} を付与しました（テストビルド）`);
+});
 
 // ページを離れる時に保険として最後の保存
 window.addEventListener('beforeunload', () => {
@@ -1688,6 +1782,21 @@ if (DEBUG) {
   document.getElementById('debug-add-armor' ).addEventListener('click', () => debugAddItem('armor'));
   document.getElementById('debug-add-potion').addEventListener('click', () => debugAddItem('potion'));
   document.getElementById('debug-add-scroll').addEventListener('click', () => debugAddItem('scroll'));
+
+  // プラチナ結晶 / スキャン回数の操作
+  document.getElementById('debug-platinum-give').addEventListener('click', () => {
+    const n = Math.max(1, parseInt(document.getElementById('debug-platinum-amount').value, 10) || 0);
+    addPlatinum(player, n);
+    refreshHUD();
+    if (!document.getElementById('menu-modal').classList.contains('hidden')) refreshMenu();
+    autoSave();
+  });
+  document.getElementById('debug-scan-reset').addEventListener('click', () => {
+    debugResetDailyScans(player);
+    refreshHUD();
+    if (!document.getElementById('menu-modal').classList.contains('hidden')) refreshMenu();
+    autoSave();
+  });
 
   document.getElementById('debug-clear-inv').addEventListener('click', async () => {
     const ok = await showConfirm('インベントリ・装備・ストレージを全廃棄します', { danger: true, okLabel: '全廃棄' });

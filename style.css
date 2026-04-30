@@ -205,6 +205,33 @@ html, body {
   letter-spacing: 1px;
 }
 
+/* マップ HUD のスキャン残量・結晶残量 */
+.hud-scan-status {
+  font-size: 12px;
+  color: #c5c5d4;
+  background: rgba(0,0,0,0.55);
+  padding: 3px 10px;
+  border-radius: 12px;
+  letter-spacing: 0.3px;
+}
+
+/* スキャナー画面ヘッダ右端のスキャン残量 */
+.scanner-status {
+  margin-left: auto;
+  font-size: 12px;
+  color: #c5c5d4;
+  background: rgba(0,0,0,0.45);
+  padding: 3px 10px;
+  border-radius: 12px;
+}
+
+/* メニュー内のスキャン残量行 */
+.menu-scan-status {
+  font-size: 14px;
+  color: #c5c5d4;
+  margin-bottom: 8px;
+}
+
 /* ── BUTTONS ── */
 .btn-primary {
   background: var(--primary);
