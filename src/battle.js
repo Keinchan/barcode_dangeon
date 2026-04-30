@@ -1,4 +1,4 @@
-import { applyItem } from './items.js';
+import { applyItem, elementMatchup, matchupLabel } from './items.js';
 import {
   showFloatingDamage, showEnemyDamage,
   sparkSpray, explosion, shockwave, magicCircle,
@@ -105,10 +105,12 @@ export class Battle {
   attack() {
     if (this._busy) return;
     if (this.wallPiercing) return;  // 壁越し戦闘では通常攻撃不可
-    const dmg = this._calcDmg(this.player.atk, this.monster.def, 1.0);
-    const isCrit = dmg >= Math.max(2, Math.floor((this.player.atk - this.monster.def) * 1.4));
+    const matchup = elementMatchup(this.player.weapon?.element, this.monster.element);
+    const dmg = this._calcDmg(this.player.atk, this.monster.def, matchup);
+    const isCrit = dmg >= Math.max(2, Math.floor((this.player.atk - this.monster.def) * 1.4 * matchup));
     this.monster.hp = Math.max(0, this.monster.hp - dmg);
-    this.log(`⚔️ こうげき！ ${dmg} ダメージ！`);
+    const matchLbl = matchupLabel(matchup);
+    this.log(`⚔️ こうげき！ ${dmg} ダメージ！${matchLbl ? '　' + matchLbl : ''}`);
     showEnemyDamage(dmg);
     playSfx(isCrit ? 'crit' : 'hit');
     // VFX: クリティカルは爆発、通常は火花
@@ -121,9 +123,11 @@ export class Battle {
 
   skill() {
     if (this._busy) return;
-    const dmg = this._calcDmg(this.player.atk, this.monster.def, 2.0);
+    const matchup = elementMatchup(this.player.weapon?.element, this.monster.element);
+    const dmg = this._calcDmg(this.player.atk, this.monster.def, 2.0 * matchup);
     this.monster.hp = Math.max(0, this.monster.hp - dmg);
-    this.log(`✨ スキル！ ${dmg} の大ダメージ！`);
+    const matchLbl = matchupLabel(matchup);
+    this.log(`✨ スキル！ ${dmg} の大ダメージ！${matchLbl ? '　' + matchLbl : ''}`);
     showEnemyDamage(dmg);
     playSfx('crit');
     // VFX: 武器属性の魔法陣 → 爆発
@@ -255,10 +259,12 @@ export class Battle {
 
   // 壁越し戦闘では魔法ナラティブ、通常戦闘は物理ナラティブ。ダメージ計算は同一
   _enemyBasicAttack() {
-    const dmg = this._calcDmg(this.monster.atk, this.player.def);
+    const matchup = elementMatchup(this.monster.element, this.player.armor?.element);
+    const dmg = this._calcDmg(this.monster.atk, this.player.def, matchup);
     this.player.hp = Math.max(0, this.player.hp - dmg);
     const label = this.wallPiercing ? '✨ 魔法攻撃' : '💥 攻撃';
-    this.log(`${label} ${this.monster.name} の一撃！ ${dmg} ダメージ！`);
+    const matchLbl = matchupLabel(matchup);
+    this.log(`${label} ${this.monster.name} の一撃！ ${dmg} ダメージ！${matchLbl ? '　' + matchLbl : ''}`);
     showFloatingDamage(dmg);
     playSfx('damage');
     // VFX: 被ダメ衝撃波（壁越しは魔法陣も）

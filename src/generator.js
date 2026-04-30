@@ -15,14 +15,16 @@ const MONSTER_POOL = [
   { base: 'ドラゴン',     emoji: '🐉' },
 ];
 
-// ── 属性スキル ──
+// ── 属性スキル（モンスターが 3 ターンに 1 回発動）──
+//   棒人間 = 物理パンチ。落書き = 高威力・乱雑。影絵 = 中威力 + 毒。
+//   ピクセル = 連続ダメ。ホログラム = 自己回復。折り紙 = 鋭利な切り。
 export const SKILLS = {
-  火: { name: '炎の息',   mult: 2.0, healSelf: 0,    poison: false },
-  水: { name: '水流',     mult: 1.5, healSelf: 0,    poison: false },
-  地: { name: '岩石投げ', mult: 2.5, healSelf: 0,    poison: false },
-  風: { name: '竜巻',     mult: 1.8, healSelf: 0,    poison: false },
-  光: { name: '聖光',     mult: 0,   healSelf: 0.25, poison: false },
-  闇: { name: '呪い',     mult: 1.2, healSelf: 0,    poison: true  },
+  '棒人間':     { name: 'スティック・パンチ', mult: 2.0, healSelf: 0,    poison: false },
+  '落書き':     { name: 'グシャ書き',         mult: 2.4, healSelf: 0,    poison: false },
+  '影絵':       { name: '影縫い',             mult: 1.5, healSelf: 0,    poison: true  },
+  'ピクセル':   { name: 'ドット弾幕',         mult: 1.5, healSelf: 0,    poison: false },
+  'ホログラム': { name: '偽光',               mult: 0,   healSelf: 0.25, poison: false },
+  '折り紙':     { name: '折り鶴投げ',         mult: 2.0, healSelf: 0,    poison: false },
 };
 
 // ── ダンジョン設定 ──
