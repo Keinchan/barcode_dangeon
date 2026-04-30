@@ -141,9 +141,37 @@ function unlockOnGesture() {
       ctx.resume().catch(() => {});
     }
   };
-  document.addEventListener('visibilitychange', tryResume);
+  document.addEventListener('focus', tryResume);
   window.addEventListener('focus', tryResume);
   window.addEventListener('pageshow', tryResume);
+
+  // ─── タブ非表示 → 表示 の BGM 復帰 ───
+  // ブラウザは visibilitychange で AudioContext を必ずしも suspend しない（特に PC Chrome）。
+  // その場合 statechange ハンドラが発火せず、setTimeout ベースのスケジューラだけが
+  // background throttle で停止する → ループ最後のオシレータが鳴り終わったら無音になる。
+  //
+  // 対策: visibilitychange を見て自前で stop / 再開する（ctx の suspend を待たない）。
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      // 非表示: 鳴っているなら名前だけ覚えて即停止（throttle で迷子にならないように）
+      if (currentBgm) {
+        const name = currentBgm.name;
+        currentBgm.stop();
+        currentBgm = null;
+        pendingBgm = name;
+      }
+    } else {
+      // 表示復帰: ctx を resume してから pendingBgm を再投入
+      if (ctx && ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
+      if (pendingBgm && (!ctx || ctx.state === 'running')) {
+        const name = pendingBgm;
+        pendingBgm = null;
+        startBgm(name);
+      }
+    }
+  });
 }
 unlockOnGesture();
 
