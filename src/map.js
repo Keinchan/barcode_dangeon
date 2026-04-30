@@ -15,6 +15,10 @@ let onEnterCb         = null;
 let isClearedCb       = null;
 let difficultyCb      = null;
 let recommendedLvCb   = null;
+// 表示しているピンの掃除半径（プレイヤーから N メートル超のピンは削除）。
+// 電車などで長距離移動したあとに古いピンが地図に残ると、付近のダンジョンタップを
+// 妨害したり、メモリも肥大化するため一定距離で破棄する。
+const PIN_KEEP_RADIUS_M = 3000;
 
 export function initMap({ onEnter, isCleared, difficulty, recommendedLv } = {}) {
   onEnterCb       = onEnter       ?? null;
@@ -33,19 +37,32 @@ export function initMap({ onEnter, isCleared, difficulty, recommendedLv } = {}) 
   L.control.zoom({ position: 'topright' }).addTo(map);
 
   // GPS追従＋追従に応じて固定湧きダンジョン更新
+  // maximumAge を短めにして電車移動などでも追従する。watchPosition がエラーで
+  // 抜けた場合は 30 秒後に再起動を試みる（電車のトンネルなどで一時的にロスト
+  // しても自動復帰させる）。
   if (navigator.geolocation) {
-    navigator.geolocation.watchPosition(
-      pos => _setPlayer(pos.coords.latitude, pos.coords.longitude),
-      err => {
-        console.warn('geolocation watch error:', err?.message);
-        // フォールバック：東京で湧きだけ描画
-        _refreshDungeons(35.6762, 139.6503);
-      },
-      { enableHighAccuracy: true, maximumAge: 5000 },
-    );
+    _startGeolocationWatch();
   } else {
     _refreshDungeons(35.6762, 139.6503);
   }
+}
+
+let _watchId = null;
+function _startGeolocationWatch() {
+  if (_watchId !== null) {
+    try { navigator.geolocation.clearWatch(_watchId); } catch {}
+  }
+  _watchId = navigator.geolocation.watchPosition(
+    pos => _setPlayer(pos.coords.latitude, pos.coords.longitude),
+    err => {
+      console.warn('geolocation watch error:', err?.message);
+      // フォールバック：playerPos がまだ無ければ東京で湧きだけ描画。
+      // ある場合は前回位置を保持しつつ 30 秒後に再起動を試みる。
+      if (!playerPos) _refreshDungeons(35.6762, 139.6503);
+      setTimeout(_startGeolocationWatch, 30000);
+    },
+    { enableHighAccuracy: true, maximumAge: 1000, timeout: 20000 },
+  );
 }
 
 function _setPlayer(lat, lng) {
@@ -73,6 +90,14 @@ function _refreshDungeons(lat, lng) {
   for (const d of dungeons) {
     if (renderedPins.has(d.seed)) continue;
     _addDungeonPin(d);
+  }
+  // プレイヤーから遠すぎる古いピンを掃除（電車等で長距離移動した後の残骸対策）
+  for (const [seed, entry] of renderedPins) {
+    const dist = distanceMeters(lat, lng, entry.dungeon.lat, entry.dungeon.lng);
+    if (dist > PIN_KEEP_RADIUS_M) {
+      try { entry.marker.remove(); } catch {}
+      renderedPins.delete(seed);
+    }
   }
 }
 
@@ -166,6 +191,15 @@ export function getPlayerPos() {
 // 画面切替などで #map のサイズが変わった時に Leaflet 内部のサイズキャッシュを更新
 export function invalidateMapSize() {
   if (map) map.invalidateSize();
+}
+
+// マップ画面復帰時に呼ぶ：現在の playerPos に強制再センタリング。
+// ダンジョン入場〜離脱の間に GPS が大きく動いた場合、地図の中心が古い位置に
+// 残っていると別のダンジョンが画面外で選べないので、必ず追従させる。
+export function recenterOnPlayer() {
+  if (!map || !playerPos) return false;
+  map.setView([playerPos.lat, playerPos.lng], map.getZoom() ?? 16, { animate: false });
+  return true;
 }
 
 // デバッグ用：プレイヤー位置を任意座標に強制設定（地図中心も移動）
