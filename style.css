@@ -456,6 +456,14 @@ html, body {
   margin-left: 8px;
 }
 
+/* ショップ価格表示 */
+.shop-price {
+  color: #ffd54f;
+  font-weight: bold;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
 /* スタックアイテムの個数表示（×N） */
 .menu-row-count {
   display: inline-block;

@@ -17,6 +17,7 @@ import {
   generateItemFromBarcode, rarityFromDigit, bumpRarity, RARITIES, migrateElement,
   isStackable, stackKey, materialForRarity,
   PATTERN_OFFSETS, PATTERN_DESC, findSkillById, elementMatchup, matchupLabel,
+  shopPriceFor,
 } from './items.js';
 import { hashString } from './rng.js';
 import { Dungeon } from './dungeon.js';
@@ -1009,6 +1010,95 @@ function _executeSkill(skill) {
   autoSave();
 }
 
+// ─────────────────────────────────────────────
+// ダンジョン内ショップ（徘徊商人）
+// ─────────────────────────────────────────────
+let _currentShopkeeper = null;
+function _openShopModal(shopkeeper) {
+  _currentShopkeeper = shopkeeper;
+  const stock = dungeon.getShopStock(shopkeeper);
+  const list  = document.getElementById('shop-list');
+
+  document.getElementById('shop-gold-status').textContent = `所持金 🪙 ${player.gold ?? 0}`;
+  document.getElementById('shop-keeper-meta').textContent = `Lv${shopkeeper.level} の商人（攻撃するなら相応の覚悟を）`;
+
+  if (stock.length === 0) {
+    list.innerHTML = '<div style="text-align:center;color:#888;padding:14px">在庫切れ</div>';
+  } else {
+    list.innerHTML = stock.map((entry, i) => {
+      const it = entry.item;
+      const cantAfford = (player.gold ?? 0) < entry.price;
+      return `
+        <div class="item-row${cantAfford ? ' disabled' : ''}" data-idx="${i}">
+          <span class="item-emoji">${it.emoji ?? '🎁'}</span>
+          <div class="item-info">
+            <div class="item-name" style="color:${it.rarityColor}">${it.name}</div>
+            <div class="item-desc">${_shopItemDescription(it)}</div>
+          </div>
+          <span class="shop-price">🪙 ${entry.price}${cantAfford ? ' ⚠️不足' : ''}</span>
+        </div>`;
+    }).join('');
+    list.querySelectorAll('.item-row:not(.disabled)').forEach(row => {
+      row.addEventListener('click', () => {
+        const i = parseInt(row.dataset.idx, 10);
+        _buyFromShop(i);
+      });
+    });
+  }
+  document.getElementById('shop-modal').classList.remove('hidden');
+}
+
+function _shopItemDescription(it) {
+  if (it.type === 'potion')        return `HP +${it.heal} 回復 / ${it.rarity}`;
+  if (it.type === 'mpPotion')      return `MP +${it.mpHeal} 回復 / ${it.rarity}`;
+  if (it.type === 'scroll')        return `${it.element}属性 ${it.dmg} ダメージ / ${it.rarity}`;
+  if (it.type === 'weapon')        return `ATK +${it.atkBonus}（${it.element}属性） / ${it.rarity}`;
+  if (it.type === 'armor')         return `DEF +${it.defBonus}（${it.element}属性） / ${it.rarity}`;
+  if (it.type === 'material')      return `${it.desc} / ${it.rarity}`;
+  if (it.type === 'mysteryScroll') return `${it.desc} / ${it.rarity}`;
+  if (it.type === 'skillBook')     return `📕 ${it.skillName} / ${it.rarity}`;
+  return it.rarity ?? '';
+}
+
+function _buyFromShop(idx) {
+  if (!_currentShopkeeper) return;
+  const stock = dungeon.getShopStock(_currentShopkeeper);
+  const entry = stock[idx];
+  if (!entry) return;
+  if ((player.gold ?? 0) < entry.price) { showAlert('ゴールドが足りません'); return; }
+  // インベントリ余裕チェック（スタック合算で OK な場合あり）
+  if (!canAddToInventory(entry.item)) { showAlert('持ち物が満杯です（先に整理してから）'); return; }
+  player.gold -= entry.price;
+  addToInventory({ ...entry.item });   // 同名同レアの新規個体（同じスタックに合流）
+  stock.splice(idx, 1);
+  playSfx('pickup', { rarityTier: rarityTier(entry.item.rarity) });
+  refreshHUD();
+  // 再描画
+  _openShopModal(_currentShopkeeper);
+  autoSave();
+}
+
+document.getElementById('btn-shop-close').addEventListener('click', () => {
+  playSfx('click');
+  document.getElementById('shop-modal').classList.add('hidden');
+  _currentShopkeeper = null;
+});
+
+document.getElementById('btn-shop-attack').addEventListener('click', async () => {
+  if (!_currentShopkeeper) return;
+  const ok = await showConfirm(
+    '本当に商人を攻撃しますか？\n\n' +
+    '商人は Lv ' + _currentShopkeeper.level + ' の超強敵です。\n' +
+    '勝てれば在庫すべてと大量のゴールドが手に入ります。',
+    { danger: true, okLabel: '攻撃する' },
+  );
+  if (!ok) return;
+  document.getElementById('shop-modal').classList.add('hidden');
+  const target = _currentShopkeeper;
+  _currentShopkeeper = null;
+  startBattle(target);
+});
+
 // わざボタン → モーダル表示
 function _openWazaModal() {
   if (!dungeon || screen !== 'dungeon' || combatActive) {
@@ -1398,7 +1488,14 @@ function move(dx, dy) {
     if (!dungeon.canWalk(nx, ny)) return;
 
     const mob = dungeon.monsterAt(nx, ny);
-    if (mob) { startBattle(mob); return; }   // 戦闘パネル発動 → 敵ターン無し
+    if (mob) {
+      // 商人マスへ進入 → 戦闘ではなく購入モーダル
+      if (mob.isShopkeeper) {
+        _openShopModal(mob);
+        return;
+      }
+      startBattle(mob); return;
+    }   // 戦闘パネル発動 → 敵ターン無し
 
     dungeon.playerPos = { x: nx, y: ny };
 
@@ -1612,6 +1709,29 @@ function startBattle(mob, opts = {}) {
     if (result === 'win') {
       // 元のmobリファレンスで確実に削除（cloneのdefeatedではindexOf不一致）
       dungeon.removeMonster(mob);
+      // 商人撃破: 在庫を全て床にぶちまける + 大量ゴールド
+      if (mob.isShopkeeper) {
+        const stock = dungeon.getShopStock(mob);
+        const placed = [];
+        for (const entry of stock) {
+          const it = { ...entry.item, x: mob.x, y: mob.y };
+          // 周囲 8 マスを埋めながら配置（壁/他mob を避ける）
+          for (const [dx, dy] of [[0,0],[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,-1],[1,-1],[-1,1]]) {
+            const tx = mob.x + dx, ty = mob.y + dy;
+            if (!dungeon.canWalk(tx, ty)) continue;
+            if (placed.some(p => p.x === tx && p.y === ty)) continue;
+            it.x = tx; it.y = ty;
+            placed.push(it);
+            break;
+          }
+          dungeon.floorItems.push(it);
+        }
+        dungeon.shopkeeperToStock?.delete(mob);
+        // 巨額ゴールドのボーナス
+        const bonus = 500 + (mob.level ?? 30) * 30;
+        player.gold = (player.gold ?? 0) + bonus;
+        dungeonLog(`💰 商人を撃破！ ${bonus} ゴールドと在庫すべてが床に...`, { rarity: 'レジェンド' });
+      }
       // XP獲得
       gainXp(_xpFromMonster(mob));
       // ゴールドドロップ（アイテムドロップとは独立）

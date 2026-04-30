@@ -1,5 +1,8 @@
 import { createRNG, hashString } from './rng.js';
-import { RARITIES, ELEMENTS, rarityFromDigit, generateItemFromBarcode, randomMysteryScroll, randomSkillBook } from './items.js';
+import {
+  RARITIES, ELEMENTS, rarityFromDigit, generateItemFromBarcode,
+  randomMysteryScroll, randomSkillBook, materialForRarity, shopPriceFor,
+} from './items.js';
 
 // ── モンスタープール ──
 const MONSTER_POOL = [
@@ -183,6 +186,57 @@ export function generateMonster(dungeonData, floor, isBoss = false) {
     skillCharge: 0,
     hp, maxHp: hp, atk, def, floor,
   };
+}
+
+// ── 商人 NPC（モンスターと同じ this.monsters に shopkeeper フラグ付きで配置）──
+//   ダンジョンレベル + 30 の超強敵。普通に殴ると即死級なので、撃破できれば
+//   超大量のゴールド + 在庫すべてを奪える。
+//   walking-into = 購入モーダル。意図的に攻撃する場合はモーダル内ボタンから。
+export function generateShopkeeperFor(dungeonData, floor) {
+  const baseLvl = enemyLevel(dungeonData, floor, false);
+  const lvl     = Math.min(MAX_LEVEL, baseLvl + 30);
+  const stats   = statsForLevel(lvl);
+  // ボス級ステータスを更にブースト（HP×1.5 ATK+30%）
+  const hp  = Math.floor(stats.maxHp   * 1.5);
+  const atk = Math.floor(stats.atkBase * 1.3);
+  const def = Math.floor(stats.defBase * 1.3);
+
+  return {
+    base: '商人', emoji: '🧝',
+    name: '商人',
+    level: lvl,
+    rarity: 'レジェンド', rarityColor: '#ffc107',
+    element: '棒人間',                 // 物理メイン
+    skill:   { name: '撃退一閃', mult: 3.0, healSelf: 0, poison: false },
+    skillCharge: 0,
+    isBoss: false,
+    isShopkeeper: true,
+    hp, maxHp: hp, atk, def, floor,
+  };
+}
+
+// ショップ在庫を生成（4 アイテム）。ダンジョンの難易度に応じて構成が変わる
+export function generateShopStock(dungeonData, floor) {
+  const rng       = createRNG(hashString(`shop:${dungeonData.seed}:${floor}`));
+  const itemLevel = enemyLevel(dungeonData, floor, false);
+  const dunRarity = dungeonData.rarityBase.name;
+  const stock     = [];
+
+  // バーコード基盤の汎用アイテム 2 個（薬・巻物・武器・防具のいずれか）
+  for (let i = 0; i < 2; i++) {
+    const seed = hashString(`shop:${dungeonData.seed}:${floor}:slot${i}`);
+    const code = String(seed).padStart(13, '0').slice(0, 13);
+    const item = generateItemFromBarcode(code, null, itemLevel);
+    stock.push({ item, price: shopPriceFor(item, dunRarity) });
+  }
+  // 素材（ダンジョンレアリティ準拠）
+  const mat = materialForRarity(dunRarity);
+  stock.push({ item: mat, price: shopPriceFor(mat, dunRarity) });
+  // 技の書（ランダム）
+  const book = randomSkillBook(rng, dunRarity);
+  if (book) stock.push({ item: book, price: shopPriceFor(book, dunRarity) });
+
+  return stock;
 }
 
 // ── フロアのアイテム生成 ──
