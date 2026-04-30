@@ -177,9 +177,14 @@ export class Battle {
     this._busy = true;
     // 1撃キル時も周囲の他敵に最後の1ティック（移動・魔法）を与えてから勝利演出。
     // これがないと「強い武器ができた途端に他の敵が完全に静止」して見える。
+    //
+    // initialDelay: プレイヤーの致命アタック VFX（火花・爆発）と他敵の魔法演出が
+    // 同フレームで重なって表示される問題があったため、最初の魔法 1 件目までに
+    // 500ms 待機させて順番化する。通常の敵ターン経由なら _enemyTurn で 550+380ms
+    // 既に挟まっているので 0 のままで OK。
     this._tickOtherEnemies(() => {
       setTimeout(() => this.onEnd('win', this.monster), 600);
-    });
+    }, { initialDelay: 500 });
     return true;
   }
 
@@ -205,8 +210,11 @@ export class Battle {
   // onComplete: 省略すると通常の敵ターン終了として _busy=false に戻す。
   // 指定すると tick 完了後にそれを呼び出し、_busy は呼び出し側の責務にする
   // （勝利確定後の演出など、戦闘を閉じる前に1ティック挟みたい時に利用）
-  _tickOtherEnemies(onComplete) {
+  // opts.initialDelay: 1 件目の魔法発動までに待つ ms（致命アタック VFX と被る
+  // のを避けるため）。デフォルト 0
+  _tickOtherEnemies(onComplete, opts = {}) {
     const finish = onComplete ?? (() => { this._busy = false; });
+    const initialDelay = opts.initialDelay ?? 0;
     if (!this.dungeon) { finish(); return; }
     const r = this.dungeon.tickEnemies(this.player, { excludeMob: this.mobRef });
     if (this.onTick) { try { this.onTick(r); } catch {} }
@@ -241,7 +249,8 @@ export class Battle {
       if (i < magics.length) setTimeout(step, STEP_MS);
       else { this.updateUI(); finish(); }
     };
-    step();
+    if (initialDelay > 0) setTimeout(step, initialDelay);
+    else step();
   }
 
   // 壁越し戦闘では魔法ナラティブ、通常戦闘は物理ナラティブ。ダメージ計算は同一
