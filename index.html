@@ -176,6 +176,19 @@
         <button id="btn-waza-cancel" class="btn-back">キャンセル</button>
       </div>
     </div>
+
+    <!-- ショップモーダル（商人と接触時） -->
+    <div id="shop-modal" class="modal hidden">
+      <div class="modal-box">
+        <div class="modal-title">🧝 商人 <span id="shop-gold-status" class="modal-meta"></span></div>
+        <div id="shop-keeper-meta" class="modal-meta" style="margin-bottom:8px"></div>
+        <div id="shop-list"></div>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button id="btn-shop-attack" class="menu-action-btn danger" style="flex:1">⚔️ 商人を攻撃</button>
+          <button id="btn-shop-close"  class="btn-back" style="flex:1">立ち去る</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- アプリ内 alert/confirm ダイアログ（native は audio を止めるので使わない） -->

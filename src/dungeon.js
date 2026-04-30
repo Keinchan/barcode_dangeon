@@ -1,5 +1,5 @@
 import { createRNG, hashString } from './rng.js';
-import { generateMonster, generateFloorItems } from './generator.js';
+import { generateMonster, generateFloorItems, generateShopkeeperFor, generateShopStock } from './generator.js';
 import { getDebugState } from './debug.js';
 import { getItemIconCanvas } from './icons.js';
 
@@ -71,9 +71,30 @@ export class Dungeon {
 
     this.floorItems = generateFloorItems(this.data, this.floor, rooms);
 
+    // ショップ：30% 確率で商人 NPC を配置（最終フロアにはボスがいるので避ける）
+    this.shopkeeperToStock = new Map();   // monster ref → stock 配列（撃破時の落下用にも使う）
+    if (!this.isFinal && rooms.length > 2 && this.rng() <= 0.30) {
+      const room = rooms[1 + Math.floor(this.rng() * Math.max(1, rooms.length - 2))];
+      const sx = room.x + 1 + Math.floor(this.rng() * Math.max(1, room.w - 2));
+      const sy = room.y + 1 + Math.floor(this.rng() * Math.max(1, room.h - 2));
+      if (this.grid[sy][sx] === T.FLOOR && !this._monsterAt(sx, sy)) {
+        const shopkeeper = generateShopkeeperFor(this.data, this.floor);
+        shopkeeper.x = sx;
+        shopkeeper.y = sy;
+        const stock = generateShopStock(this.data, this.floor);
+        this.shopkeeperToStock.set(shopkeeper, stock);
+        this.monsters.push(shopkeeper);
+      }
+    }
+
     // 念のためスポーン直後にもオーバーラップを解消（_pickSurroundSlot 等の前提条件）
     this._fixOverlaps?.();
   }
+
+  // 商人 mob か？ tickEnemies は商人を行動対象から除外する
+  isShopkeeperMob(m) { return m && m.isShopkeeper; }
+  // 商人の在庫を返す（撃破時の落下や購入時の更新に使う）
+  getShopStock(mob)  { return this.shopkeeperToStock?.get(mob) ?? []; }
 
   _genRooms(target) {
     const rooms = [];
@@ -188,10 +209,10 @@ export class Dungeon {
     let totalDmg = 0;
     const exclude = opts.excludeMob ?? null;
 
-    // 行動対象（生存・除外外）を距離昇順で並べる：近い mob が先にスロットを
-    // 取れる方が「囲み」が自然に成立する
+    // 行動対象（生存・除外外・非商人）を距離昇順で並べる：近い mob が先にスロットを
+    // 取れる方が「囲み」が自然に成立する。商人は攻撃されない限りその場でじっとしている
     const actors = this.monsters
-      .filter(m => m.hp > 0 && m !== exclude)
+      .filter(m => m.hp > 0 && m !== exclude && !m.isShopkeeper)
       .map(m => ({
         m,
         dist: Math.abs(m.x - this.playerPos.x) + Math.abs(m.y - this.playerPos.y),
@@ -498,6 +519,17 @@ export class Dungeon {
         ctx.lineWidth = 2;
         ctx.strokeRect(dx * ts + 2, dy * ts + 2, ts - 4, ts - 4);
         ctx.lineWidth = 1;
+      } else if (m.isShopkeeper) {
+        // 商人マーカー: 紫の円とドル風 ¥ を描く
+        ctx.fillStyle = '#7c4dff';
+        ctx.beginPath();
+        ctx.arc(dx * ts + ts - 8, dy * ts + 8, 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = `bold ${Math.floor(ts * 0.35)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('¥', dx * ts + ts - 8, dy * ts + 9);
       } else {
         ctx.fillStyle = m.rarityColor ?? '#9e9e9e';
         ctx.beginPath();

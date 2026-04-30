@@ -493,6 +493,30 @@ export function randomSkillBook(rng = Math.random, mobRarity = null) {
   return makeSkillBook(pool[Math.floor(r * pool.length)].id);
 }
 
+// ── ショップ価格 ──
+// レアリティと種別から購入価格（ゴールド）を算出。ダンジョンレアリティで倍率がかかる
+const _SHOP_BASE = {
+  potion:        { コモン: 30,  レア: 80,  エピック: 200, レジェンド: 500 },
+  mpPotion:      { コモン: 35,  レア: 90,  エピック: 220, レジェンド: 540 },
+  scroll:        { コモン: 50,  レア: 130, エピック: 320, レジェンド: 800 },
+  weapon:        { コモン: 80,  レア: 280, エピック: 900, レジェンド: 3000 },
+  armor:         { コモン: 80,  レア: 280, エピック: 900, レジェンド: 3000 },
+  material:      { コモン: 60,  レア: 220, エピック: 700, レジェンド: 2400 },
+  skillBook:     { コモン: 200, レア: 600, エピック: 2000, レジェンド: 6000 },
+  mysteryScroll: { コモン: 80,  レア: 200, エピック: 500, レジェンド: 1200 },
+};
+
+export function shopPriceFor(item, dungeonRarity = 'コモン') {
+  const base = _SHOP_BASE[item.type]?.[item.rarity] ?? 100;
+  // ダンジョンレアリティ倍率：高難度ダンジョンほど高い
+  const dunMul =
+    dungeonRarity === 'レジェンド' ? 2.5 :
+    dungeonRarity === 'エピック'   ? 1.8 :
+    dungeonRarity === 'レア'       ? 1.3 :
+    1.0;
+  return Math.max(5, Math.floor(base * dunMul));
+}
+
 // ── アイテム使用（バトル中） ──
 // 戻り値: { msg, healAmt, dmgAmt, mpHealAmt, consumed }
 export function applyItem(item, player, monster) {
