@@ -97,6 +97,14 @@ const POTIONS = [
   { base: '大回復薬', emoji: '💉', heal: 55 },
 ];
 
+// MP 回復薬（青系）。potion 種別で digits[6] が偶数なら HP、奇数なら MP に分岐。
+// HP/MP の決定論性を保つため、専用テーブルを用意する。
+const MP_POTIONS = [
+  { base: '小マナ薬', emoji: '🔵', mpHeal: 8  },
+  { base: 'マナ薬',   emoji: '💎', mpHeal: 18 },
+  { base: '大マナ薬', emoji: '🩵', mpHeal: 36 },
+];
+
 // 巻物は新属性に対応した 6 種類。それぞれ ELEMENTS 内の 1 属性とリンクする
 const SCROLLS = [
   { base: '棒の巻物',     emoji: '🥢', dmg: 14, element: '棒人間' },
@@ -191,7 +199,13 @@ export function generateItemFromBarcode(barcode, rarityOverride = null, levelOve
   switch (typeIdx) {
     case 0: return _buildWeapon(barcode, rng, rarity, element, level);
     case 1: return _buildArmor(barcode, rng, rarity, element, level);
-    case 2: return _buildPotion(barcode, rng, rarity, level);
+    case 2: {
+      // 薬カテゴリ内で digits[6] により HP/MP を振り分け（決定論的）
+      const isMp = (digits[6] % 2) === 1;
+      return isMp
+        ? _buildMpPotion(barcode, rng, rarity, level)
+        : _buildPotion   (barcode, rng, rarity, level);
+    }
     default: return _buildScroll(barcode, rng, rarity, element, level);
   }
 }
@@ -277,6 +291,22 @@ function _buildPotion(barcode, rng, rarity, level) {
   };
 }
 
+// MP 回復薬。type='mpPotion' で別タイプ扱い（バトルで MP を回復する）
+function _buildMpPotion(barcode, rng, rarity, level) {
+  const base   = MP_POTIONS[Math.floor(rng() * MP_POTIONS.length)];
+  const mpHeal = Math.max(3, Math.floor(base.mpHeal * rarity.mult * _levelMult(level)));
+  const prefix = _pickPrefix(rarity, rng);
+  return {
+    type: 'mpPotion', barcode,
+    name: `${prefix}${rarity.name}の${base.base}`,
+    emoji: base.emoji,
+    rarity: rarity.name, rarityColor: rarity.color, element: null, level,
+    atkBonus: 0, defBonus: 0, mpHeal,
+    skill: { kind: 'none', name: '' },
+    desc: `MPを${mpHeal}回復`,
+  };
+}
+
 function _buildScroll(barcode, rng, rarity, element, level) {
   const match = SCROLLS.find(s => s.element === element) ?? SCROLLS[Math.floor(rng() * SCROLLS.length)];
   const dmg   = Math.max(5, Math.floor(match.dmg * rarity.mult * _levelMult(level)));
@@ -293,16 +323,21 @@ function _buildScroll(barcode, rng, rarity, element, level) {
 }
 
 // ── アイテム使用（バトル中） ──
-// 戻り値: { msg, healAmt, dmgAmt, consumed }
+// 戻り値: { msg, healAmt, dmgAmt, mpHealAmt, consumed }
 export function applyItem(item, player, monster) {
   if (item.type === 'potion') {
     const actual = Math.min(item.heal, player.maxHp - player.hp);
     player.hp = Math.min(player.maxHp, player.hp + item.heal);
-    return { msg: `🧪 ${item.name} 使用！ HPが${actual}回復した`, healAmt: actual, dmgAmt: 0, consumed: true };
+    return { msg: `🧪 ${item.name} 使用！ HPが${actual}回復した`, healAmt: actual, dmgAmt: 0, mpHealAmt: 0, consumed: true };
+  }
+  if (item.type === 'mpPotion') {
+    const actual = Math.min(item.mpHeal, (player.maxMp ?? 0) - (player.mp ?? 0));
+    player.mp = Math.min(player.maxMp ?? 0, (player.mp ?? 0) + item.mpHeal);
+    return { msg: `🔵 ${item.name} 使用！ MPが${actual}回復した`, healAmt: 0, dmgAmt: 0, mpHealAmt: actual, consumed: true };
   }
   if (item.type === 'scroll') {
     monster.hp = Math.max(0, monster.hp - item.dmg);
-    return { msg: `${item.emoji} ${item.name} 使用！ ${item.dmg}ダメージ！`, healAmt: 0, dmgAmt: item.dmg, consumed: true };
+    return { msg: `${item.emoji} ${item.name} 使用！ ${item.dmg}ダメージ！`, healAmt: 0, dmgAmt: item.dmg, mpHealAmt: 0, consumed: true };
   }
-  return { msg: 'このアイテムはここでは使えない', healAmt: 0, dmgAmt: 0, consumed: false };
+  return { msg: 'このアイテムはここでは使えない', healAmt: 0, dmgAmt: 0, mpHealAmt: 0, consumed: false };
 }

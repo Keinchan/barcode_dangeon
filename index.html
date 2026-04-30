@@ -85,6 +85,7 @@
         <div class="dungeon-hp-row">
           <span id="player-lv" class="lv-text">Lv1</span>
           <span id="player-hp" class="hp-text">HP: 35/35</span>
+          <span id="player-mp" class="mp-text">MP: 20/20</span>
           <span id="player-gold" class="gold-text">🪙 0</span>
         </div>
         <div id="equip-display" class="equip-display">⚔️ー　🛡️ー</div>
@@ -141,6 +142,11 @@
           <span id="battle-player-hp">HP 35/35</span>
         </div>
         <div class="hp-bar-wrap"><div id="battle-player-hp-bar" class="hp-bar" style="width:100%"></div></div>
+        <div class="combat-player-row" style="margin-top:4px">
+          <span style="font-size:12px;color:#9adfff">💧 MP</span>
+          <span id="battle-player-mp" style="font-size:12px;color:#9adfff">MP 20/20</span>
+        </div>
+        <div class="hp-bar-wrap"><div id="battle-player-mp-bar" class="hp-bar" style="width:100%;background:#4dc4ff"></div></div>
       </div>
 
       <div id="battle-log" class="battle-log"></div>
@@ -221,6 +227,7 @@
         <div class="menu-stats">
           <div>Lv <span id="menu-lv">1</span></div>
           <div>HP <span id="menu-hp">35/35</span></div>
+          <div>MP <span id="menu-mp">20/20</span></div>
           <div>ATK <span id="menu-atk">9</span></div>
           <div>DEF <span id="menu-def">3</span></div>
           <div id="menu-gold" class="menu-gold-line">🪙 0</div>

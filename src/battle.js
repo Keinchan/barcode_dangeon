@@ -1,4 +1,5 @@
 import { applyItem, elementMatchup, matchupLabel } from './items.js';
+import { SKILL_MP_COST } from './generator.js';
 import {
   showFloatingDamage, showEnemyDamage,
   sparkSpray, explosion, shockwave, magicCircle,
@@ -46,9 +47,11 @@ export class Battle {
     document.getElementById('enemy-rarity').textContent  = `[${this.monster.rarity}]`;
     document.getElementById('enemy-rarity').style.color  = this.monster.rarityColor;
 
-    // ダンジョンヘッダーのプレイヤーHP（常時表示）
+    // ダンジョンヘッダーのプレイヤーHP / MP（常時表示）
     const dungeonHp = document.getElementById('player-hp');
     if (dungeonHp) dungeonHp.textContent = `HP: ${this.player.hp}/${this.player.maxHp}`;
+    const dungeonMp = document.getElementById('player-mp');
+    if (dungeonMp) dungeonMp.textContent = `MP: ${this.player.mp ?? 0}/${this.player.maxMp ?? 0}`;
 
     // 戦闘パネルのプレイヤーHP表示
     const bpHp = document.getElementById('battle-player-hp');
@@ -59,6 +62,17 @@ export class Battle {
       const ppct = Math.max(0, this.player.hp / this.player.maxHp) * 100;
       bpBar.style.width      = ppct + '%';
       bpBar.style.background = ppct > 50 ? '#4caf50' : ppct > 25 ? '#ffc107' : '#f44336';
+    }
+
+    // 戦闘パネルの MP 表示
+    const bpMp = document.getElementById('battle-player-mp');
+    if (bpMp) bpMp.textContent = `MP ${this.player.mp ?? 0}/${this.player.maxMp ?? 0}`;
+    const bpMpBar = document.getElementById('battle-player-mp-bar');
+    if (bpMpBar) {
+      const max = this.player.maxMp ?? 1;
+      const mppct = Math.max(0, (this.player.mp ?? 0) / max) * 100;
+      bpMpBar.style.width      = mppct + '%';
+      bpMpBar.style.background = '#4dc4ff';
     }
 
     // 行動ボタンに対敵での期待ダメージなどの内容を表示
@@ -81,8 +95,10 @@ export class Battle {
     const wSkill = this.player.weapon?.skill;
     if (skillBtn) {
       const skillName = (wSkill && wSkill.kind !== 'none') ? wSkill.name : (this.wallPiercing ? '魔法攻撃' : 'スキル');
+      const lowMp = (this.player.mp ?? 0) < SKILL_MP_COST;
       skillBtn.innerHTML =
-        `✨ ${skillName}<span class="btn-battle-sub">約${skillDmg}ダメージ（×2）</span>`;
+        `✨ ${skillName}<span class="btn-battle-sub">約${skillDmg}ダメージ（MP -${SKILL_MP_COST}）${lowMp ? '⚠️MP不足' : ''}</span>`;
+      skillBtn.disabled = lowMp;
     }
 
     const itemBtn = document.getElementById('btn-item');
@@ -123,11 +139,16 @@ export class Battle {
 
   skill() {
     if (this._busy) return;
+    if ((this.player.mp ?? 0) < SKILL_MP_COST) {
+      this.log(`💧 MP が足りない（必要 ${SKILL_MP_COST}）`);
+      return;
+    }
+    this.player.mp = Math.max(0, (this.player.mp ?? 0) - SKILL_MP_COST);
     const matchup = elementMatchup(this.player.weapon?.element, this.monster.element);
     const dmg = this._calcDmg(this.player.atk, this.monster.def, 2.0 * matchup);
     this.monster.hp = Math.max(0, this.monster.hp - dmg);
     const matchLbl = matchupLabel(matchup);
-    this.log(`✨ スキル！ ${dmg} の大ダメージ！${matchLbl ? '　' + matchLbl : ''}`);
+    this.log(`✨ スキル！ ${dmg} の大ダメージ！（MP -${SKILL_MP_COST}）${matchLbl ? '　' + matchLbl : ''}`);
     showEnemyDamage(dmg);
     playSfx('crit');
     // VFX: 武器属性の魔法陣 → 爆発

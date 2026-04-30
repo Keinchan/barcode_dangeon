@@ -429,6 +429,7 @@ html, body {
 #dungeon-title { font-size: 13px; color: var(--muted); }
 #floor-label   { font-size: 18px; font-weight: bold; margin-top: 2px; }
 .hp-text { font-size: 15px; color: var(--success); font-weight: bold; }
+.mp-text { font-size: 14px; color: #4dc4ff; font-weight: bold; }
 
 #dungeon-canvas {
   display: block;
