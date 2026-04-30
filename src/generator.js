@@ -192,8 +192,8 @@ export function generateFloorItems(dungeonData, floor, rooms) {
   const itemLevel = enemyLevel(dungeonData, floor, false);
 
   rooms.slice(1, -1).forEach((room, idx) => {
-    // 通常アイテム
-    if (rng() <= 0.5) {
+    // 通常アイテム（出現率 50% → 70%）
+    if (rng() <= 0.7) {
       const subHash  = hashString(`${dungeonData.barcode}:${floor}:room${idx}`);
       const subCode  = subHash.toString().padStart(13, '0').slice(0, 13);
       const item     = generateItemFromBarcode(subCode, null, itemLevel);
@@ -203,10 +203,10 @@ export function generateFloorItems(dungeonData, floor, rooms) {
       items.push(item);
     }
 
-    // ゴールドの山（部屋ごと 35% で出現）。アイテムスロットを消費しないため
+    // ゴールドの山（部屋ごと 35% → 60% で出現）。アイテムスロットを消費しないため
     // 持ち物満杯でも拾える「即時加算アイテム」扱い
-    if (rng() <= 0.35) {
-      const amount = Math.max(3, Math.floor((8 + itemLevel * 2) * (0.6 + rng() * 0.8)));
+    if (rng() <= 0.6) {
+      const amount = Math.max(8, Math.floor((20 + itemLevel * 4) * (0.7 + rng() * 0.8)));
       let gx = room.x + 1 + Math.floor(rng() * Math.max(1, room.w - 2));
       let gy = room.y + 1 + Math.floor(rng() * Math.max(1, room.h - 2));
       // 同じマスに通常アイテムが居れば 1 マス避ける（重なって描画されると見えない）
@@ -276,13 +276,13 @@ export function createPlayer() {
 export function rollGoldDropFromMonster(mob) {
   const lvl  = mob.level ?? 1;
   const rar  = mob.rarity;
-  const base = 5 + lvl * 2;
+  const base = 12 + lvl * 4;            // 5+lvl*2 → 12+lvl*4 に増額
   const rarBonus =
-    rar === 'レジェンド' ? 60 :
-    rar === 'エピック'   ? 22 :
-    rar === 'レア'       ? 8  :
+    rar === 'レジェンド' ? 150 :
+    rar === 'エピック'   ? 55  :
+    rar === 'レア'       ? 22  :
     0;
-  const bossMul = mob.isBoss ? 3 : 1;
-  const roll = 0.7 + Math.random() * 0.6;   // 0.7〜1.3
-  return Math.max(1, Math.floor((base + rarBonus) * bossMul * roll));
+  const bossMul = mob.isBoss ? 4 : 1;   // ボスはより多く
+  const roll = 0.8 + Math.random() * 0.5;   // 0.8〜1.3 にブレ縮小（最低保証）
+  return Math.max(2, Math.floor((base + rarBonus) * bossMul * roll));
 }
