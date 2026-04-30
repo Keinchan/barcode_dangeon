@@ -369,6 +369,45 @@ export function materialForRarity(rarityName) {
   return makeMaterial(m);
 }
 
+// ── 不思議のダンジョン系巻物 ──
+// バトルでは使わず、ダンジョン探索中にメニューから使うフロア限定巻物。
+// 効果は現フロア（dungeon インスタンス）の visibility フラグを書き換えるだけで、
+// 階段やアイテム位置の表示・全マップ可視化など。新フロアで自動リセット。
+export const MYSTERY_SCROLLS = [
+  { effect: 'reveal-stairs',  name: '階段感知の巻物',     emoji: '🔍', rarity: 'コモン',
+    desc: '今のフロアの階段位置がわかる' },
+  { effect: 'reveal-enemies', name: '敵感知の巻物',       emoji: '👁',  rarity: 'レア',
+    desc: '今のフロアの敵位置を表示' },
+  { effect: 'reveal-items',   name: 'アイテム感知の巻物', emoji: '🎁', rarity: 'レア',
+    desc: '今のフロアのアイテム位置を表示' },
+  { effect: 'reveal-all',     name: '視界の巻物',         emoji: '🗺',  rarity: 'エピック',
+    desc: '今のフロア全マップを照らす' },
+];
+
+export function makeMysteryScroll(spec) {
+  const rarity = RARITIES.find(r => r.name === spec.rarity) ?? RARITIES[0];
+  return {
+    type:        'mysteryScroll',
+    effect:      spec.effect,
+    name:        spec.name,
+    emoji:       spec.emoji,
+    rarity:      rarity.name,
+    rarityColor: rarity.color,
+    element:     null, level: 1,
+    desc:        spec.desc,
+    count:       1,
+  };
+}
+
+// 重み付きランダム抽選: コモン 50%, 感知系（レア）40%, 視界（エピック）10%
+export function randomMysteryScroll(rng = Math.random) {
+  const r = typeof rng === 'function' ? rng() : Math.random();
+  if (r < 0.50) return makeMysteryScroll(MYSTERY_SCROLLS[0]);
+  if (r < 0.70) return makeMysteryScroll(MYSTERY_SCROLLS[1]);
+  if (r < 0.90) return makeMysteryScroll(MYSTERY_SCROLLS[2]);
+  return                makeMysteryScroll(MYSTERY_SCROLLS[3]);
+}
+
 // ── アイテム使用（バトル中） ──
 // 戻り値: { msg, healAmt, dmgAmt, mpHealAmt, consumed }
 export function applyItem(item, player, monster) {

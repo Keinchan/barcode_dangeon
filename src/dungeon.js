@@ -21,6 +21,11 @@ export class Dungeon {
     this.stairsPos  = null;
     this.discovered = Array.from({ length: H }, () => new Uint8Array(W));
     this.visible    = new Set();
+    // 不思議系巻物の効果フラグ。フロアごと（new Dungeon ごと）にリセット
+    this.revealStairs  = false;
+    this.revealEnemies = false;
+    this.revealItems   = false;
+    this.revealFloor   = false;
     this._build();
   }
 
@@ -371,7 +376,12 @@ export class Dungeon {
 
     this.refreshVisibility();
     const dbg       = getDebugState();
-    const revealAll = !!dbg.revealAll;
+    // デバッグの全可視化 or 巻物による全可視化
+    const revealAll = !!dbg.revealAll || this.revealFloor;
+    // 個別系巻物（階段だけ / アイテムだけ / 敵だけ をフォグ越しに表示）
+    const showStairsThruFog  = revealAll || this.revealStairs;
+    const showItemsThruFog   = revealAll || this.revealItems;
+    const showEnemiesThruFog = revealAll || this.revealEnemies;
 
     const ctx   = canvas.getContext('2d');
     const { x: px, y: py } = this.playerPos;
@@ -388,9 +398,20 @@ export class Dungeon {
         const isVisible    = revealAll || (!outOfBounds && this.visible.has(`${wx},${wy}`));
         const isDiscovered = revealAll || (!outOfBounds && this.discovered[wy][wx] === 1);
 
+        // 階段感知中は階段マスをフォグ越しでも描く（タイルは黒のまま、シンボルだけ薄く出す）
+        const isStairs = !outOfBounds && this.grid[wy][wx] === T.STAIRS;
         if (outOfBounds || (!isVisible && !isDiscovered)) {
           ctx.fillStyle = '#000';
           ctx.fillRect(sx, sy, ts, ts);
+          if (isStairs && showStairsThruFog) {
+            const fs = Math.floor(ts * 0.6);
+            ctx.font = `${fs}px serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.globalAlpha = 0.55;
+            ctx.fillText('🔽', sx + ts / 2, sy + ts / 2);
+            ctx.globalAlpha = 1;
+          }
           continue;
         }
 
@@ -425,20 +446,26 @@ export class Dungeon {
     }
 
     // アイテム（現視野内のみ。既踏でも非表示にして「拾われたかも」のミスリードを避ける）
-    //   絵文字ではなく手続きアイコンを drawImage する
+    //   絵文字ではなく手続きアイコンを drawImage する。
+    //   アイテム感知の巻物使用中はフォグ越しでも半透明で表示する
     for (const it of this.floorItems) {
       const dx = it.x - (px - half);
       const dy = it.y - (py - half);
       if (dx < 0 || dx >= VIEW || dy < 0 || dy >= VIEW) continue;
-      if (!revealAll && !this.visible.has(`${it.x},${it.y}`)) continue;
+      const inSight = this.visible.has(`${it.x},${it.y}`);
+      if (!revealAll && !inSight && !showItemsThruFog) continue;
+      const dim = !revealAll && !inSight;
+      if (dim) ctx.globalAlpha = 0.55;
 
-      // ゴールドの山は絵文字 + 数値表記で描画（手続きアイコンは武器/防具/薬/巻物のみ）
-      if (it.type === 'gold') {
+      // ゴールドの山・不思議系巻物・素材は絵文字描画
+      // （手続きアイコンは武器/防具/薬/巻物のみ。それ以外は emoji フォールバック）
+      if (it.type === 'gold' || it.type === 'mysteryScroll' || it.type === 'material') {
         const fs = Math.floor(ts * 0.6);
         ctx.font = `${fs}px serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('🪙', dx * ts + ts / 2, dy * ts + ts / 2);
+        ctx.fillText(it.emoji ?? '🎁', dx * ts + ts / 2, dy * ts + ts / 2);
+        ctx.globalAlpha = 1;
         continue;
       }
 
@@ -447,15 +474,19 @@ export class Dungeon {
       const ix = dx * ts + (ts - iconSize) / 2;
       const iy = dy * ts + (ts - iconSize) / 2;
       ctx.drawImage(icon, ix, iy, iconSize, iconSize);
+      ctx.globalAlpha = 1;
     }
 
-    // モンスター（現視野内のみ）
+    // モンスター（現視野内のみ。敵感知巻物中はフォグ越しでも半透明表示）
     for (const m of this.monsters) {
       if (m.hp <= 0) continue;
       const dx = m.x - (px - half);
       const dy = m.y - (py - half);
       if (dx < 0 || dx >= VIEW || dy < 0 || dy >= VIEW) continue;
-      if (!revealAll && !this.visible.has(`${m.x},${m.y}`)) continue;
+      const inSight = this.visible.has(`${m.x},${m.y}`);
+      if (!revealAll && !inSight && !showEnemiesThruFog) continue;
+      const dim = !revealAll && !inSight;
+      if (dim) ctx.globalAlpha = 0.55;
       const fs = Math.floor(ts * 0.65);
       ctx.font = `${fs}px serif`;
       ctx.textAlign = 'center';
@@ -473,6 +504,7 @@ export class Dungeon {
         ctx.arc(dx * ts + 6, dy * ts + 6, 4, 0, Math.PI * 2);
         ctx.fill();
       }
+      ctx.globalAlpha = 1;
     }
 
     // プレイヤー（常に中央）

@@ -1,5 +1,5 @@
 import { createRNG, hashString } from './rng.js';
-import { RARITIES, ELEMENTS, rarityFromDigit, generateItemFromBarcode } from './items.js';
+import { RARITIES, ELEMENTS, rarityFromDigit, generateItemFromBarcode, randomMysteryScroll } from './items.js';
 
 // ── モンスタープール ──
 const MONSTER_POOL = [
@@ -192,6 +192,15 @@ export function generateFloorItems(dungeonData, floor, rooms) {
   const rng       = createRNG(hashString(`floor-items:${dungeonData.seed}:${floor}`));
   const items     = [];
   const itemLevel = enemyLevel(dungeonData, floor, false);
+
+  // 不思議系巻物：このフロアに 1 個（25% 確率）配置
+  if (rng() <= 0.25 && rooms.length > 2) {
+    const room = rooms[1 + Math.floor(rng() * Math.max(1, rooms.length - 2))];
+    const scroll = randomMysteryScroll(rng);
+    scroll.x = room.x + 1 + Math.floor(rng() * Math.max(1, room.w - 2));
+    scroll.y = room.y + 1 + Math.floor(rng() * Math.max(1, room.h - 2));
+    items.push(scroll);
+  }
 
   rooms.slice(1, -1).forEach((room, idx) => {
     // 通常アイテム（出現率 50% → 70%）
