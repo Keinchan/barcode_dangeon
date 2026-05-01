@@ -29,6 +29,7 @@ import { Battle } from './battle.js';
 import {
   showFloatingDamage, showItemBanner, shockwave, magicCircle, playerVfxAnchor,
   hitFlash, screenShake, deathBurst, sparkSpray, explosion,
+  showEnhanceCelebration,
 } from './ui.js';
 import {
   isFirebaseConfigured,
@@ -1182,15 +1183,16 @@ function _refreshSynthesisUI() {
             if (!_consumeMaterial(recipe.matName, recipe.matCount)) {
               showAlert('素材消費に失敗（途中で減った？）'); return;
             }
-            const upgraded = applyEnhanceRecipe(item, recipe);
+            const beforeAtk = item.atkBonus;
+            const upgraded  = applyEnhanceRecipe(item, recipe);
             _replaceWeaponAt(ref, upgraded);
+            playSfx('crit');
             playSfx('levelup');
             refreshHUD();
             refreshMenu();
             autoSave();
-            showItemBanner({
-              ...upgraded, rarity: item.rarity, rarityColor: item.rarityColor,
-            }, { action: '強化完了' });
+            // 派手な強化バナー（フラッシュ + シェイク + 星屑 + 火花 + before→after 表示）
+            showEnhanceCelebration(upgraded, beforeAtk, upgraded.atkBonus);
           });
       });
     }
@@ -1239,11 +1241,14 @@ function _openFuseModal(fusable) {
       // 融合品はインベントリへ（満杯ならストレージ）
       if (canAddToInventory(fused)) addToInventory(fused);
       else                          addToStorage(fused);
+      playSfx('crit');
       playSfx('levelup');
       refreshHUD();
       refreshMenu();
       autoSave();
-      showItemBanner({ ...fused, rarity: 'レジェンド', rarityColor: '#ffe082' }, { action: '神話級！' });
+      // 神話級バナー：mythic フラグで色とエフェクトをさらに派手に
+      const beforeAtk = Math.max(a.item.atkBonus, b.item.atkBonus);
+      showEnhanceCelebration(fused, beforeAtk, fused.atkBonus);
     });
 }
 

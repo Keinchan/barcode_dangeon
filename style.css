@@ -1290,6 +1290,154 @@ html, body {
   margin-top: 2px;
 }
 
+/* ── 強化バナー（武器強化・神話融合用） ── */
+.enhance-banner {
+  position: fixed;
+  left: 50%;
+  top: 18%;
+  transform: translateX(-50%);
+  z-index: 5500;
+  padding: 20px 28px 22px;
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-width: 300px;
+  max-width: 90vw;
+  pointer-events: none;
+  animation: enhanceBannerIn 0.6s cubic-bezier(.2,1.4,.4,1) forwards;
+  text-align: center;
+  overflow: hidden;
+}
+.enhance-banner.fade-out {
+  animation: enhanceBannerOut 0.4s ease-out forwards;
+}
+.enhance-banner-tag {
+  font-size: 13px;
+  font-weight: bold;
+  letter-spacing: 3px;
+  color: #fff;
+  text-shadow: 0 0 10px var(--primary);
+}
+.enhance-banner-sub {
+  font-size: 11px;
+  color: rgba(255,255,255,0.8);
+}
+.enhance-banner-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 4px;
+}
+.enhance-banner-icon {
+  font-size: 48px;
+  filter: drop-shadow(0 0 8px var(--primary));
+  animation: enhanceIconBob 1.4s ease-in-out infinite;
+}
+.enhance-banner-text { text-align: left; }
+.enhance-banner-name {
+  font-size: 18px;
+  font-weight: bold;
+  color: #fff;
+  text-shadow: 0 0 6px var(--primary);
+}
+.enhance-banner-stats {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: bold;
+}
+.atk-before { color: rgba(255,255,255,0.55); text-decoration: line-through; }
+.atk-arrow  { color: #ffd54f; font-size: 16px; }
+.atk-after  { color: #4caf50; }
+.atk-delta  {
+  background: rgba(76,175,80,0.25);
+  border: 1px solid rgba(76,175,80,0.6);
+  color: #a5e6a8;
+  padding: 1px 8px;
+  border-radius: 10px;
+  margin-left: 4px;
+  font-size: 12px;
+}
+
+/* 中央から放射状に伸びる光の筋（rays） */
+.enhance-banner-rays {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 35%,
+    rgba(255,255,255,0.35) 0%,
+    rgba(255,255,255,0.05) 30%,
+    rgba(0,0,0,0) 60%);
+  pointer-events: none;
+  animation: enhanceRayPulse 1.6s ease-in-out infinite;
+}
+.enhance-banner-sparkles {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+.enhance-banner.rarity-common {
+  background: linear-gradient(135deg, #2d2d44 0%, #1a1a2e 100%);
+  border: 1.5px solid var(--primary);
+  box-shadow: 0 0 26px rgba(124,77,255,0.55);
+}
+.enhance-banner.rarity-rare {
+  background: linear-gradient(135deg, #1e3c5c 0%, #14283c 100%);
+  border: 1.5px solid #4fc3f7;
+  box-shadow: 0 0 28px rgba(79,195,247,0.6);
+}
+.enhance-banner.rarity-epic {
+  background: linear-gradient(135deg, #4a1a6b 0%, #2c0f44 100%);
+  border: 2px solid #ce93d8;
+  box-shadow: 0 0 32px rgba(206,147,216,0.6), 0 0 80px rgba(171,71,188,0.4);
+}
+.enhance-banner.rarity-legendary {
+  background: radial-gradient(ellipse at top, #6b4a0a 0%, #3a2700 60%, #1a1100 100%);
+  border: 2.5px solid #ffd54f;
+  box-shadow:
+    0 0 36px rgba(255,213,79,0.75),
+    0 0 90px rgba(255,179,0,0.5),
+    inset 0 0 30px rgba(255,213,79,0.18);
+}
+.enhance-banner.mythic {
+  /* 神話級は虹グラデと強発光で「特別感」を出す */
+  background: linear-gradient(135deg, #6b1a0a 0%, #6b4a0a 30%, #1a4a6b 70%, #6b1a6b 100%);
+  background-size: 200% 200%;
+  border: 3px solid #ffe082;
+  box-shadow:
+    0 0 42px rgba(255,224,130,0.85),
+    0 0 100px rgba(255,179,0,0.55);
+  animation: enhanceBannerIn 0.6s cubic-bezier(.2,1.4,.4,1) forwards,
+             mythicShift 3.5s ease-in-out infinite;
+}
+
+@keyframes enhanceBannerIn {
+  0%   { transform: translateX(-50%) scale(0.5) rotate(-3deg); opacity: 0; }
+  60%  { transform: translateX(-50%) scale(1.08) rotate(1deg); opacity: 1; }
+  100% { transform: translateX(-50%) scale(1) rotate(0); opacity: 1; }
+}
+@keyframes enhanceBannerOut {
+  0%   { transform: translateX(-50%) translateY(0)    scale(1);    opacity: 1; }
+  100% { transform: translateX(-50%) translateY(-20%) scale(0.9);  opacity: 0; }
+}
+@keyframes enhanceIconBob {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50%      { transform: translateY(-6px) scale(1.08); }
+}
+@keyframes enhanceRayPulse {
+  0%, 100% { opacity: 0.6; }
+  50%      { opacity: 1; }
+}
+@keyframes mythicShift {
+  0%, 100% { background-position: 0% 50%; }
+  50%      { background-position: 100% 50%; }
+}
+
 /* ── 属性相性チャート（メニュー内） ── */
 .element-chart-help {
   font-size: 11px;
