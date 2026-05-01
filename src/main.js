@@ -407,8 +407,75 @@ btnDungeonMenu.addEventListener('click', () => {
 });
 
 function openMenu() {
+  // メニューを開いた直後は必ずホームに戻す（前回開いた stage は保持しない）
+  _setMenuStage('home');
   refreshMenu();
   document.getElementById('menu-modal').classList.remove('hidden');
+}
+
+// メニューの 2 段階切り替え。data-stage を書き換えるだけで CSS が表示制御する。
+const MENU_STAGE_TITLES = {
+  home:      'メニュー',
+  pocket:    '装備・持ち物',
+  storage:   'ストレージ',
+  materials: '素材ボックス',
+  synth:     '合成・強化',
+  element:   '属性相性',
+  currency:  '通貨・スキャン',
+  sound:     'サウンド',
+  account:   'アカウント',
+};
+function _setMenuStage(stage) {
+  const modal = document.getElementById('menu-modal');
+  if (!modal) return;
+  modal.dataset.stage = stage;
+  const title = document.getElementById('menu-modal-title');
+  if (title) title.textContent = MENU_STAGE_TITLES[stage] ?? 'メニュー';
+  // ストレージ画面に入った時は持ち物ミニ一覧を再描画
+  if (stage === 'storage') _refreshInventoryMini();
+}
+
+// タイル → ステージ切替
+document.querySelectorAll('.menu-tile').forEach(btn => {
+  btn.addEventListener('click', () => {
+    playSfx('click');
+    _setMenuStage(btn.dataset.go);
+  });
+});
+document.getElementById('btn-menu-back').addEventListener('click', () => {
+  playSfx('click');
+  _setMenuStage('home');
+});
+
+// ストレージ画面の「持ち物ミニ」描画。行タップで 1 個だけストレージへ送る
+function _refreshInventoryMini() {
+  const wrap = document.getElementById('menu-inventory-mini');
+  if (!wrap) return;
+  const cnt = document.getElementById('menu-inv-count-mini');
+  if (cnt) cnt.textContent = `(${player.inventory.length}/8)`;
+  if (player.inventory.length === 0) {
+    wrap.innerHTML = '<div class="menu-empty">持ち物なし</div>';
+    return;
+  }
+  wrap.innerHTML = '';
+  player.inventory.forEach((it, idx) => {
+    const row = document.createElement('div');
+    row.className = 'storage-mini-row';
+    const cnt = (isStackable(it) && (it.count ?? 1) > 1) ? `<span class="menu-row-count">×${it.count}</span>` : '';
+    row.innerHTML = `
+      ${iconImg(it, 28)}
+      <div class="storage-mini-row-info">
+        <div class="storage-mini-row-name" style="color:${it.rarityColor}">${it.name} ${cnt}</div>
+        <div class="storage-mini-row-stat">${_statLine(it)}</div>
+      </div>
+      <span class="storage-mini-row-arrow">→📦</span>
+    `;
+    row.addEventListener('click', () => {
+      _depositToStorage(idx);
+      _refreshInventoryMini();   // ミニ側も即更新
+    });
+    wrap.appendChild(row);
+  });
 }
 
 // ─────────────────────────────────────────────
@@ -465,8 +532,9 @@ function refreshMenu() {
     });
   }
 
-  // ストレージ
+  // ストレージ + 持ち物ミニ（ストレージ画面用）
   _refreshStorageUI();
+  _refreshInventoryMini();
   // 素材ボックス
   _refreshMaterialsUI();
   // 合成
