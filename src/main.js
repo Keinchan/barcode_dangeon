@@ -467,6 +467,8 @@ function refreshMenu() {
   _refreshSynthesisUI();
   // 属性相性チャート
   _refreshElementChart();
+  // 技を学ぶ/忘れるとスロット内容が変わるのでクイックバーも再描画
+  _refreshWazaBar();
 }
 
 // 属性相性チャート：2 つの 3 元素サイクルを矢印付きで描画する。
@@ -1341,7 +1343,61 @@ document.getElementById('btn-shop-attack').addEventListener('click', async () =>
   startBattle(target);
 });
 
-// わざボタン → モーダル表示
+// 技クイックバー描画：4 スロットに player.skills を順番にバインド。
+// 学習済み技はスロットに「絵文字 + 名前頭文字」で表示し、属性カラーで縁取り。
+// MP 不足時は disabled、タップで即発動（モーダルを開かない）。
+const SKILL_ELEMENT_COLOR = {
+  '火': '#ff6b3d', '水': '#4dc4ff', '草': '#66bb6a',
+  '雷': '#ffd54f', '光': '#fff176', '闇': '#b070dd',
+};
+const SKILL_ELEMENT_EMOJI = {
+  '火': '🔥', '水': '💧', '草': '🌿',
+  '雷': '⚡', '光': '✨', '闇': '🌑',
+};
+function _refreshWazaBar() {
+  const bar = document.getElementById('waza-bar');
+  if (!bar) return;
+  const slots = bar.querySelectorAll('.waza-slot');
+  const skills = Array.isArray(player.skills) ? player.skills : [];
+  for (let i = 0; i < slots.length; i++) {
+    const btn = slots[i];
+    const sk  = skills[i];
+    btn.onclick = null;
+    if (!sk) {
+      btn.classList.add('empty');
+      btn.classList.remove('lowmp');
+      btn.disabled = true;
+      btn.style.borderColor   = '';
+      btn.style.background    = '';
+      btn.style.color         = '';
+      btn.title    = '空きスロット';
+      btn.innerHTML = '—';
+      continue;
+    }
+    btn.classList.remove('empty');
+    const color = SKILL_ELEMENT_COLOR[sk.element] ?? '#c5c5d4';
+    const emoji = SKILL_ELEMENT_EMOJI[sk.element] ?? '✨';
+    const lowMp = (player.mp ?? 0) < sk.mpCost;
+    btn.classList.toggle('lowmp', lowMp);
+    btn.disabled = lowMp || combatActive || screen !== 'dungeon';
+    btn.style.borderColor = color;
+    btn.style.background  = `linear-gradient(180deg, ${color}33 0%, ${color}11 100%)`;
+    btn.style.color       = color;
+    btn.title = `${sk.name}（${sk.element} / ${sk.pattern}型 / MP-${sk.mpCost}）${lowMp ? ' MP不足' : ''}`;
+    btn.innerHTML =
+      `<span class="waza-slot-emoji">${emoji}</span>` +
+      `<span class="waza-slot-name">${sk.name}</span>` +
+      `<span class="waza-slot-mp">MP-${sk.mpCost}</span>`;
+    btn.onclick = () => {
+      playSfx('click');
+      _executeSkill(sk);
+    };
+  }
+}
+
+// わざモーダル（旧仕様）→ 直接発動に切り替え後はクイックバーから呼ばれる。
+// モーダルは「技スロットを並び替える/詳細を見たい」時用に残しても良いが
+// 現状は不要なので関数だけ残しておく（将来の slot 編集 UI へ転用予定）
 function _openWazaModal() {
   if (!dungeon || screen !== 'dungeon' || combatActive) {
     showAlert('技はダンジョン探索中にだけ使えます'); return;
@@ -1377,10 +1433,6 @@ function _openWazaModal() {
   }
   document.getElementById('waza-modal').classList.remove('hidden');
 }
-document.getElementById('btn-waza').addEventListener('click', () => {
-  playSfx('click');
-  _openWazaModal();
-});
 document.getElementById('btn-waza-cancel').addEventListener('click', () => {
   playSfx('click');
   document.getElementById('waza-modal').classList.add('hidden');
@@ -1649,6 +1701,8 @@ function refreshHUD() {
   if (mapGold) mapGold.textContent = goldStr;
 
   _refreshScanStatusUI();
+  // 技クイックバーは MP 残量で disabled が切り替わるので HUD と同じタイミングで再描画
+  _refreshWazaBar();
 }
 
 // XP獲得＆レベルアップ
@@ -1902,9 +1956,16 @@ document.querySelectorAll('.dpad-btn').forEach(btn => {
   });
 });
 
-// キーボード（PC確認用、8方向対応）
+// キーボード（PC確認用、8方向対応 + 技クイックバー 1〜4）
 document.addEventListener('keydown', e => {
   if (screen !== 'dungeon' || combatActive) return;
+  // 1〜4 で技スロットを発動（PC からのデバッグ動作確認用）
+  if (e.key === '1' || e.key === '2' || e.key === '3' || e.key === '4') {
+    const idx = parseInt(e.key, 10) - 1;
+    const sk  = (player.skills ?? [])[idx];
+    if (sk) { e.preventDefault(); _executeSkill(sk); }
+    return;
+  }
   const m = {
     ArrowUp:[0,-1], ArrowDown:[0,1], ArrowLeft:[-1,0], ArrowRight:[1,0],
     w:[0,-1], s:[0,1], a:[-1,0], d:[1,0], ' ':[0,0],
@@ -1953,6 +2014,8 @@ function startBattle(mob, opts = {}) {
   combatActive = true;
   document.getElementById('dungeon-footer').classList.add('hidden');
   document.getElementById('combat-panel').classList.remove('hidden');
+  // クイックバーは戦闘中は disabled（探索中の技なので意味がない）
+  _refreshWazaBar();
 
   // ボス遭遇は専用 SFX、その後バトル BGM へ
   if (mob.isBoss) playSfx('boss');
@@ -1963,6 +2026,7 @@ function startBattle(mob, opts = {}) {
     combatActive = false;
     document.getElementById('combat-panel').classList.add('hidden');
     document.getElementById('dungeon-footer').classList.remove('hidden');
+    _refreshWazaBar();   // 探索復帰時にクイックバーも再活性化
 
     player.hp  = battle.player.hp;
     player.mp  = battle.player.mp ?? player.mp;
