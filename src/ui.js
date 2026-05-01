@@ -164,6 +164,69 @@ function rarityKey(name) {
   }
 }
 
+// 強化成功時の派手バナー：
+//   武器名・ATK の before → after を大きく出し、画面フラッシュ・粒子・
+//   星屑・シェイクを重ねて「強化された！」感を演出する。
+//   呼び出し側は強化前と強化後の atkBonus を渡す。
+export function showEnhanceCelebration(item, beforeAtk, afterAtk) {
+  if (!item) return;
+  const tag    = item.isMythic ? '🌟 MYTHIC FUSE' : '🛠 ENHANCED';
+  const subTag = item.isMythic ? '神話級に到達！' : '強化成功！';
+  const cls    = `enhance-banner rarity-${rarityKey(item.rarity)}` + (item.isMythic ? ' mythic' : '');
+  const icon   = item.emoji ?? '⚔️';
+
+  const div = document.createElement('div');
+  div.className = cls;
+  div.innerHTML = `
+    <div class="enhance-banner-tag">${tag}</div>
+    <div class="enhance-banner-sub">${subTag}</div>
+    <div class="enhance-banner-row">
+      <span class="enhance-banner-icon">${icon}</span>
+      <div class="enhance-banner-text">
+        <div class="enhance-banner-name">${item.name}</div>
+        <div class="enhance-banner-stats">
+          <span class="atk-before">ATK ${beforeAtk}</span>
+          <span class="atk-arrow">➤</span>
+          <span class="atk-after">ATK ${afterAtk}</span>
+          <span class="atk-delta">+${afterAtk - beforeAtk}</span>
+        </div>
+      </div>
+    </div>
+    <div class="enhance-banner-rays"></div>
+    <div class="enhance-banner-sparkles"></div>
+  `;
+
+  // 星屑 16 粒
+  const sparkles = div.querySelector('.enhance-banner-sparkles');
+  for (let i = 0; i < 16; i++) {
+    const s = document.createElement('span');
+    s.className = 'sparkle';
+    s.style.left  = `${Math.random() * 100}%`;
+    s.style.top   = `${Math.random() * 100}%`;
+    s.style.animationDelay = `${Math.random() * 0.6}s`;
+    sparkles.appendChild(s);
+  }
+
+  // 全画面フラッシュ + シェイク
+  hitFlash({ color: item.isMythic ? 'rgba(255,213,79,0.55)' : 'rgba(124,77,255,0.45)' });
+  screenShake(item.isMythic ? 14 : 8, 380);
+
+  document.body.appendChild(div);
+  // バナー周辺に火花を散らす
+  setTimeout(() => {
+    const r = div.getBoundingClientRect();
+    const anchor = { left: r.left + r.width / 2 - 18, top: r.top + r.height / 2 - 18, width: 36, height: 36 };
+    sparkSpray(anchor, { count: 24, color: item.isMythic ? '#ffd54f' : '#b39bff' });
+    if (item.isMythic) sparkSpray(anchor, { count: 18, color: '#fff8e1' });
+  }, 100);
+
+  const lifetime = item.isMythic ? 2400 : 1800;
+  setTimeout(() => {
+    div.classList.add('fade-out');
+    setTimeout(() => div.remove(), 400);
+  }, lifetime);
+}
+
 // ─────────────────────────────────────────────
 // 戦闘演出（パーティクル / 爆発 / 魔法陣）
 //   全て fixed 配置の DOM で軽量実装。Canvas 描画には介入しない。
