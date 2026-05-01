@@ -241,7 +241,8 @@ export function generateShopStock(dungeonData, floor) {
 
 // ── フロアのアイテム生成 ──
 //   そのフロアの雑魚相当のレベルを付けて、レベル相当のステータスにする。
-//   各部屋に通常アイテムが落ちる確率と独立に、ゴールドの山も配置する。
+//   武器ドロップは「敵」からは出さず、フロアの宝箱（chest）かボスドロップに集約。
+//   通常の床落ちは消耗品（薬・巻物）を中心にし、装備偏重を解消。
 export function generateFloorItems(dungeonData, floor, rooms) {
   const rng       = createRNG(hashString(`floor-items:${dungeonData.seed}:${floor}`));
   const items     = [];
@@ -267,21 +268,50 @@ export function generateFloorItems(dungeonData, floor, rooms) {
     }
   }
 
+  // 宝箱：このフロアに最大 1 個（25% 確率）。中身は武器 (75%) または防具 (25%)。
+  // 装備獲得の主経路をここに集約する（敵からは武器が出ない）。
+  if (rng() <= 0.25 && rooms.length > 2) {
+    const room = rooms[1 + Math.floor(rng() * Math.max(1, rooms.length - 2))];
+    const seed = hashString(`chest:${dungeonData.seed}:${floor}`);
+    const code = seed.toString().padStart(13, '0').slice(0, 13);
+    // 中身を「武器か防具」になるよう生成（typeIdx 0 or 1）
+    const want = rng() < 0.75 ? 'weapon' : 'armor';
+    const inner = _generateEquipmentFromBarcode(code, dungeonData.rarityBase, itemLevel, want);
+    if (inner) {
+      const cx = room.x + 1 + Math.floor(rng() * Math.max(1, room.w - 2));
+      const cy = room.y + 1 + Math.floor(rng() * Math.max(1, room.h - 2));
+      items.push({
+        type: 'chest',
+        name: '宝箱',
+        emoji: '🎁',
+        rarity: inner.rarity,
+        rarityColor: inner.rarityColor,
+        inner,                 // 開けると inner が出る（rarity に応じた SFX 付き）
+        x: cx, y: cy,
+      });
+    }
+  }
+
   rooms.slice(1, -1).forEach((room, idx) => {
-    // 通常アイテム（出現率 50% → 70%）
-    if (rng() <= 0.7) {
+    // 通常アイテム（出現率 35%）。雑魚エリアでは消耗品中心に絞る
+    // （旧仕様の 70% で武器/防具が氾濫していたのを抑制）
+    if (rng() <= 0.35) {
       const subHash  = hashString(`${dungeonData.barcode}:${floor}:room${idx}`);
       const subCode  = subHash.toString().padStart(13, '0').slice(0, 13);
-      const item     = generateItemFromBarcode(subCode, null, itemLevel);
-      const x = room.x + 1 + Math.floor(rng() * Math.max(1, room.w - 2));
-      const y = room.y + 1 + Math.floor(rng() * Math.max(1, room.h - 2));
-      item.x = x; item.y = y;
-      items.push(item);
+      // 床落ちは consumable（potion/mpPotion/scroll）に限定。
+      // 武器/防具は宝箱経由でしか入手できないようにする。
+      const want = rng() < 0.6 ? 'potion' : 'scroll';
+      const item = _generateConsumableFromBarcode(subCode, null, itemLevel, want);
+      if (item) {
+        const x = room.x + 1 + Math.floor(rng() * Math.max(1, room.w - 2));
+        const y = room.y + 1 + Math.floor(rng() * Math.max(1, room.h - 2));
+        item.x = x; item.y = y;
+        items.push(item);
+      }
     }
 
-    // ゴールドの山（部屋ごと 35% → 60% で出現）。アイテムスロットを消費しないため
-    // 持ち物満杯でも拾える「即時加算アイテム」扱い
-    if (rng() <= 0.6) {
+    // ゴールドの山（部屋ごと 40% で出現）。スロットを消費しない即時加算アイテム
+    if (rng() <= 0.4) {
       const amount = Math.max(8, Math.floor((20 + itemLevel * 4) * (0.7 + rng() * 0.8)));
       let gx = room.x + 1 + Math.floor(rng() * Math.max(1, room.w - 2));
       let gy = room.y + 1 + Math.floor(rng() * Math.max(1, room.h - 2));
@@ -304,6 +334,37 @@ export function generateFloorItems(dungeonData, floor, rooms) {
 
   return items;
 }
+
+// バーコードから装備（weapon|armor）を生成。type を強制したい時用：
+// generateItemFromBarcode は digit sum で type が決まるので、ここでは末尾を
+// 補正して目的の type が出るバーコードに作り変える。
+function _generateEquipmentFromBarcode(code, dungeonRarity, level, want) {
+  const wantIdx = want === 'weapon' ? 0 : 1;
+  const adjusted = _forceTypeBarcode(code, wantIdx);
+  // 宝箱の中身はダンジョン基準レアリティ（少し贅沢）
+  return generateItemFromBarcode(adjusted, dungeonRarity, level);
+}
+
+// バーコードから消耗品（potion/scroll）を生成。
+function _generateConsumableFromBarcode(code, rarityOverride, level, want) {
+  const wantIdx = want === 'potion' ? 2 : 3;
+  const adjusted = _forceTypeBarcode(code, wantIdx);
+  return generateItemFromBarcode(adjusted, rarityOverride, level);
+}
+
+// バーコードを「digit sum % 4 == wantIdx」になるよう先頭桁だけ補正
+function _forceTypeBarcode(code, wantIdx) {
+  const digits = code.split('').map(Number);
+  let sum = 0;
+  for (let i = 1; i < digits.length; i++) sum += digits[i];
+  const cur = sum % 4;
+  const delta = ((wantIdx - cur) % 4 + 4) % 4;
+  digits[0] = (digits[0] + delta) % 10;
+  return digits.join('');
+}
+
+// 公開：呼び出し側からも装備強制生成を使えるように
+export { _forceTypeBarcode as forceTypeBarcode };
 
 // ── レベリング設定 ──
 export const MAX_LEVEL      = 100;
@@ -356,17 +417,32 @@ export function createPlayer() {
 
 export const SKILL_SLOTS_MAX = 4;
 
-// 敵撃破時のゴールド報酬（決定論的ではなくランダム要素を含む）
+// ゴールドのフロアアイテムを生成（共通の見た目を統一）
+export function makeGoldFloorItem(amount) {
+  return {
+    type: 'gold',
+    name: `${amount} ゴールド`,
+    emoji: '🪙',
+    amount,
+    rarity: 'コモン',
+    rarityColor: '#ffd54f',
+  };
+}
+
+// 敵撃破時のゴールド報酬（決定論的ではなくランダム要素を含む）。
+// 戻り値が 0 の場合は「ドロップなし」を意味する（ボスは常に >0）。
+// 通常雑魚は 50% の確率で 0 を返し、確定報酬ではなく「たまに出る」感覚にする。
 export function rollGoldDropFromMonster(mob) {
+  if (!mob.isBoss && Math.random() > 0.5) return 0;
   const lvl  = mob.level ?? 1;
   const rar  = mob.rarity;
-  const base = 12 + lvl * 4;            // 5+lvl*2 → 12+lvl*4 に増額
+  const base = 12 + lvl * 4;
   const rarBonus =
     rar === 'レジェンド' ? 150 :
     rar === 'エピック'   ? 55  :
     rar === 'レア'       ? 22  :
     0;
-  const bossMul = mob.isBoss ? 4 : 1;   // ボスはより多く
-  const roll = 0.8 + Math.random() * 0.5;   // 0.8〜1.3 にブレ縮小（最低保証）
+  const bossMul = mob.isBoss ? 4 : 1;
+  const roll = 0.8 + Math.random() * 0.5;
   return Math.max(2, Math.floor((base + rarBonus) * bossMul * roll));
 }
