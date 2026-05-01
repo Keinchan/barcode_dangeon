@@ -120,6 +120,7 @@ function _drawBody(ctx, item, size, rng) {
     case 'skillBook':     _drawEmojiOnFrame(ctx, '📕', size); break;
     case 'material':      _drawEmojiOnFrame(ctx, item.emoji ?? '⛓️', size); break;
     case 'gold':          _drawGold(ctx, size); break;
+    case 'chest':         _drawChest(ctx, size); break;
     default:              _drawEmojiOnFrame(ctx, item.emoji ?? '🎁', size);
   }
   ctx.restore();
@@ -135,6 +136,47 @@ function _drawEmojiOnFrame(ctx, emoji, size) {
   ctx.shadowColor = 'rgba(0,0,0,0.6)';
   ctx.shadowBlur  = 4;
   ctx.fillText(emoji, 0, 0);
+}
+
+// 宝箱：木製の本体 + 金属ベルト + 鍵。中身レアリティに応じた金縁の輝きで
+// 「これは普通の落ちアイテムではなく特別」と一目でわかるようにする。
+function _drawChest(ctx, size) {
+  const w = size * 0.6;
+  const h = size * 0.45;
+  const lidH = h * 0.45;
+  // 本体
+  const bodyG = ctx.createLinearGradient(0, 0, 0, h);
+  bodyG.addColorStop(0, '#8b5a2b');
+  bodyG.addColorStop(1, '#5a3a1a');
+  ctx.fillStyle = bodyG;
+  _roundRect(ctx, -w / 2, -h * 0.1, w, h, 4);
+  ctx.fill();
+  ctx.strokeStyle = '#3a2410';
+  ctx.lineWidth = 1.4;
+  ctx.stroke();
+  // 蓋（半開き気味の遠近表現は省略してフラットに）
+  const lidG = ctx.createLinearGradient(0, -h * 0.55, 0, -h * 0.1);
+  lidG.addColorStop(0, '#a06b32');
+  lidG.addColorStop(1, '#6b3f1a');
+  ctx.fillStyle = lidG;
+  _roundRect(ctx, -w / 2, -h * 0.55, w, lidH, 4);
+  ctx.fill();
+  ctx.strokeStyle = '#3a2410';
+  ctx.stroke();
+  // 金属ベルト
+  ctx.fillStyle = '#caa15a';
+  ctx.fillRect(-w / 2, -h * 0.18, w, 3);
+  ctx.fillRect(-w / 2 + w * 0.46, -h * 0.55, 3, h);
+  // 鍵（中央の南京錠）
+  ctx.fillStyle = '#ffd54f';
+  ctx.beginPath();
+  ctx.arc(0, -h * 0.06, size * 0.05, 0, Math.PI * 2);
+  ctx.fill();
+  // 中央のキラリ（レジェンド時はもっと派手に。ここはレアリティ枠の glow に任せる）
+  ctx.fillStyle = 'rgba(255,255,255,0.8)';
+  ctx.beginPath();
+  ctx.arc(-size * 0.02, -h * 0.09, size * 0.012, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 // 金貨の山。レアリティ枠の上にコインを 3 枚重ねた図案

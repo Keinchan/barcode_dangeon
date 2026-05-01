@@ -7,6 +7,8 @@ import {
   statsForLevel,
   enemyLevel,
   rollGoldDropFromMonster,
+  makeGoldFloorItem,
+  forceTypeBarcode,
   MAX_LEVEL,
   HP_PER_LEVEL,
   ATK_PER_LEVEL,
@@ -1016,7 +1018,9 @@ function _executeSkill(skill) {
     gainXp(_xpFromMonster(m));
     const gold = rollGoldDropFromMonster(m);
     if (gold > 0) {
-      player.gold = (player.gold ?? 0) + gold;
+      const goldItem = makeGoldFloorItem(gold);
+      goldItem.x = m.x; goldItem.y = m.y;
+      dungeon.floorItems.push(goldItem);
       dungeonLog(`🪙 ${m.name} は ${gold} ゴールドを落とした`);
     }
     const matDrop = _rollMaterialDrop(m);
@@ -1773,6 +1777,23 @@ function pickupItem(item) {
     return;
   }
 
+  // 宝箱：踏むと開けて中身（武器/防具）を出す。中身は床に置き直して「拾うか
+  // どうかをプレイヤーに任せる」UX。装備の主経路をここに集約している。
+  if (item.type === 'chest') {
+    dungeon.removeFloorItem(item);
+    const inner = item.inner;
+    if (!inner) { dungeonLog('🎁 宝箱は空っぽだった...'); return; }
+    inner.x = item.x; inner.y = item.y;
+    dungeon.floorItems.push(inner);
+    dungeonLog(`🎁 宝箱を開けた！ ${inner.name} が出てきた`, { rarity: inner.rarity });
+    playSfx('drop', { rarityTier: rarityTier(inner.rarity) });
+    _celebratePickup(inner, '宝箱から');
+    refreshHUD();
+    dungeon.render(document.getElementById('dungeon-canvas'));
+    autoSave();
+    return;
+  }
+
   // 装備品は装備に置き換えられる可能性があるので満杯でも拾う（古い装備が
   // 持ち物に押し戻される時に追加で空きが必要にはなるが、その時点で再評価）。
   // 非装備で持ち物に入れられない場合はここで弾く。
@@ -1943,12 +1964,21 @@ function startBattle(mob, opts = {}) {
       }
       // XP獲得
       gainXp(_xpFromMonster(mob));
-      // ゴールドドロップ（アイテムドロップとは独立）
+      // ゴールドドロップ：床に金貨アイテムとして落とす（拾わないと取れない）。
+      // ボスは確定で発生、雑魚は rollGoldDropFromMonster の中で 50% に間引き済み。
+      // ボスは離脱するので即時取得、雑魚は床に置いて拾わせる。
       const gold = rollGoldDropFromMonster(mob);
       if (gold > 0) {
-        player.gold = (player.gold ?? 0) + gold;
-        dungeonLog(`🪙 ${mob.name} は ${gold} ゴールドを落とした`);
-        refreshHUD();
+        if (mob.isBoss) {
+          player.gold = (player.gold ?? 0) + gold;
+          dungeonLog(`🪙 ${mob.name} から ${gold} ゴールドを得た`);
+          refreshHUD();
+        } else {
+          const goldItem = makeGoldFloorItem(gold);
+          goldItem.x = mob.x; goldItem.y = mob.y;
+          dungeon.floorItems.push(goldItem);
+          dungeonLog(`🪙 ${mob.name} は ${gold} ゴールドを落とした`);
+        }
       }
       // 素材ドロップ（装備ドロップとは独立）
       const mat = _rollMaterialDrop(mob);
@@ -2015,28 +2045,36 @@ function _rollMaterialDrop(mob) {
   return materialForRarity(mob.rarity);
 }
 
-// モンスター撃破時のドロップ判定
+// モンスター撃破時のドロップ判定。
+// 仕様変更: 雑魚からは武器/防具を出さない（消耗品のみ）。
+// 装備の主経路はフロアの宝箱とボスドロップに集約。
 function _rollMonsterDrop(mob) {
   const dbg = getDebugState();
+  // 雑魚のドロップ率も全体的に下げる（40→25 / 50→35 / 70→55 / 95→90）
   const dropChance = dbg.forceDrop ? 1 :
     mob.isBoss               ? 1.0 :
-    mob.rarity === 'レジェンド' ? 0.95 :
-    mob.rarity === 'エピック'   ? 0.7  :
-    mob.rarity === 'レア'       ? 0.5  :
-    0.4;
+    mob.rarity === 'レジェンド' ? 0.55 :
+    mob.rarity === 'エピック'   ? 0.40 :
+    mob.rarity === 'レア'       ? 0.25 :
+    0.15;
   if (Math.random() > dropChance) return null;
 
   const seed = hashString(`drop:${dungeonData.seed}:${currentFloor}:${mob.x}:${mob.y}`);
   const code = String(seed).padStart(13, '0').slice(0, 13);
 
-  // ドロップアイテムのレアリティ：基本はモンスターと同レベル、ボスは+1段階
   const baseRarity = RARITIES.find(r => r.name === mob.rarity);
   let rarityOverride = baseRarity ?? null;
   if (mob.isBoss && baseRarity) rarityOverride = bumpRarity(baseRarity, 1);
-
-  // アイテムレベル: 落とした敵のレベルに準拠（ボスは +5 相当）
   const itemLevel = (mob.level ?? 1) + (mob.isBoss ? 5 : 0);
-  return generateItemFromBarcode(code, rarityOverride, itemLevel);
+
+  if (mob.isBoss) {
+    // ボスは武器/防具を含む全種から（ボスドロップは装備獲得の主経路）
+    return generateItemFromBarcode(code, rarityOverride, itemLevel);
+  }
+  // 雑魚は消耗品（potion/scroll）に強制（武器/防具は宝箱・ボス専用）
+  const wantPotion = (Math.random() < 0.6);
+  const adjusted = forceTypeBarcode(code, wantPotion ? 2 : 3);
+  return generateItemFromBarcode(adjusted, rarityOverride, itemLevel);
 }
 
 document.getElementById('btn-attack').addEventListener('click', () => battle?.attack());
@@ -2422,7 +2460,9 @@ if (DEBUG) {
       gainXp(_xpFromMonster(mob));
       const gold = rollGoldDropFromMonster(mob);
       if (gold > 0) {
-        player.gold = (player.gold ?? 0) + gold;
+        const goldItem = makeGoldFloorItem(gold);
+        goldItem.x = mob.x; goldItem.y = mob.y;
+        dungeon.floorItems.push(goldItem);
         dungeonLog(`🪙 ${mob.name} は ${gold} ゴールドを落とした`);
       }
       const drop = _rollMonsterDrop(mob);
