@@ -356,6 +356,53 @@ export function enemyVfxAnchor() {
   return sprite.getBoundingClientRect();
 }
 
+// 攻撃の方向（誰が誰を狙ったか）を直感的に示す細長いストリーク。
+//   from / to は { left, top, width, height } または { x, y } を受け付ける。
+//   element 文字列を渡せば属性カラーで彩色（無ければ default の橙）。
+//   呼び出し側は「攻撃側 → 被弾側」の順で渡す。
+export function attackTrail(from, to, opts = {}) {
+  const a = _toCenterPoint(from);
+  const b = _toCenterPoint(to);
+  if (!a || !b) return;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len < 1) return;
+  const angleDeg = Math.atan2(dy, dx) * 180 / Math.PI;
+  const color = opts.color ?? _elementColor(opts.element) ?? '#ff7043';
+
+  const el = document.createElement('div');
+  el.className = 'vfx-attack-trail';
+  el.style.left = a.x + 'px';
+  el.style.top  = a.y + 'px';
+  el.style.width  = len + 'px';
+  el.style.transform = `translate(0, -50%) rotate(${angleDeg}deg)`;
+  el.style.background = `linear-gradient(90deg, transparent 0%, ${color} 25%, #fff 50%, ${color} 75%, transparent 100%)`;
+  el.style.boxShadow = `0 0 10px ${color}, 0 0 20px ${color}`;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 480);
+
+  // 着弾点に小さな閃光（誰が「誰を」攻撃したかを強調）
+  const hit = document.createElement('div');
+  hit.className = 'vfx-attack-impact';
+  hit.style.left = b.x + 'px';
+  hit.style.top  = b.y + 'px';
+  hit.style.background = color;
+  hit.style.boxShadow  = `0 0 16px ${color}`;
+  document.body.appendChild(hit);
+  setTimeout(() => hit.remove(), 420);
+}
+
+function _toCenterPoint(target) {
+  if (!target) return null;
+  if (typeof target.x === 'number' && typeof target.y === 'number' && target.width === undefined) {
+    return { x: target.x, y: target.y };
+  }
+  const r = _rectOf(target);
+  if (!r) return null;
+  return { x: r.left + (r.width ?? 0) / 2, y: r.top + (r.height ?? 0) / 2 };
+}
+
 // ─────────────────────────────────────────────
 // 技パターン別の特殊演出
 //   A 型 = 上下左右の隣 4 マス：プレイヤー中心に十字スラッシュ
