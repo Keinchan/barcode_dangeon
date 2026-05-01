@@ -1631,6 +1631,21 @@ html, body {
 
 /* ── LEAFLET overrides ── */
 .player-marker-icon { background: none !important; border: none !important; }
+
+/* マップ右下「現在地に戻る」ボタン（手動でパンした後の復帰用） */
+.map-recenter-btn {
+  width: 38px;
+  height: 38px;
+  background: rgba(20, 20, 30, 0.9);
+  border: 1px solid var(--primary);
+  border-radius: 8px;
+  color: #fff;
+  font-size: 20px;
+  cursor: pointer;
+  margin-bottom: 110px; /* HUD ボタンと被らないよう底上げ */
+  box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+}
+.map-recenter-btn:active { background: var(--primary); }
 .dungeon-map-icon {
   width: 40px; height: 40px;
   background: var(--primary);

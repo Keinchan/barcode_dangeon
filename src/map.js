@@ -15,6 +15,11 @@ let onEnterCb         = null;
 let isClearedCb       = null;
 let difficultyCb      = null;
 let recommendedLvCb   = null;
+// ユーザーが手動でドラッグ／ピンチした最後の時刻。直後 N 秒は GPS 更新で
+// 自動再センタリングしない（離れた場所のピンを見たい時用）。それ以外は
+// 常にプレイヤーが地図の中心に来るよう追従する。
+let _lastManualPanAt = 0;
+const FOLLOW_PAUSE_MS = 6000;
 // 表示しているピンの掃除半径（プレイヤーから N メートル超のピンは削除）。
 // 電車などで長距離移動したあとに古いピンが地図に残ると、付近のダンジョンタップを
 // 妨害したり、メモリも肥大化するため一定距離で破棄する。
@@ -35,6 +40,14 @@ export function initMap({ onEnter, isCleared, difficulty, recommendedLv } = {}) 
   }).addTo(map);
 
   L.control.zoom({ position: 'topright' }).addTo(map);
+
+  // ドラッグ／ピンチで手動移動した直後は短時間だけ追従を一時停止する。
+  // mousedown/touchstart は登録時点で即発火することがあるので dragstart を使う。
+  map.on('dragstart',  () => { _lastManualPanAt = Date.now(); });
+  map.on('zoomstart',  () => { _lastManualPanAt = Date.now(); });
+
+  // 「現在地」ボタン：手動操作後にすぐ自分の位置に戻したい時用
+  _addRecenterButton();
 
   // GPS追従＋追従に応じて固定湧きダンジョン更新
   // maximumAge を短めにして電車移動などでも追従する。watchPosition がエラーで
@@ -80,6 +93,12 @@ function _setPlayer(lat, lng) {
     });
     playerMarker = L.marker([lat, lng], { icon, zIndexOffset: 1000 }).addTo(map);
     map.setView([lat, lng], 16);
+  }
+  // GPS 更新ごとにプレイヤー位置を画面中央へ。歩きや電車での移動でも
+  // 「自分が常に真ん中」になり、周囲のピンが自動で見える。
+  // 直近で手動操作（ドラッグ/ズーム）があった場合のみ、しばらく追従を保留する。
+  if (Date.now() - _lastManualPanAt > FOLLOW_PAUSE_MS) {
+    map.setView([lat, lng], map.getZoom() ?? 16, { animate: true });
   }
 
   _refreshDungeons(lat, lng);
@@ -198,8 +217,27 @@ export function invalidateMapSize() {
 // 残っていると別のダンジョンが画面外で選べないので、必ず追従させる。
 export function recenterOnPlayer() {
   if (!map || !playerPos) return false;
+  _lastManualPanAt = 0;       // 強制復帰時は手動 pan の保留も解除する
   map.setView([playerPos.lat, playerPos.lng], map.getZoom() ?? 16, { animate: false });
   return true;
+}
+
+// 右下に「現在地」ボタンを置く（leaflet コントロールとして実装）。
+// 手動でマップを動かした後、すぐ自分の位置に戻したい時用。
+function _addRecenterButton() {
+  const Ctl = L.Control.extend({
+    options: { position: 'bottomright' },
+    onAdd: () => {
+      const btn = L.DomUtil.create('button', 'leaflet-bar map-recenter-btn');
+      btn.type = 'button';
+      btn.title = '現在地に戻る';
+      btn.textContent = '🎯';
+      L.DomEvent.disableClickPropagation(btn);
+      L.DomEvent.on(btn, 'click', () => recenterOnPlayer());
+      return btn;
+    },
+  });
+  new Ctl().addTo(map);
 }
 
 // デバッグ用：プレイヤー位置を任意座標に強制設定（地図中心も移動）
