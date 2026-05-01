@@ -11,12 +11,12 @@ import { playSfx } from './audio.js';
 // 属性 → 16進カラー（VFX 色の統一に使用）。ui.js の magicCircle と同色テーブル
 function _elementHexColor(element) {
   switch (element) {
-    case '棒人間':     return '#c5c5d4';
-    case '落書き':     return '#ff6b6b';
-    case '影絵':       return '#5b5b78';
-    case 'ピクセル':   return '#4dc4ff';
-    case 'ホログラム': return '#b070dd';
-    case '折り紙':     return '#ffd54f';
+    case '火': return '#ff6b3d';
+    case '水': return '#4dc4ff';
+    case '草': return '#66bb6a';
+    case '雷': return '#ffd54f';
+    case '光': return '#fff176';
+    case '闇': return '#b070dd';
     default: return null;
   }
 }

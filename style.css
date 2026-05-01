@@ -1269,6 +1269,45 @@ html, body {
   margin-top: 2px;
 }
 
+/* ── 属性相性チャート（メニュー内） ── */
+.element-chart-help {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+.element-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.element-chart-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.element-chart-cycle-name {
+  font-size: 11px;
+  color: var(--muted);
+  width: 48px;
+  flex-shrink: 0;
+}
+.element-chart-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: 1px solid;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: bold;
+}
+.element-chart-arrow {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 /* ── 戦闘 VFX（パーティクル / 爆発 / 衝撃波 / 魔法陣） ── */
 .vfx-wrap {
   position: fixed;

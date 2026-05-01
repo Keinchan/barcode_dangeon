@@ -254,9 +254,9 @@ function _elementColor(element) {
   switch (element) {
     case '火': return '#ff6b3d';
     case '水': return '#4dc4ff';
-    case '地': return '#caa15a';
-    case '風': return '#9adf8e';
-    case '光': return '#ffe890';
+    case '草': return '#66bb6a';
+    case '雷': return '#ffd54f';
+    case '光': return '#fff176';
     case '闇': return '#b070dd';
     default:   return '#ffffff';
   }
