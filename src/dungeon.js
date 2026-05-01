@@ -467,7 +467,10 @@ export class Dungeon {
     }
 
     // アイテム（現視野内のみ。既踏でも非表示にして「拾われたかも」のミスリードを避ける）
-    //   絵文字ではなく手続きアイコンを drawImage する。
+    //   全タイプを getItemIconCanvas 経由で描く（icons.js が type 別に処理）。
+    //   こうすることで「床に落ちている時のアイコン」と「メニューで見るアイコン」が
+    //   完全一致する（旧実装は gold/material/mysteryScroll/skillBook を絵文字直描き
+    //   していて、メニュー側の手続きアイコンと食い違っていた）。
     //   アイテム感知の巻物使用中はフォグ越しでも半透明で表示する
     for (const it of this.floorItems) {
       const dx = it.x - (px - half);
@@ -477,18 +480,6 @@ export class Dungeon {
       if (!revealAll && !inSight && !showItemsThruFog) continue;
       const dim = !revealAll && !inSight;
       if (dim) ctx.globalAlpha = 0.55;
-
-      // ゴールドの山・不思議系巻物・素材・技の書は絵文字描画
-      // （手続きアイコンは武器/防具/薬/巻物のみ。それ以外は emoji フォールバック）
-      if (it.type === 'gold' || it.type === 'mysteryScroll' || it.type === 'material' || it.type === 'skillBook') {
-        const fs = Math.floor(ts * 0.6);
-        ctx.font = `${fs}px serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(it.emoji ?? '🎁', dx * ts + ts / 2, dy * ts + ts / 2);
-        ctx.globalAlpha = 1;
-        continue;
-      }
 
       const iconSize = Math.max(20, Math.floor(ts * 0.85));
       const icon = getItemIconCanvas(it, 64);
