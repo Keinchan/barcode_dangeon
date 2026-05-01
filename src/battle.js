@@ -5,7 +5,14 @@ import {
   sparkSpray, explosion, shockwave, magicCircle,
   playerVfxAnchor, enemyVfxAnchor,
   hitFlash, screenShake, deathBurst,
+  attackTrail,
 } from './ui.js';
+
+// 戦闘パネル上の「自分」アンカーを取り出す（player → enemy のトレイル始点用）
+function _battlePlayerAnchor() {
+  const el = document.querySelector('.combat-player');
+  return el ? el.getBoundingClientRect() : null;
+}
 import { playSfx } from './audio.js';
 
 // 属性 → 16進カラー（VFX 色の統一に使用）。ui.js の magicCircle と同色テーブル
@@ -158,6 +165,9 @@ export class Battle {
     // VFX: クリティカルは爆発+全画面フラッシュ+シェイク、通常は火花。属性色を反映
     const enemyAt = enemyVfxAnchor();
     const elColor = _elementHexColor(this.player.weapon?.element);
+    // 自分 → 敵 への攻撃方向ストリーク（誰が誰を狙ったか）
+    const fromPlayer = _battlePlayerAnchor();
+    if (fromPlayer && enemyAt) attackTrail(fromPlayer, enemyAt, { color: elColor ?? '#ffd54f' });
     if (isCrit) {
       hitFlash({ color: 'rgba(255,213,79,0.55)' });
       screenShake(10, 320);
@@ -195,6 +205,9 @@ export class Battle {
     const elColor = _elementHexColor(elem);
     hitFlash({ color: 'rgba(255,138,101,0.45)' });
     screenShake(8, 280);
+    // 自分 → 敵 への大きめのストリーク（属性色）
+    const fromPlayer = _battlePlayerAnchor();
+    if (fromPlayer && enemyAt) attackTrail(fromPlayer, enemyAt, { color: elColor ?? '#ff8a65' });
     magicCircle(enemyAt, elem);
     setTimeout(() => explosion(enemyAt, { color: elColor ?? '#ff8a65' }), 320);
     setTimeout(() => sparkSpray(enemyAt, { color: '#fff', count: 14 }), 380);
@@ -337,6 +350,9 @@ export class Battle {
     // VFX: 被ダメ衝撃波（属性色）+ 効果絶大ならフラッシュ + 軽いシェイク
     const playerAt = playerVfxAnchor();
     const elColor  = _elementHexColor(this.monster.element);
+    // 敵 → 自分 への攻撃方向ストリーク
+    const enemyAtkAt = enemyVfxAnchor();
+    if (enemyAtkAt && playerAt) attackTrail(enemyAtkAt, playerAt, { color: elColor ?? '#ff5252' });
     shockwave(playerAt, { color: elColor ? _alphaize(elColor, 0.65) : 'rgba(255,82,82,0.65)' });
     if (this.wallPiercing) magicCircle(playerAt, this.monster.element);
     if (isEffective) {
@@ -381,9 +397,15 @@ export class Battle {
       this.log(`🔥 ${this.monster.name} が「${sk.name}」を使った！ ${dmg} ダメージ！`);
       showFloatingDamage(dmg);
       playSfx('damage');
-      // 敵スキル: 敵側に魔法陣 → プレイヤー側に爆発
+      // 敵スキル: 敵側に魔法陣 → 攻撃方向ストリーク → プレイヤー側に爆発
+      const skElColor = _elementHexColor(this.monster.element);
       magicCircle(enemyVfxAnchor(), this.monster.element);
-      setTimeout(() => explosion(playerVfxAnchor(), { color: '#ff7043' }), 250);
+      setTimeout(() => {
+        const enAt = enemyVfxAnchor();
+        const plAt = playerVfxAnchor();
+        if (enAt && plAt) attackTrail(enAt, plAt, { color: skElColor ?? '#ff7043' });
+      }, 180);
+      setTimeout(() => explosion(playerVfxAnchor(), { color: skElColor ?? '#ff7043' }), 280);
       this.updateUI();
       this._checkPlayerDead();
     }

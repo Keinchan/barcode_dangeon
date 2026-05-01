@@ -1468,6 +1468,38 @@ html, body {
   50%      { background-position: 100% 50%; }
 }
 
+/* ── 攻撃の方向を示すストリーク（誰が誰を狙ったか） ── */
+.vfx-attack-trail {
+  position: fixed;
+  height: 4px;
+  border-radius: 4px;
+  transform-origin: left center;
+  pointer-events: none;
+  z-index: 4500;
+  animation: vfxAttackTrail 0.45s ease-out forwards;
+}
+@keyframes vfxAttackTrail {
+  0%   { opacity: 0;   transform: translate(0, -50%) rotate(var(--r, 0deg)) scaleX(0.05); }
+  35%  { opacity: 1;   transform: translate(0, -50%) rotate(var(--r, 0deg)) scaleX(1.0); }
+  100% { opacity: 0;   transform: translate(0, -50%) rotate(var(--r, 0deg)) scaleX(1.0); }
+}
+.vfx-attack-impact {
+  position: fixed;
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  margin-top: -7px;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 4500;
+  animation: vfxAttackImpact 0.4s ease-out forwards;
+}
+@keyframes vfxAttackImpact {
+  0%   { opacity: 1;   transform: scale(0.4); }
+  60%  { opacity: 1;   transform: scale(1.6); }
+  100% { opacity: 0;   transform: scale(2.2); }
+}
+
 /* ── 技パターン別の特殊演出（_executeSkill から呼ぶ） ── */
 .vfx-slash, .vfx-beam, .vfx-omni-sweep, .vfx-aoe-ring, .vfx-aoe-swirl {
   position: fixed;

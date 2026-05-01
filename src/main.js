@@ -30,6 +30,7 @@ import {
   showFloatingDamage, showItemBanner, shockwave, magicCircle, playerVfxAnchor,
   hitFlash, screenShake, deathBurst, sparkSpray, explosion,
   showEnhanceCelebration, showDamageAt, showSkillPatternVfx,
+  attackTrail,
 } from './ui.js';
 import {
   isFirebaseConfigured,
@@ -1871,6 +1872,9 @@ function _runEnemyTurn() {
     player.hp = Math.max(0, player.hp - ev.dmg);
     showFloatingDamage(ev.dmg);
     playSfx('damage');
+    // 「誰が」プレイヤーを攻撃しているかを攻撃方向ストリークで明示
+    const mobScreen = _mobScreenAnchor(ev.mob);
+    if (mobScreen) attackTrail(mobScreen, playerVfxAnchor(), { element: ev.mob.element });
     // 壁越し魔法は属性魔法陣＋衝撃波
     magicCircle(playerVfxAnchor(), ev.mob.element);
     shockwave(playerVfxAnchor(), { color: 'rgba(255,82,82,0.6)' });
@@ -1883,6 +1887,27 @@ function _runEnemyTurn() {
     if (i < magics.length) setTimeout(apply, STEP_MS);
   };
   apply();
+}
+
+// ダンジョン上のモンスターのスクリーン中心座標を取り出す（攻撃方向矢印用）。
+// 視野外（描画されていない）モンスターは null を返す。
+function _mobScreenAnchor(mob) {
+  if (!dungeon || !mob) return null;
+  const canvas = document.getElementById('dungeon-canvas');
+  if (!canvas) return null;
+  const r = canvas.getBoundingClientRect();
+  const VIEW = 11, half = 5;
+  const px = dungeon.playerPos.x;
+  const py = dungeon.playerPos.y;
+  const tx = mob.x - (px - half);
+  const ty = mob.y - (py - half);
+  if (tx < 0 || tx >= VIEW || ty < 0 || ty >= VIEW) return null;
+  const ts = canvas.width / VIEW;
+  return {
+    left: r.left + tx * ts + ts / 2 - 16,
+    top:  r.top  + ty * ts + ts / 2 - 16,
+    width: 32, height: 32,
+  };
 }
 
 function pickupItem(item) {
