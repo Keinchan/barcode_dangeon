@@ -111,13 +111,89 @@ function _drawBody(ctx, item, size, rng) {
   ctx.translate(size / 2, size / 2);
 
   switch (item.type) {
-    case 'weapon': _drawWeapon(ctx, item, size, rng); break;
-    case 'armor':  _drawArmor (ctx, item, size, rng); break;
-    case 'potion': _drawPotion(ctx, item, size, rng); break;
-    case 'scroll': _drawScroll(ctx, item, size, rng); break;
-    default: ctx.fillStyle = '#ddd';
+    case 'weapon':        _drawWeapon(ctx, item, size, rng); break;
+    case 'armor':         _drawArmor (ctx, item, size, rng); break;
+    case 'potion':        _drawPotion(ctx, item, size, rng); break;
+    case 'mpPotion':      _drawMpPotion(ctx, item, size, rng); break;
+    case 'scroll':        _drawScroll(ctx, item, size, rng); break;
+    case 'mysteryScroll': _drawEmojiOnFrame(ctx, item.emoji ?? '📜', size); break;
+    case 'skillBook':     _drawEmojiOnFrame(ctx, '📕', size); break;
+    case 'material':      _drawEmojiOnFrame(ctx, item.emoji ?? '⛓️', size); break;
+    case 'gold':          _drawGold(ctx, size); break;
+    default:              _drawEmojiOnFrame(ctx, item.emoji ?? '🎁', size);
   }
   ctx.restore();
+}
+
+// 既存の絵文字を中央にそのまま重ねる（手続き描画が用意されていないタイプ用）。
+// レアリティ枠と属性グラデーションは _drawFrame 側で先に描いてあるので、その上に
+// 大きめに絵文字を 1 つ落とすだけで「ドロップ時と同じアイコン」として成立する。
+function _drawEmojiOnFrame(ctx, emoji, size) {
+  ctx.font = `${Math.floor(size * 0.6)}px serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(0,0,0,0.6)';
+  ctx.shadowBlur  = 4;
+  ctx.fillText(emoji, 0, 0);
+}
+
+// 金貨の山。レアリティ枠の上にコインを 3 枚重ねた図案
+function _drawGold(ctx, size) {
+  ctx.shadowColor = 'rgba(255,213,79,0.7)';
+  ctx.shadowBlur  = 10;
+  for (const [ox, oy, r] of [
+    [-size * 0.10,  size * 0.06, size * 0.18],
+    [ size * 0.10,  size * 0.10, size * 0.18],
+    [ 0,           -size * 0.10, size * 0.20],
+  ]) {
+    const g = ctx.createRadialGradient(ox - r * 0.4, oy - r * 0.4, 0, ox, oy, r);
+    g.addColorStop(0, '#fff8c0');
+    g.addColorStop(0.6, '#ffd54f');
+    g.addColorStop(1, '#b8860b');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(ox, oy, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+    ctx.stroke();
+  }
+  ctx.shadowBlur = 0;
+}
+
+// MP 薬：通常薬と同じ瓶を青系で塗る簡易バリアント。
+function _drawMpPotion(ctx, item, size, rng) {
+  const baseName = (item.name ?? '');
+  const big   = baseName.includes('大');
+  const small = baseName.includes('小');
+  const liquid = '#4dc4ff';
+  const bw = (small ? 0.18 : big ? 0.30 : 0.24) * size;
+  const bh = (small ? 0.25 : big ? 0.40 : 0.32) * size;
+  ctx.fillStyle = '#cfd8dc';
+  ctx.fillRect(-bw * 0.35, -bh - size * 0.13, bw * 0.7, size * 0.10);
+  ctx.fillStyle = '#5a3a1f';
+  ctx.fillRect(-bw * 0.30, -bh - size * 0.18, bw * 0.6, size * 0.07);
+  ctx.fillStyle = 'rgba(220,235,245,0.55)';
+  _roundRect(ctx, -bw, -bh, bw * 2, bh * 2, bw * 0.4);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.save();
+  ctx.beginPath();
+  _roundRectPath(ctx, -bw + 2, -bh + bh * 0.4, bw * 2 - 4, bh * 1.55, bw * 0.35);
+  ctx.clip();
+  ctx.fillStyle = liquid;
+  ctx.fillRect(-bw, -bh + bh * 0.4, bw * 2, bh * 1.6);
+  ctx.fillStyle = 'rgba(255,255,255,0.45)';
+  ctx.fillRect(-bw + 4, -bh + bh * 0.42, bw * 0.5, 2);
+  ctx.restore();
+  // MP マーカー（青い星）
+  ctx.fillStyle = '#fff';
+  ctx.font = `bold ${Math.floor(size * 0.18)}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('MP', 0, 0);
 }
 
 // ─── 武器 ───
