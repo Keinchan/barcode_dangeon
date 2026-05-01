@@ -1565,6 +1565,45 @@ html, body {
   100% { transform: rotate(540deg) scale(1.8); opacity: 0; }
 }
 
+/* ── 素材ボックス（メニュー内） ── */
+.materials-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.material-cell {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  padding: 6px 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  text-align: center;
+}
+.material-cell-emoji .item-icon { width: 32px; height: 32px; }
+.material-cell-name {
+  font-size: 11px;
+  font-weight: bold;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.material-cell-count {
+  font-size: 11px;
+  color: #ffd54f;
+  font-weight: bold;
+}
+.menu-materials-help {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
 /* ── 属性相性チャート（メニュー内） ── */
 .element-chart-help {
   font-size: 11px;
