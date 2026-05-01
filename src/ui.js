@@ -14,6 +14,22 @@ export function showFloatingDamage(amount, opts = {}) {
   setTimeout(() => el.remove(), 1300);
 }
 
+// 任意の画面座標 {left, top, width, height} の中心にダメージ数値を浮かべる。
+// 範囲技で命中マスごとに別々の数値を出す時用。
+export function showDamageAt(rect, amount, opts = {}) {
+  if (!rect) return;
+  const cx = rect.left + (rect.width  ?? 0) / 2;
+  const cy = rect.top  + (rect.height ?? 0) / 2;
+  const el = document.createElement('div');
+  el.className = `damage-float damage-float-enemy ${_dmgFloatClass(opts.kind)}`;
+  el.textContent = opts.kind === 'crit' ? `-${amount}!!` : `-${amount}`;
+  el.style.left = cx + 'px';
+  el.style.top  = cy + 'px';
+  el.style.fontSize = _dmgFontSize(amount, opts.kind) + 'px';
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 1300);
+}
+
 // 敵に与えたダメージを戦闘パネル上の敵情報ボックス上端付近にフロート表示（緑）
 export function showEnemyDamage(amount, opts = {}) {
   const target = document.querySelector('.combat-enemy');
@@ -338,4 +354,114 @@ export function enemyVfxAnchor() {
   const sprite = document.getElementById('enemy-sprite');
   if (!sprite) return null;
   return sprite.getBoundingClientRect();
+}
+
+// ─────────────────────────────────────────────
+// 技パターン別の特殊演出
+//   A 型 = 上下左右の隣 4 マス：プレイヤー中心に十字スラッシュ
+//   B 型 = 周囲 8 マス（王将）：プレイヤー中心に拡大円波
+//   C 型 = 4 方向 2 マス先まで：4 方向のレーザービーム
+//   D 型 = 周囲 2 マス全 24：大きな拡大リング + 渦
+//
+//   呼び出し側は技の属性カラーと「マス幅 (tileSize)」を渡す。
+//   playerCenter = { x, y } はプレイヤーの画面中心（canvas 内中央）。
+// ─────────────────────────────────────────────
+export function showSkillPatternVfx(pattern, playerCenter, tileSize, color = '#b070dd') {
+  switch (pattern) {
+    case 'A': _vfxCrossSlash (playerCenter, tileSize, color); break;
+    case 'B': _vfxOmniSweep  (playerCenter, tileSize, color); break;
+    case 'C': _vfxFourBeams  (playerCenter, tileSize, color); break;
+    case 'D': _vfxBigAoeRing (playerCenter, tileSize, color); break;
+    default:  _vfxOmniSweep  (playerCenter, tileSize, color);
+  }
+}
+
+// 十字スラッシュ：上下左右に 4 つのスラッシュ片（細長矩形）を伸ばす
+function _vfxCrossSlash(c, ts, color) {
+  const len = ts * 1.4;
+  const dirs = [
+    { rot: 90,    dx: 0, dy: -len * 0.55 },   // 上
+    { rot: 90,    dx: 0, dy:  len * 0.55 },   // 下
+    { rot: 0,     dx: -len * 0.55, dy: 0 },   // 左
+    { rot: 0,     dx:  len * 0.55, dy: 0 },   // 右
+  ];
+  for (const d of dirs) {
+    const el = document.createElement('div');
+    el.className = 'vfx-slash';
+    el.style.left = (c.x + d.dx) + 'px';
+    el.style.top  = (c.y + d.dy) + 'px';
+    el.style.width  = len + 'px';
+    el.style.height = (ts * 0.18) + 'px';
+    el.style.background = `linear-gradient(90deg, transparent 0%, ${color} 30%, #fff 50%, ${color} 70%, transparent 100%)`;
+    el.style.boxShadow = `0 0 12px ${color}`;
+    el.style.transform = `translate(-50%,-50%) rotate(${d.rot}deg)`;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 480);
+  }
+}
+
+// 周囲 8 マスを薙ぐ：プレイヤー中心の拡大円
+function _vfxOmniSweep(c, ts, color) {
+  const el = document.createElement('div');
+  el.className = 'vfx-omni-sweep';
+  el.style.left = c.x + 'px';
+  el.style.top  = c.y + 'px';
+  el.style.setProperty('--c', color);
+  el.style.setProperty('--max', (ts * 3.4) + 'px');
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 600);
+}
+
+// 4 方向のレーザー：上下左右に伸びる長いビーム
+function _vfxFourBeams(c, ts, color) {
+  const len = ts * 2.6;
+  const dirs = [
+    { rot: 0,   tx: len / 2 + ts * 0.5, ty: 0 },
+    { rot: 0,   tx: -len / 2 - ts * 0.5, ty: 0 },
+    { rot: 90,  tx: 0, ty: len / 2 + ts * 0.5 },
+    { rot: 90,  tx: 0, ty: -len / 2 - ts * 0.5 },
+  ];
+  for (const d of dirs) {
+    const el = document.createElement('div');
+    el.className = 'vfx-beam';
+    el.style.left = (c.x + d.tx) + 'px';
+    el.style.top  = (c.y + d.ty) + 'px';
+    el.style.width  = len + 'px';
+    el.style.height = (ts * 0.22) + 'px';
+    el.style.background = `linear-gradient(90deg, transparent 0%, ${color} 50%, transparent 100%)`;
+    el.style.boxShadow = `0 0 14px ${color}, 0 0 28px ${color}`;
+    el.style.transform = `translate(-50%,-50%) rotate(${d.rot}deg)`;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 520);
+  }
+}
+
+// 大規模 AoE：拡大リングを 2 段 + 中央渦
+function _vfxBigAoeRing(c, ts, color) {
+  const ring1 = document.createElement('div');
+  ring1.className = 'vfx-aoe-ring vfx-aoe-ring-1';
+  ring1.style.left = c.x + 'px';
+  ring1.style.top  = c.y + 'px';
+  ring1.style.setProperty('--c', color);
+  ring1.style.setProperty('--max', (ts * 5.2) + 'px');
+  document.body.appendChild(ring1);
+  setTimeout(() => {
+    const ring2 = document.createElement('div');
+    ring2.className = 'vfx-aoe-ring vfx-aoe-ring-2';
+    ring2.style.left = c.x + 'px';
+    ring2.style.top  = c.y + 'px';
+    ring2.style.setProperty('--c', color);
+    ring2.style.setProperty('--max', (ts * 5.0) + 'px');
+    document.body.appendChild(ring2);
+    setTimeout(() => ring2.remove(), 720);
+  }, 120);
+  // 中央の渦（回転する円）
+  const swirl = document.createElement('div');
+  swirl.className = 'vfx-aoe-swirl';
+  swirl.style.left = c.x + 'px';
+  swirl.style.top  = c.y + 'px';
+  swirl.style.setProperty('--c', color);
+  document.body.appendChild(swirl);
+  setTimeout(() => ring1.remove(), 800);
+  setTimeout(() => swirl.remove(), 900);
 }

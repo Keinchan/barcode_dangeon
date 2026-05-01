@@ -29,7 +29,7 @@ import { Battle } from './battle.js';
 import {
   showFloatingDamage, showItemBanner, shockwave, magicCircle, playerVfxAnchor,
   hitFlash, screenShake, deathBurst, sparkSpray, explosion,
-  showEnhanceCelebration,
+  showEnhanceCelebration, showDamageAt, showSkillPatternVfx,
 } from './ui.js';
 import {
   isFirebaseConfigured,
@@ -1029,18 +1029,27 @@ function _executeSkill(skill) {
   dungeonLog(`${SKILL_ELEMENT_EMOJI[skill.element] ?? '✨'} 技「${skill.name}」発動！ ${hits.length} 体に命中（MP -${skill.mpCost}）`);
   playSfx('crit');
 
-  // 範囲技 VFX: 技の属性カラーを反映する。命中マスごとに爆発、プレイヤー位置に
-  // 魔法陣（属性の色）。これで一目で「なに属性の技を使った」がわかる。
+  // 範囲技 VFX: 技の属性カラー + 技パターン別の特殊エフェクト
+  //   A 型 = 十字スラッシュ / B 型 = 周囲を薙ぐ円 / C 型 = 4 方向ビーム / D 型 = 大 AoE
   const elColor = SKILL_ELEMENT_COLOR[skill.element] ?? '#b070dd';
   const elColorAlpha = _alphaize(elColor, 0.45);
   hitFlash({ color: elColorAlpha });
   screenShake(Math.min(14, 6 + hits.length * 2), 350);
-  // プレイヤー中央に技属性の魔法陣（誰が技を放ったかが分かる）
   magicCircle(playerVfxAnchor(), skill.element);
+
   const canvas = document.getElementById('dungeon-canvas');
   const cRect  = canvas.getBoundingClientRect();
   const ts     = canvas.width / 11;
   const half   = 5;
+
+  // プレイヤー中心の画面座標（半マスずれているので half * ts + ts/2 = canvas 中央）
+  const playerScreen = {
+    x: cRect.left + (half * ts + ts / 2),
+    y: cRect.top  + (half * ts + ts / 2),
+  };
+  // パターン形状に応じた特殊演出（円・十字・ビーム・AoE リング）
+  showSkillPatternVfx(skill.pattern, playerScreen, ts, elColor);
+
   hits.forEach((h, i) => {
     setTimeout(() => {
       const tx = h.m.x - (px - half);
@@ -1048,7 +1057,10 @@ function _executeSkill(skill) {
       const sx = cRect.left + tx * ts + ts / 2;
       const sy = cRect.top  + ty * ts + ts / 2;
       const anchor = { left: sx - 18, top: sy - 18, width: 36, height: 36 };
+      // 命中マスごとに爆発 + ダメージ数値（属性相性に応じた kind で色変え）
       explosion(anchor, { color: elColor });
+      const kind = h.matchup >= 1.5 ? 'crit' : h.matchup <= 0.7 ? 'weak' : 'effective';
+      showDamageAt({ left: sx, top: sy - 18, width: 0, height: 0 }, h.dmg, { kind });
       if (h.m.hp <= 0) deathBurst(anchor, { color: h.m.rarityColor ?? '#ff7043' });
     }, 60 + i * 70);
   });

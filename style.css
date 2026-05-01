@@ -1468,6 +1468,71 @@ html, body {
   50%      { background-position: 100% 50%; }
 }
 
+/* ── 技パターン別の特殊演出（_executeSkill から呼ぶ） ── */
+.vfx-slash, .vfx-beam, .vfx-omni-sweep, .vfx-aoe-ring, .vfx-aoe-swirl {
+  position: fixed;
+  pointer-events: none;
+  z-index: 4500;
+}
+.vfx-slash {
+  border-radius: 4px;
+  animation: vfxSlash 0.45s ease-out forwards;
+}
+@keyframes vfxSlash {
+  0%   { opacity: 0; transform: translate(-50%, -50%) rotate(var(--r, 0deg)) scaleX(0.2); }
+  30%  { opacity: 1; transform: translate(-50%, -50%) rotate(var(--r, 0deg)) scaleX(1.0); }
+  100% { opacity: 0; transform: translate(-50%, -50%) rotate(var(--r, 0deg)) scaleX(1.2); }
+}
+.vfx-beam {
+  border-radius: 6px;
+  animation: vfxBeam 0.5s ease-out forwards;
+}
+@keyframes vfxBeam {
+  0%   { opacity: 0; transform: translate(-50%, -50%) rotate(var(--r, 0deg)) scaleX(0.1); }
+  30%  { opacity: 1; transform: translate(-50%, -50%) rotate(var(--r, 0deg)) scaleX(1.0); }
+  100% { opacity: 0; transform: translate(-50%, -50%) rotate(var(--r, 0deg)) scaleX(1.0); }
+}
+.vfx-omni-sweep {
+  width: 1px; height: 1px;
+  border-radius: 50%;
+  border: 3px solid var(--c, #b070dd);
+  box-shadow: 0 0 14px var(--c, #b070dd), inset 0 0 14px var(--c, #b070dd);
+  transform: translate(-50%, -50%);
+  animation: vfxOmniSweep 0.55s ease-out forwards;
+}
+@keyframes vfxOmniSweep {
+  0%   { width: 1px; height: 1px; opacity: 0.9; }
+  60%  { width: var(--max); height: var(--max); opacity: 0.85; }
+  100% { width: var(--max); height: var(--max); opacity: 0; }
+}
+.vfx-aoe-ring {
+  width: 1px; height: 1px;
+  border-radius: 50%;
+  border: 4px solid var(--c, #b070dd);
+  box-shadow: 0 0 22px var(--c, #b070dd), inset 0 0 22px var(--c, #b070dd);
+  transform: translate(-50%, -50%);
+}
+.vfx-aoe-ring-1 { animation: vfxAoeRing 0.75s ease-out forwards; }
+.vfx-aoe-ring-2 { animation: vfxAoeRing 0.7s ease-out forwards; opacity: 0.6; }
+@keyframes vfxAoeRing {
+  0%   { width: 1px;          height: 1px;          opacity: 1; }
+  100% { width: var(--max);   height: var(--max);   opacity: 0; }
+}
+.vfx-aoe-swirl {
+  width: 80px; height: 80px;
+  margin-left: -40px; margin-top: -40px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0%, var(--c, #b070dd) 50%, transparent 100%);
+  filter: blur(2px);
+  opacity: 0.85;
+  animation: vfxAoeSwirl 0.85s ease-out forwards;
+}
+@keyframes vfxAoeSwirl {
+  0%   { transform: rotate(0deg) scale(0.4); opacity: 0; }
+  35%  { transform: rotate(160deg) scale(1.2); opacity: 1; }
+  100% { transform: rotate(540deg) scale(1.8); opacity: 0; }
+}
+
 /* ── 属性相性チャート（メニュー内） ── */
 .element-chart-help {
   font-size: 11px;
