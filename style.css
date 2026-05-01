@@ -431,31 +431,61 @@ html, body {
 .hp-text { font-size: 15px; color: var(--success); font-weight: bold; }
 .mp-text { font-size: 14px; color: #4dc4ff; font-weight: bold; }
 
-/* ダンジョンフッターのわざボタン（D-pad の左に並べる）。
-   旧仕様は position:absolute で固定配置していたため、探索ログと重なって
-   情報が読めない不具合があった。フッターの flex 内に置けば自動で領域を
-   分けてくれる。 */
-.btn-waza {
-  background: var(--primary);
-  color: #fff;
-  border: none;
-  padding: 10px 14px;
-  border-radius: 18px;
-  font-size: 13px;
-  font-weight: bold;
-  cursor: pointer;
-  box-shadow: 0 0 12px var(--primary-glow);
+/* 技クイックバー（D-pad の左、最大 4 スロット）。各スロットは技の属性カラーで縁取り。 */
+.waza-bar {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 4px;
   flex-shrink: 0;
-  align-self: stretch;
+  width: 110px;
 }
-.btn-waza:active { transform: scale(0.96); }
+.waza-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  border: 1.5px solid rgba(255,255,255,0.18);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.05);
+  color: #c5c5d4;
+  padding: 4px 6px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: bold;
+  line-height: 1.1;
+  min-height: 44px;
+  transition: transform .08s, box-shadow .12s;
+}
+.waza-slot:not(:disabled):active {
+  transform: scale(0.94);
+  box-shadow: 0 0 12px currentColor;
+}
+.waza-slot:disabled { opacity: 0.45; cursor: not-allowed; }
+.waza-slot.empty {
+  color: rgba(255,255,255,0.35);
+  font-size: 18px;
+}
+.waza-slot.lowmp {
+  /* MP不足は赤い縁＋暗め */
+  border-color: rgba(255,82,82,0.6) !important;
+  background: rgba(255,82,82,0.08) !important;
+  color: rgba(255,82,82,0.7) !important;
+}
+.waza-slot-emoji { font-size: 16px; line-height: 1; }
+.waza-slot-name  { font-size: 10px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.waza-slot-mp    { font-size: 9px; opacity: 0.75; }
 
-/* 狭い画面ではログを 2 列幅で確保しつつ技ボタンと D-pad が縦並びになるよう、
-   フッターを縦並びに切り替える。情報表示と技ボタンが重ならない */
+/* 狭い画面ではログを 2 列幅で確保しつつクイックバーと D-pad が縦並びになるよう、
+   フッターを縦並びに切り替える。情報表示と被らない */
 @media (max-width: 420px) {
   .dungeon-footer { flex-wrap: wrap; padding: 8px 10px 12px; }
   #dungeon-log { flex: 1 1 100%; min-height: 40px; max-height: 56px; }
-  .btn-waza   { padding: 8px 12px; font-size: 12px; align-self: center; }
+  .waza-bar { width: 92px; }
+  .waza-slot { min-height: 40px; padding: 3px 4px; }
+  .waza-slot-name { font-size: 9px; }
 }
 
 .modal-meta {

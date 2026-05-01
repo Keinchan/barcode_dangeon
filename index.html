@@ -97,10 +97,15 @@
     <!-- ミニマップ（既踏マスを縮小表示） -->
     <canvas id="minimap" width="84" height="76"></canvas>
 
-    <!-- 探索中フッター：D-pad（8方向）+ 探索ログ + わざボタン -->
+    <!-- 探索中フッター：技クイックバー（4スロット）+ D-pad（8方向）+ 探索ログ -->
     <div class="dungeon-footer" id="dungeon-footer">
       <div id="dungeon-log"></div>
-      <button id="btn-waza" class="btn-waza" title="技を使う">✨ わざ</button>
+      <div id="waza-bar" class="waza-bar" aria-label="技クイックバー（最大4個）">
+        <button class="waza-slot empty" data-slot="0" disabled>—</button>
+        <button class="waza-slot empty" data-slot="1" disabled>—</button>
+        <button class="waza-slot empty" data-slot="2" disabled>—</button>
+        <button class="waza-slot empty" data-slot="3" disabled>—</button>
+      </div>
       <div class="dpad">
         <div class="dpad-row">
           <button class="dpad-btn dpad-diag" data-dir="up-left">↖</button>
