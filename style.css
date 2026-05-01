@@ -431,23 +431,32 @@ html, body {
 .hp-text { font-size: 15px; color: var(--success); font-weight: bold; }
 .mp-text { font-size: 14px; color: #4dc4ff; font-weight: bold; }
 
-/* ダンジョンフッターのわざボタン（左下） */
+/* ダンジョンフッターのわざボタン（D-pad の左に並べる）。
+   旧仕様は position:absolute で固定配置していたため、探索ログと重なって
+   情報が読めない不具合があった。フッターの flex 内に置けば自動で領域を
+   分けてくれる。 */
 .btn-waza {
-  position: absolute;
-  left: 14px;
-  bottom: 70px;
   background: var(--primary);
   color: #fff;
   border: none;
-  padding: 10px 16px;
+  padding: 10px 14px;
   border-radius: 18px;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: bold;
   cursor: pointer;
   box-shadow: 0 0 12px var(--primary-glow);
-  z-index: 5;
+  flex-shrink: 0;
+  align-self: stretch;
 }
 .btn-waza:active { transform: scale(0.96); }
+
+/* 狭い画面ではログを 2 列幅で確保しつつ技ボタンと D-pad が縦並びになるよう、
+   フッターを縦並びに切り替える。情報表示と技ボタンが重ならない */
+@media (max-width: 420px) {
+  .dungeon-footer { flex-wrap: wrap; padding: 8px 10px 12px; }
+  #dungeon-log { flex: 1 1 100%; min-height: 40px; max-height: 56px; }
+  .btn-waza   { padding: 8px 12px; font-size: 12px; align-self: center; }
+}
 
 .modal-meta {
   font-size: 12px;
@@ -534,18 +543,30 @@ html, body {
 }
 
 /* ── DUNGEON HUD 追加 ── */
-.dungeon-right-hud { text-align: right; flex: 1; }
+.dungeon-right-hud { text-align: right; flex: 1; min-width: 0; }
 .equip-display { font-size: 11px; color: var(--muted); margin-top: 3px; }
 .dungeon-hp-row {
   display: flex;
   justify-content: flex-end;
   align-items: baseline;
-  gap: 8px;
+  gap: 6px;
+  flex-wrap: wrap;       /* 幅に収まらない時は次の行に折り返す（スマホで Lv/HP/MP/🪙 が切れていた問題の対策）*/
 }
 .lv-text {
   font-size: 13px;
   color: #ffc107;
   font-weight: bold;
+}
+
+/* スマホ等の狭い画面では HP/MP の文字をやや小さく + ヘッダのパディングも縮める */
+@media (max-width: 420px) {
+  .dungeon-header { padding: 8px 10px; }
+  .dungeon-hp-row { gap: 4px; }
+  #floor-label    { font-size: 16px; }
+  .lv-text        { font-size: 12px; }
+  .hp-text, .mp-text { font-size: 12px; }
+  .gold-text      { font-size: 12px; }
+  .equip-display  { font-size: 10px; }
 }
 
 .btn-icon-menu {
