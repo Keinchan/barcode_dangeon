@@ -19,6 +19,7 @@ import {
   generateItemFromBarcode, rarityFromDigit, bumpRarity, RARITIES, migrateElement,
   isStackable, stackKey, materialForRarity,
   PATTERN_OFFSETS, PATTERN_DESC, findSkillById, elementMatchup, matchupLabel,
+  elementMatchupTable, ELEMENTS,
   shopPriceFor,
   ENHANCE_RECIPES, applyEnhanceRecipe, fuseLegendaries,
 } from './items.js';
@@ -463,6 +464,39 @@ function refreshMenu() {
   _refreshStorageUI();
   // 合成
   _refreshSynthesisUI();
+  // 属性相性チャート
+  _refreshElementChart();
+}
+
+// 属性相性チャート：2 つの 3 元素サイクルを矢印付きで描画する。
+// 「攻撃側 → 防御側 が 1.5 倍」を A → B として横に並べる。
+const ELEMENT_EMOJI = {
+  '火': '🔥', '水': '💧', '草': '🌿',
+  '雷': '⚡', '光': '✨', '闇': '🌑',
+};
+const ELEMENT_COLOR_HEX = {
+  '火': '#ff6b3d', '水': '#4dc4ff', '草': '#66bb6a',
+  '雷': '#ffd54f', '光': '#fff176', '闇': '#b070dd',
+};
+function _refreshElementChart() {
+  const el = document.getElementById('element-chart');
+  if (!el) return;
+  // 自然サイクル（火→草→水→火）と神秘サイクル（光→闇→雷→光）を 2 行で表示
+  const cycles = [
+    { title: '🌿 自然', order: ['火', '草', '水'] },
+    { title: '✨ 神秘', order: ['光', '闇', '雷'] },
+  ];
+  el.innerHTML = cycles.map(c => {
+    const cells = c.order.map(e => `
+      <span class="element-chart-cell" style="color:${ELEMENT_COLOR_HEX[e]};
+        background:${ELEMENT_COLOR_HEX[e]}22;border-color:${ELEMENT_COLOR_HEX[e]}66">
+        ${ELEMENT_EMOJI[e]} ${e}
+      </span>`).join('<span class="element-chart-arrow">→</span>');
+    return `<div class="element-chart-row">
+      <span class="element-chart-cycle-name">${c.title}</span>
+      ${cells}<span class="element-chart-arrow">↩︎</span>
+    </div>`;
+  }).join('');
 }
 
 // ─── ストレージ UI ───
@@ -2215,7 +2249,8 @@ function _applySave(data) {
   if (typeof player.mp    !== 'number') player.mp    = player.maxMp;
   // 旧セーブ互換: platinum / scanBudget の正規化（日次リセットも内側で実施）
   ensureScanBudget(player);
-  // 旧属性 (火/水/...) を新属性 (棒人間/落書き/...) にマイグレート
+  // 旧属性（棒人間/落書き等の手描き属性 or さらに古い 地/風 等）を
+  // 新属性（火/水/草/雷/光/闇）にマイグレート
   _migrateItemElements(player);
   // 旧セーブのスタック未対応データを集約（count 付与 + 同種重複統合）
   _consolidateStacks(player);

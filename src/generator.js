@@ -19,15 +19,14 @@ const MONSTER_POOL = [
 ];
 
 // ── 属性スキル（モンスターが 3 ターンに 1 回発動）──
-//   棒人間 = 物理パンチ。落書き = 高威力・乱雑。影絵 = 中威力 + 毒。
-//   ピクセル = 連続ダメ。ホログラム = 自己回復。折り紙 = 鋭利な切り。
+//   各属性ごとに 1 つの代表スキル。
 export const SKILLS = {
-  '棒人間':     { name: 'スティック・パンチ', mult: 2.0, healSelf: 0,    poison: false },
-  '落書き':     { name: 'グシャ書き',         mult: 2.4, healSelf: 0,    poison: false },
-  '影絵':       { name: '影縫い',             mult: 1.5, healSelf: 0,    poison: true  },
-  'ピクセル':   { name: 'ドット弾幕',         mult: 1.5, healSelf: 0,    poison: false },
-  'ホログラム': { name: '偽光',               mult: 0,   healSelf: 0.25, poison: false },
-  '折り紙':     { name: '折り鶴投げ',         mult: 2.0, healSelf: 0,    poison: false },
+  '火': { name: '火炎放射',     mult: 2.0, healSelf: 0,    poison: false },
+  '水': { name: 'ウォーターバ', mult: 1.8, healSelf: 0,    poison: false },
+  '草': { name: '毒の蔓',       mult: 1.5, healSelf: 0,    poison: true  },
+  '雷': { name: '雷撃',         mult: 2.4, healSelf: 0,    poison: false },
+  '光': { name: '聖なる癒し',   mult: 0,   healSelf: 0.25, poison: false },
+  '闇': { name: '影縫い',       mult: 2.0, healSelf: 0,    poison: true  },
 };
 
 // ── ダンジョン設定 ──
@@ -206,7 +205,7 @@ export function generateShopkeeperFor(dungeonData, floor) {
     name: '商人',
     level: lvl,
     rarity: 'レジェンド', rarityColor: '#ffc107',
-    element: '棒人間',                 // 物理メイン
+    element: '火',                       // 物理メイン
     skill:   { name: '撃退一閃', mult: 3.0, healSelf: 0, poison: false },
     skillCharge: 0,
     isBoss: false,

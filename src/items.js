@@ -24,24 +24,35 @@ export function bumpRarity(rarity, steps = 1) {
   return RARITIES[Math.min(RARITIES.length - 1, idx + steps)];
 }
 
-// ── 属性（手描き / グラフィック系の奇抜な 6 属性） ──
-//   従来の 火/水/地/風/光/闇 を「絵的なスタイル」属性に刷新。
-//   棒人間 = もっとも素朴。落書き = 雑なエネルギー塊。影絵 = 影 + 毒。
-//   ピクセル = 8bit 系。ホログラム = 光と幻。折り紙 = 紙の鋭利。
+// ── 属性（直感的な 6 属性） ──
+//   火 / 水 / 草 / 雷 / 光 / 闇。相性は「自然サイクル」と「神秘サイクル」の
+//   2 つの 3 元素ループ：
+//     自然: 火 > 草 > 水 > 火（ ★ 燃やす / 吸う / 消火 ）
+//     神秘: 光 > 闇 > 雷 > 光（ ★ 照らす / 呑む / 帯電 ）
+//   別サイクル間は 1.0 倍（中立）なので、覚える相性はサイクルあたり 3 つ。
 //
-//   ELEMENTS の長さは 6 のまま（バーコード由来の `% ELEMENTS.length` を維持）。
+//   ELEMENTS の長さは 6 のまま（`% ELEMENTS.length` 由来の決定論性を維持）。
 //   旧セーブは ELEMENT_LEGACY_MAP で新表記にマッピングしてロード時に変換する。
-export const ELEMENTS = ['棒人間', '落書き', '影絵', 'ピクセル', 'ホログラム', '折り紙'];
+export const ELEMENTS = ['火', '水', '草', '雷', '光', '闇'];
 
-// 旧属性 → 新属性。同じ index 順を維持しているので、既存の
-// 「digit % 6 → element」由来の決定論性も保たれる。
+// 旧属性（さらに前世代の手描き属性も含む）→ 新属性のマッピング。
+// 過去にこのプロジェクトでは「火/水/地/風/光/闇」→「棒人間/落書き/折り紙/ピクセル/ホログラム/影絵」
+// と 1 度移行したため、両方の旧表記を新表記に変換する必要がある。
 export const ELEMENT_LEGACY_MAP = {
-  '火': '棒人間',
-  '水': '落書き',
-  '地': '折り紙',
-  '風': 'ピクセル',
-  '光': 'ホログラム',
-  '闇': '影絵',
+  // 第 1 世代（クラシック RPG 表記）→ 新表記
+  '火': '火',
+  '水': '水',
+  '地': '草',
+  '風': '雷',
+  '光': '光',
+  '闇': '闇',
+  // 第 2 世代（手描きスタイル表記）→ 新表記
+  '棒人間':     '火',
+  '落書き':     '水',
+  '影絵':       '闇',
+  'ピクセル':   '雷',
+  'ホログラム': '光',
+  '折り紙':     '草',
 };
 
 // 既存アイテム/モンスターの element 文字列が旧表記なら新表記に書き換える
@@ -51,16 +62,29 @@ export function migrateElement(element) {
 }
 
 // 属性相性（攻撃側 → 防御側 = ダメージ倍率）。
-// 6 属性のサークルマッチアップ：A → B が 1.5 倍なら逆 B → A は 0.7 倍。
-//   棒人間 > ピクセル > ホログラム > 影絵 > 折り紙 > 落書き > 棒人間 …
+// 2 つの 3 元素サイクル：
+//   自然: 火 → 草 → 水 → 火
+//   神秘: 光 → 闇 → 雷 → 光
+// 別サイクル間は 1.0 倍（中立）。同サイクル内は「天敵」「獲物」の関係。
 const _STRONG_AGAINST = {
-  '棒人間':     'ピクセル',
-  'ピクセル':   'ホログラム',
-  'ホログラム': '影絵',
-  '影絵':       '折り紙',
-  '折り紙':     '落書き',
-  '落書き':     '棒人間',
+  '火': '草',
+  '草': '水',
+  '水': '火',
+  '光': '闇',
+  '闇': '雷',
+  '雷': '光',
 };
+
+// UI 表示用：各属性の「強い相手」「弱い相手（自分を倒す者）」を返す
+export function elementMatchupTable() {
+  const out = [];
+  for (const el of ELEMENTS) {
+    const strongAgainst = _STRONG_AGAINST[el];
+    const weakAgainst   = ELEMENTS.find(e => _STRONG_AGAINST[e] === el);
+    out.push({ element: el, strongAgainst, weakAgainst });
+  }
+  return out;
+}
 
 export function elementMatchup(attacker, defender) {
   if (!attacker || !defender) return 1.0;
@@ -107,12 +131,12 @@ const MP_POTIONS = [
 
 // 巻物は新属性に対応した 6 種類。それぞれ ELEMENTS 内の 1 属性とリンクする
 const SCROLLS = [
-  { base: '棒の巻物',     emoji: '🥢', dmg: 14, element: '棒人間' },
-  { base: 'ペンの巻物',   emoji: '✏️', dmg: 22, element: '落書き' },
-  { base: '影の巻物',     emoji: '👤', dmg: 18, element: '影絵' },
-  { base: 'ドットの巻物', emoji: '🟦', dmg: 16, element: 'ピクセル' },
-  { base: '虹の巻物',     emoji: '🌈', dmg: 20, element: 'ホログラム' },
-  { base: '紙の巻物',     emoji: '📄', dmg: 17, element: '折り紙' },
+  { base: '炎の巻物', emoji: '🔥', dmg: 18, element: '火' },
+  { base: '水の巻物', emoji: '💧', dmg: 16, element: '水' },
+  { base: '草の巻物', emoji: '🌿', dmg: 17, element: '草' },
+  { base: '雷の巻物', emoji: '⚡', dmg: 20, element: '雷' },
+  { base: '光の巻物', emoji: '✨', dmg: 22, element: '光' },
+  { base: '闇の巻物', emoji: '🌑', dmg: 19, element: '闇' },
 ];
 
 // ── 装備の名前接尾辞（レアリティ毎・武器/防具共通） ──
@@ -445,17 +469,17 @@ export const PATTERN_OFFSETS = {
 
 export const SKILLS_LIBRARY = [
   // コモン
-  { id: 'sweep',     name: '薙ぎ払い',   pattern: 'A', dmgMult: 1.0, mpCost: 6,  element: '棒人間',     rarity: 'コモン',     desc: '十字隣接 4 マスを薙ぐ' },
-  { id: 'jab',       name: '小突き',     pattern: 'C', dmgMult: 0.8, mpCost: 5,  element: '棒人間',     rarity: 'コモン',     desc: '直線 2 マスを軽く突く' },
+  { id: 'sweep',     name: '薙ぎ払い',   pattern: 'A', dmgMult: 1.0, mpCost: 6,  element: '火', rarity: 'コモン',     desc: '十字隣接 4 マスを薙ぐ' },
+  { id: 'jab',       name: '小突き',     pattern: 'C', dmgMult: 0.8, mpCost: 5,  element: '火', rarity: 'コモン',     desc: '直線 2 マスを軽く突く' },
   // レア
-  { id: 'whirl',     name: '回転斬り',   pattern: 'B', dmgMult: 1.2, mpCost: 10, element: '落書き',     rarity: 'レア',       desc: '周囲 8 マスを攻撃' },
-  { id: 'pierce',    name: '貫通弾',     pattern: 'C', dmgMult: 1.5, mpCost: 12, element: 'ピクセル',   rarity: 'レア',       desc: '直線 2 マス先まで貫く' },
+  { id: 'whirl',     name: '水流斬',     pattern: 'B', dmgMult: 1.2, mpCost: 10, element: '水', rarity: 'レア',       desc: '周囲 8 マスを攻撃' },
+  { id: 'pierce',    name: '貫通弾',     pattern: 'C', dmgMult: 1.5, mpCost: 12, element: '雷', rarity: 'レア',       desc: '直線 2 マス先まで貫く' },
   // エピック
-  { id: 'snipe',     name: '影狙撃',     pattern: 'C', dmgMult: 2.5, mpCost: 14, element: '影絵',       rarity: 'エピック',   desc: '4方向 2 マス先（高威力）' },
-  { id: 'storm',     name: '虹嵐',       pattern: 'D', dmgMult: 1.4, mpCost: 18, element: 'ホログラム', rarity: 'エピック',   desc: '周囲 2 マス全範囲' },
+  { id: 'snipe',     name: '影狙撃',     pattern: 'C', dmgMult: 2.5, mpCost: 14, element: '闇', rarity: 'エピック',   desc: '4方向 2 マス先（高威力）' },
+  { id: 'storm',     name: '光の嵐',     pattern: 'D', dmgMult: 1.4, mpCost: 18, element: '光', rarity: 'エピック',   desc: '周囲 2 マス全範囲' },
   // レジェンド
-  { id: 'doom',      name: '終末の折り', pattern: 'D', dmgMult: 2.5, mpCost: 28, element: '折り紙',     rarity: 'レジェンド', desc: '広範囲・高威力' },
-  { id: 'overdrive', name: '神無双',     pattern: 'B', dmgMult: 3.0, mpCost: 22, element: '棒人間',     rarity: 'レジェンド', desc: '周囲 8 マスを必殺' },
+  { id: 'doom',      name: '草薙ぎ',     pattern: 'D', dmgMult: 2.5, mpCost: 28, element: '草', rarity: 'レジェンド', desc: '広範囲・高威力' },
+  { id: 'overdrive', name: '神無双',     pattern: 'B', dmgMult: 3.0, mpCost: 22, element: '火', rarity: 'レジェンド', desc: '周囲 8 マスを必殺' },
 ];
 
 export function findSkillById(id) {
