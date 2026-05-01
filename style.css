@@ -1565,6 +1565,96 @@ html, body {
   100% { transform: rotate(540deg) scale(1.8); opacity: 0; }
 }
 
+/* ── メニュー 2 段階構造 ──
+   .menu-modal[data-stage="..."] が現在のステージ。各 .menu-section.stage-XXX は
+   data-stage と一致する時だけ表示。stage="home" 以外の時は「↑ メニュー」戻る
+   ボタンが出る。 */
+.menu-section.stage-home,
+.menu-section.stage-pocket,
+.menu-section.stage-storage,
+.menu-section.stage-materials,
+.menu-section.stage-synth,
+.menu-section.stage-element,
+.menu-section.stage-currency,
+.menu-section.stage-sound,
+.menu-section.stage-account {
+  display: none;
+}
+.menu-modal[data-stage="home"]      .menu-section.stage-home,
+.menu-modal[data-stage="pocket"]    .menu-section.stage-pocket,
+.menu-modal[data-stage="storage"]   .menu-section.stage-storage,
+.menu-modal[data-stage="materials"] .menu-section.stage-materials,
+.menu-modal[data-stage="synth"]     .menu-section.stage-synth,
+.menu-modal[data-stage="element"]   .menu-section.stage-element,
+.menu-modal[data-stage="currency"]  .menu-section.stage-currency,
+.menu-modal[data-stage="sound"]     .menu-section.stage-sound,
+.menu-modal[data-stage="account"]   .menu-section.stage-account {
+  display: block;
+}
+/* home 以外では「閉じる」を隠して「↑ メニュー」だけ出す */
+.menu-modal:not([data-stage="home"]) #btn-menu-close { display: none; }
+.menu-modal:not([data-stage="home"]) #btn-menu-back  { display: inline-block; }
+
+.menu-tile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+}
+.menu-tile {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 12px;
+  color: var(--text);
+  padding: 14px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: bold;
+  transition: transform .08s, background .12s;
+}
+.menu-tile:active {
+  transform: scale(0.96);
+  background: rgba(124,77,255,0.2);
+  border-color: var(--primary);
+}
+.menu-tile-emoji { font-size: 28px; line-height: 1; }
+.menu-tile-label { font-size: 11px; }
+
+/* ストレージ画面：持ち物のミニ表示（行タップで即送る） */
+.storage-mini-inventory {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.storage-mini-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background .12s;
+}
+.storage-mini-row:active { background: var(--primary); }
+.storage-mini-row .item-icon { width: 28px; height: 28px; }
+.storage-mini-row-info { flex: 1; min-width: 0; }
+.storage-mini-row-name { font-size: 12px; font-weight: bold; }
+.storage-mini-row-stat { font-size: 10px; color: var(--muted); }
+.storage-mini-row-arrow { color: var(--primary); font-size: 14px; }
+.storage-mini-help {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+  line-height: 1.5;
+}
+
 /* ── 素材ボックス（メニュー内） ── */
 .materials-grid {
   display: grid;

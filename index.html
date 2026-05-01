@@ -243,14 +243,17 @@
     </div>
   </div>
 
-  <!-- メニューモーダル（マップ・ダンジョンの両方から開く。screen 非依存に body 直下） -->
-  <div id="menu-modal" class="menu-modal hidden">
+  <!-- メニューモーダル（マップ・ダンジョンの両方から開く。screen 非依存に body 直下）。
+       2 段階構成：data-stage="home" 時は概要 + タイル一覧。タイルを選ぶと該当 stage に
+       切り替え、CSS で .menu-section.stage-XXX のみ表示する。 -->
+  <div id="menu-modal" class="menu-modal hidden" data-stage="home">
     <div class="menu-modal-header">
       <button id="btn-menu-close" class="btn-back">← 閉じる</button>
-      <span class="menu-modal-title">メニュー</span>
+      <button id="btn-menu-back"  class="btn-back hidden">↑ メニュー</button>
+      <span id="menu-modal-title" class="menu-modal-title">メニュー</span>
     </div>
     <div class="menu-modal-body">
-      <section class="menu-section">
+      <section class="menu-section stage-home">
         <div class="menu-section-title">🧙 ステータス</div>
         <div class="menu-stats">
           <div>Lv <span id="menu-lv">1</span></div>
@@ -265,16 +268,61 @@
           <div class="menu-xp-bar-wrap"><div id="menu-xp-bar" class="menu-xp-bar"></div></div>
         </div>
       </section>
-      <section class="menu-section">
+
+      <!-- カテゴリタイル：home でだけ表示する 2 段階構造の入口 -->
+      <section class="menu-section stage-home">
+        <div class="menu-section-title">📂 メニュー項目</div>
+        <div class="menu-tile-grid">
+          <button class="menu-tile" data-go="pocket">
+            <span class="menu-tile-emoji">⚔️</span>
+            <span class="menu-tile-label">装備・持ち物</span>
+          </button>
+          <button class="menu-tile" data-go="storage">
+            <span class="menu-tile-emoji">📦</span>
+            <span class="menu-tile-label">ストレージ</span>
+          </button>
+          <button class="menu-tile" data-go="materials">
+            <span class="menu-tile-emoji">🧰</span>
+            <span class="menu-tile-label">素材ボックス</span>
+          </button>
+          <button class="menu-tile" data-go="synth">
+            <span class="menu-tile-emoji">🛠</span>
+            <span class="menu-tile-label">合成・強化</span>
+          </button>
+          <button class="menu-tile" data-go="element">
+            <span class="menu-tile-emoji">⚖️</span>
+            <span class="menu-tile-label">属性相性</span>
+          </button>
+          <button class="menu-tile" data-go="currency">
+            <span class="menu-tile-emoji">💎</span>
+            <span class="menu-tile-label">通貨・スキャン</span>
+          </button>
+          <button class="menu-tile" data-go="sound">
+            <span class="menu-tile-emoji">🔊</span>
+            <span class="menu-tile-label">サウンド</span>
+          </button>
+          <button class="menu-tile" data-go="account">
+            <span class="menu-tile-emoji">👤</span>
+            <span class="menu-tile-label">アカウント</span>
+          </button>
+        </div>
+      </section>
+
+      <section class="menu-section stage-pocket">
         <div class="menu-section-title">装備中</div>
         <div id="menu-equipment"></div>
       </section>
-      <section class="menu-section">
+      <section class="menu-section stage-pocket">
         <div class="menu-section-title">持ち物 <span id="menu-inv-count" class="menu-section-meta"></span></div>
         <div id="menu-inventory"></div>
       </section>
 
-      <section class="menu-section">
+      <section class="menu-section stage-storage">
+        <div class="menu-section-title">🎒 持ち物（タップでストレージへ） <span id="menu-inv-count-mini" class="menu-section-meta"></span></div>
+        <div id="menu-inventory-mini" class="storage-mini-inventory"></div>
+        <div class="storage-mini-help">行をタップでスタックを 1 個ストレージに送ります（装備中はここからは外せません）。</div>
+      </section>
+      <section class="menu-section stage-storage">
         <div class="menu-section-title">📦 ストレージ <span id="menu-storage-count" class="menu-section-meta"></span></div>
         <div class="storage-tabs">
           <button class="storage-tab active" data-cat="all">すべて</button>
@@ -282,7 +330,6 @@
           <button class="storage-tab" data-cat="armor">🛡️</button>
           <button class="storage-tab" data-cat="potion">🧪</button>
           <button class="storage-tab" data-cat="scroll">📜</button>
-          <button class="storage-tab" data-cat="material">⛓️</button>
         </div>
         <div class="storage-controls">
           <select id="storage-sort" class="storage-sort">
@@ -296,32 +343,32 @@
         <div id="menu-storage"></div>
       </section>
 
-      <section class="menu-section">
+      <section class="menu-section stage-materials">
         <div class="menu-section-title">🧰 素材ボックス <span id="menu-materials-count" class="menu-section-meta"></span></div>
         <div id="menu-materials" class="materials-grid"></div>
         <div class="menu-materials-help">合成専用の素材入れ。持ち物の枠を消費しません。<br>
           <span style="color:#ff8a65">敗北時はロストします</span>（ダンジョンから持ち帰れなかった素材は失われる）。</div>
       </section>
 
-      <section class="menu-section">
+      <section class="menu-section stage-synth">
         <div class="menu-section-title">🛠 合成（武器強化 + 融合）</div>
         <div id="synthesis-list" class="synthesis-list"></div>
         <button id="synthesis-fuse" class="menu-action-btn hidden" style="margin-top:8px">🌟 同名レジェンド融合</button>
       </section>
 
-      <section class="menu-section">
+      <section class="menu-section stage-element">
         <div class="menu-section-title">⚖️ 属性相性</div>
         <div class="element-chart-help">攻撃側の属性が相手の弱点なら 1.5 倍、逆に弱点なら 0.7 倍。下の輪を覚えれば OK。</div>
         <div id="element-chart" class="element-chart"></div>
       </section>
 
-      <section class="menu-section">
+      <section class="menu-section stage-currency">
         <div class="menu-section-title">💎 通貨・スキャン</div>
         <div id="menu-scan-status" class="menu-scan-status">📷 0/5　💎 0</div>
         <button id="btn-buy-platinum" class="menu-action-btn">プラチナ結晶を購入（テスト）</button>
       </section>
 
-      <section class="menu-section">
+      <section class="menu-section stage-sound">
         <div class="menu-section-title">🔊 サウンド</div>
         <label class="menu-audio-row">
           <input id="menu-bgm-toggle" type="checkbox" checked />
@@ -335,7 +382,7 @@
         </label>
       </section>
 
-      <section class="menu-section">
+      <section class="menu-section stage-account">
         <div class="menu-section-title">アカウント <span id="menu-username" class="menu-section-meta"></span></div>
         <button id="btn-logout" class="menu-logout-btn">🚪 ログアウト</button>
       </section>
