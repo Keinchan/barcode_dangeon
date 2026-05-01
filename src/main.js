@@ -312,39 +312,29 @@ document.getElementById('btn-pre-menu').addEventListener('click', () => {
 
 document.getElementById('btn-scan').addEventListener('click', async () => {
   playSfx('click');
-  // スキャン上限チェック。0/5 + 結晶も無ければ開始させない。
-  // 結晶があれば使うか確認、無料枠があればそのまま消費。
-  if (!await _consumeScanQuota()) return;
+  // ボタン押下では消費せず「カメラを起こせるか」だけ事前確認する。
+  // 実際のカウント消費はバーコードを読み取れた瞬間（_itemFromScan の直前）。
+  // これにより読取失敗・キャンセルで無料枠が減る不具合を解消。
+  if (!await _ensureCanScan()) return;
   show('scanner');
   launchScanner();
 });
 
-// スキャンクオータを 1 回消費。無料枠が残っていれば true、結晶がある場合は確認、
-// どちらも無ければ購入を促して false。
-async function _consumeScanQuota() {
+// スキャン開始前のチェック。残量があれば true。0 で結晶もあれば「使うか」確認、
+// どちらも無ければ購入導線へ。ここでは消費しない（実スキャン成功時に消費）。
+async function _ensureCanScan() {
   ensureScanBudget(player);
   const s = getScanStatus(player);
-  if (s.freeRemaining > 0) {
-    tryConsumeScan(player);
-    autoSave();
-    _refreshScanStatusUI();
-    return true;
-  }
-  // 無料枠尽きている → 結晶があれば確認
+  if (s.freeRemaining > 0) return true;
   if (s.platinum > 0) {
     const ok = await showConfirm(
       `今日の無料スキャンを使い切りました（${s.dailyMax}/${s.dailyMax}）。\n` +
-      `プラチナ結晶 1 個を消費して +1 スキャンしますか？\n` +
+      `次に読み取れた 1 件にプラチナ結晶 1 個を使いますか？\n` +
       `（所持: 💎${s.platinum}）`,
       { okLabel: '結晶を使う', cancelLabel: 'やめる' },
     );
-    if (!ok) return false;
-    const r = tryConsumeScan(player);
-    autoSave();
-    _refreshScanStatusUI();
-    return r.ok;
+    return !!ok;
   }
-  // 結晶も無い → 購入導線
   const buy = await showConfirm(
     `今日のスキャン上限（${s.dailyMax}/${s.dailyMax}）に達しました。\n` +
     `プラチナ結晶を購入しますか？\n\n` +
@@ -352,7 +342,6 @@ async function _consumeScanQuota() {
     { okLabel: `${PLATINUM_STUB_GRANT}個購入`, cancelLabel: 'やめる' },
   );
   if (!buy) return false;
-  // TODO: 本番では Stripe / Apple IAP / Google Play Billing に差し替え。
   addPlatinum(player, PLATINUM_STUB_GRANT);
   autoSave();
   _refreshScanStatusUI();
@@ -360,7 +349,19 @@ async function _consumeScanQuota() {
     `💎${PLATINUM_STUB_GRANT} を付与しました（テストビルド）。\n` +
     `もう一度「スキャン」を押してください。`,
   );
-  return false;   // 一旦 UI を戻して再タップさせる
+  return false;
+}
+
+// スキャン成功時に呼ぶ：実際にカウントを 1 進める。
+// 戻り値 false なら「もう消費できない＝結果を捨てる」を意味する。
+function _consumeOnScanResult() {
+  ensureScanBudget(player);
+  const r = tryConsumeScan(player);
+  if (r.ok) {
+    autoSave();
+    _refreshScanStatusUI();
+  }
+  return r.ok;
 }
 
 // スキャン残量・結晶残量の UI 反映（マップ HUD・スキャナーヘッダ・メニュー）
@@ -1426,6 +1427,14 @@ async function launchScanner() {
   try {
     await startScanner(scanResult => {
       stopScanner();
+      // バーコードが読み取れた瞬間にカウントを 1 消費する。
+      // クォータが尽きていたら結果を破棄してマップに戻す（ボタン押下時点では
+      // 「読み取れた 1 件で消費する」許可が取れている前提）。
+      if (!_consumeOnScanResult()) {
+        showAlert('スキャン上限に達しています。マップに戻ります。');
+        show('map');
+        return;
+      }
       const item = _itemFromScan(scanResult);
       pendingItem = item;
       _showItemResult(item, scanResult);
@@ -1493,9 +1502,11 @@ document.getElementById('btn-back-scan').addEventListener('click', () => {
   show('map');
 });
 
-document.getElementById('btn-rescan').addEventListener('click', () => {
+document.getElementById('btn-rescan').addEventListener('click', async () => {
   playSfx('click');
   pendingItem = null;
+  // もう一度スキャンする前にクォータの再確認（残量切れなら結晶確認 or 購入導線）
+  if (!await _ensureCanScan()) { show('map'); return; }
   launchScanner();
 });
 
