@@ -113,6 +113,9 @@ function _addToList(list, item, capacity) {
 }
 function addToInventory(item) { return _addToList(player.inventory, item, 8); }
 function addToStorage(item)   { return _addToList(player.storage,   item, null); }
+// 素材は専用ボックス（容量無制限・スタック）。
+// 持ち物を 1 枠も消費せず、敗北時の entrySnapshot 復元対象に含める。
+function addToMaterials(item) { return _addToList(player.materials, item, null); }
 
 // 指定 idx のアイテムを 1 個取り出す。スタックなら count -= 1、最後の 1 個 or
 // 非スタックなら splice で除去。返り値は count=1 のシングルアイテム
@@ -128,7 +131,7 @@ function takeOneFromInventory(idx) {
 
 // セーブロード時の互換: 既存配列に count を埋め、同 stackKey の重複を 1 スタックに集約
 function _consolidateStacks(p) {
-  for (const arrName of ['inventory', 'storage']) {
+  for (const arrName of ['inventory', 'storage', 'materials']) {
     const arr = p[arrName];
     if (!Array.isArray(arr)) continue;
     const merged = [];
@@ -464,12 +467,39 @@ function refreshMenu() {
 
   // ストレージ
   _refreshStorageUI();
+  // 素材ボックス
+  _refreshMaterialsUI();
   // 合成
   _refreshSynthesisUI();
   // 属性相性チャート
   _refreshElementChart();
   // 技を学ぶ/忘れるとスロット内容が変わるのでクイックバーも再描画
   _refreshWazaBar();
+}
+
+// 素材ボックスの一覧表示。アイコンと個数だけのシンプルなグリッド。
+function _refreshMaterialsUI() {
+  const grid = document.getElementById('menu-materials');
+  if (!grid) return;
+  if (!Array.isArray(player.materials)) player.materials = [];
+  const total = player.materials.reduce((s, it) => s + (it.count ?? 1), 0);
+  document.getElementById('menu-materials-count').textContent = `(${total})`;
+  if (player.materials.length === 0) {
+    grid.innerHTML = '<div class="menu-empty">素材なし</div>';
+    return;
+  }
+  grid.innerHTML = '';
+  for (const it of player.materials) {
+    const cell = document.createElement('div');
+    cell.className = 'material-cell';
+    cell.title = `${it.name}（${it.rarity}）${it.desc ? ' / ' + it.desc : ''}`;
+    cell.innerHTML = `
+      <div class="material-cell-emoji">${iconImg(it, 32)}</div>
+      <div class="material-cell-name" style="color:${it.rarityColor}">${it.name}</div>
+      <div class="material-cell-count">×${it.count ?? 1}</div>
+    `;
+    grid.appendChild(cell);
+  }
 }
 
 // 属性相性チャート：2 つの 3 元素サイクルを矢印付きで描画する。
@@ -647,25 +677,28 @@ function _depositToStorage(idx) {
 }
 
 // ボス撃破直後など、フロアに置けないドロップを自動取得。
-// インベントリに余裕があればそこに、満杯ならストレージに退避（永久消失を防ぐ）。
+// 素材は素材ボックスへ直行（インベントリを圧迫しない）。
+// それ以外はインベントリ余裕があればそこ、満杯ならストレージに退避（永久消失を防ぐ）。
 function _autoCollectDrop(drop) {
-  if (!Array.isArray(player.storage)) player.storage = [];
-  let toStorage = false;
-  if (canAddToInventory(drop)) {
+  if (!Array.isArray(player.storage))   player.storage   = [];
+  if (!Array.isArray(player.materials)) player.materials = [];
+  let to = '🎒持ち物へ';
+  if (drop.type === 'material') {
+    addToMaterials(drop);
+    to = '🧰素材ボックスへ';
+  } else if (canAddToInventory(drop)) {
     addToInventory(drop);
   } else {
     addToStorage(drop);
-    toStorage = true;
+    to = '📦ストレージへ';
   }
   playSfx('drop', { rarityTier: rarityTier(drop.rarity) });
-  const where = toStorage ? '📦ストレージへ' : '🎒持ち物へ';
   if (typeof dungeonLog === 'function' && screen === 'dungeon') {
-    dungeonLog(`💎 ${drop.name} を獲得！（${where}）`, { rarity: drop.rarity });
+    dungeonLog(`💎 ${drop.name} を獲得！（${to}）`, { rarity: drop.rarity });
   }
-  // レア+はバナー、コモンは控えめなアラート。ボスは満杯時のみ通知が欲しい
   if (drop.rarity !== 'コモン') {
-    _celebratePickup(drop, toStorage ? 'ストレージへ' : 'ドロップ');
-  } else if (toStorage) {
+    _celebratePickup(drop, to);
+  } else if (to === '📦ストレージへ') {
     showAlert(`持ち物満杯のため ${drop.name} はストレージへ`);
   }
 }
@@ -1104,7 +1137,9 @@ function _executeSkill(skill) {
 
 function _countMaterial(name) {
   let n = 0;
-  for (const arr of [player.inventory, player.storage]) {
+  // 新仕様: 素材は player.materials に貯まる。
+  // 旧セーブ互換のため inventory / storage に残った素材も合算してカウントする。
+  for (const arr of [player.materials, player.inventory, player.storage]) {
     for (const it of arr ?? []) {
       if (it?.type === 'material' && it.name === name) n += (it.count ?? 1);
     }
@@ -1112,10 +1147,11 @@ function _countMaterial(name) {
   return n;
 }
 
-// 指定名の素材を N 個消費（インベントリ優先、不足分はストレージから）
+// 指定名の素材を N 個消費（素材ボックス → 持ち物 → ストレージの順）
 function _consumeMaterial(name, count) {
   let need = count;
-  for (const arr of [player.inventory, player.storage]) {
+  for (const arr of [player.materials, player.inventory, player.storage]) {
+    if (!Array.isArray(arr)) continue;
     if (need <= 0) break;
     for (let i = arr.length - 1; i >= 0 && need > 0; i--) {
       const it = arr[i];
@@ -1166,6 +1202,17 @@ function _removeWeaponAt(ref) {
 function _refreshSynthesisUI() {
   const grid = document.getElementById('synthesis-list');
   if (!grid) return;
+  // 仕様: ダンジョン探索中は合成不可（街の鍛冶屋に戻ってから、というイメージ）。
+  // ロックアウト時は説明だけ出して全ボタンを非活性に。
+  if (screen === 'dungeon') {
+    grid.innerHTML =
+      '<div class="menu-empty" style="line-height:1.6">' +
+      '🛠 ダンジョン内では合成できません<br>' +
+      '<span style="font-size:11px;color:#888">マップ画面に戻ってから素材ボックスの素材を使って強化・融合できます</span>' +
+      '</div>';
+    document.getElementById('synthesis-fuse').classList.add('hidden');
+    return;
+  }
   const weapons = _allWeaponsForCraft();
   if (weapons.length === 0) {
     grid.innerHTML = '<div class="menu-empty">武器を持っていません</div>';
@@ -1683,9 +1730,14 @@ function enterDungeon(data) {
   document.getElementById('dungeon-footer').classList.remove('hidden');
 
   dungeonData  = data;
-  // 入場前スナップショット（敗北時ロールバック）
+  if (!Array.isArray(player.materials)) player.materials = [];
+  // 入場前スナップショット（敗北時ロールバック）。
+  // ロスト対象は inventory + 装備 + 素材ボックス。storage は据え置き。
+  // 配列はディープコピー（アイテム参照だけのコピーだが count などは別個体）が必要なので
+  // map で {...it} する：ロールバック時に二重カウントを防ぐ。
   entrySnapshot = {
-    inventory: [...player.inventory],
+    inventory: player.inventory.map(it => ({ ...it })),
+    materials: player.materials.map(it => ({ ...it })),
     weapon:    player.weapon,
     armor:     player.armor,
     atk:       player.atk,
@@ -1918,6 +1970,18 @@ function pickupItem(item) {
     dungeonLog(`🪙 ${item.amount} ゴールドを拾った（合計 ${player.gold}）`);
     playSfx('pickup', { rarityTier: 0 });
     refreshHUD();
+    autoSave();
+    return;
+  }
+
+  // 素材：床に直接ドロップした場合も素材ボックス直行（持ち物を消費しない）。
+  if (item.type === 'material') {
+    dungeon.removeFloorItem(item);
+    addToMaterials(item);
+    playSfx('pickup', { rarityTier: rarityTier(item.rarity) });
+    dungeonLog(`🧰 ${item.name} を素材ボックスに収納`, { rarity: item.rarity });
+    refreshHUD();
+    dungeon.render(document.getElementById('dungeon-canvas'));
     autoSave();
     return;
   }
@@ -2296,8 +2360,10 @@ function dungeonClear() {
 
 function showResult(isWin) {
   if (!isWin && entrySnapshot) {
-    // 敗北：ダンジョンで拾った装備とアイテムをロールバック
+    // 敗北：ダンジョンで拾った装備・アイテム・素材をすべてロールバック。
+    // ストレージは入場前から触っていないので据え置き。
     player.inventory = entrySnapshot.inventory;
+    player.materials = entrySnapshot.materials;
     player.weapon    = entrySnapshot.weapon;
     player.armor     = entrySnapshot.armor;
     player.atk       = entrySnapshot.atk;
@@ -2345,7 +2411,8 @@ function autoSave() {
       weapon: player.weapon,
       armor: player.armor,
       inventory: player.inventory,
-      storage:   player.storage ?? [],
+      storage:   player.storage   ?? [],
+      materials: player.materials ?? [],
       gold:       player.gold       ?? 0,
       platinum:   player.platinum   ?? 0,
       scanBudget: player.scanBudget ?? null,
@@ -2362,9 +2429,12 @@ function _applySave(data) {
   // フィールドの取り残しを防ぐため初期化してから上書き
   player = createPlayer();
   Object.assign(player, data.player);
-  // 旧セーブ互換: storage が無いケース
-  if (!Array.isArray(player.storage)) player.storage = [];
+  // 旧セーブ互換: storage / materials が無いケース
+  if (!Array.isArray(player.storage))   player.storage   = [];
+  if (!Array.isArray(player.materials)) player.materials = [];
   if (typeof player.gold !== 'number') player.gold = 0;
+  // 旧セーブで持ち物・ストレージに混ざっていた素材を素材ボックスへ移送
+  _migrateMaterialsFromOldSlots(player);
   // 旧セーブ互換: maxMp / mp が未設定 → レベル相当の値を埋め込み
   if (typeof player.maxMp !== 'number') player.maxMp = statsForLevel(player.level || 1).maxMp;
   if (typeof player.mp    !== 'number') player.mp    = player.maxMp;
@@ -2381,6 +2451,22 @@ function _applySave(data) {
     for (const s of data.clearedSeeds) clearedSet.add(s);
   }
   refreshHUD();
+}
+
+// 旧セーブの素材を持ち物・ストレージから取り出して、新しい素材ボックスへ移動する。
+// 移動後はインベントリ枠が空き、既存ユーザーが「持ち物満杯」になる事故を防げる。
+function _migrateMaterialsFromOldSlots(p) {
+  if (!Array.isArray(p.materials)) p.materials = [];
+  for (const arrName of ['inventory', 'storage']) {
+    const arr = p[arrName];
+    if (!Array.isArray(arr)) continue;
+    for (let i = arr.length - 1; i >= 0; i--) {
+      const it = arr[i];
+      if (it?.type !== 'material') continue;
+      arr.splice(i, 1);
+      _addToList(p.materials, it, null);
+    }
+  }
 }
 
 // 旧属性表記のアイテムを新属性表記にインプレースで書き換える。
