@@ -1026,12 +1026,17 @@ function _executeSkill(skill) {
     hits.push({ m, dmg, matchup });
   }
 
-  dungeonLog(`✨ 技「${skill.name}」発動！ ${hits.length} 体に命中（MP -${skill.mpCost}）`);
+  dungeonLog(`${SKILL_ELEMENT_EMOJI[skill.element] ?? '✨'} 技「${skill.name}」発動！ ${hits.length} 体に命中（MP -${skill.mpCost}）`);
   playSfx('crit');
 
-  // 範囲技 VFX: 全画面フラッシュ + シェイク + 命中マスごとに小爆発を時間差で
-  hitFlash({ color: 'rgba(124,77,255,0.45)' });
+  // 範囲技 VFX: 技の属性カラーを反映する。命中マスごとに爆発、プレイヤー位置に
+  // 魔法陣（属性の色）。これで一目で「なに属性の技を使った」がわかる。
+  const elColor = SKILL_ELEMENT_COLOR[skill.element] ?? '#b070dd';
+  const elColorAlpha = _alphaize(elColor, 0.45);
+  hitFlash({ color: elColorAlpha });
   screenShake(Math.min(14, 6 + hits.length * 2), 350);
+  // プレイヤー中央に技属性の魔法陣（誰が技を放ったかが分かる）
+  magicCircle(playerVfxAnchor(), skill.element);
   const canvas = document.getElementById('dungeon-canvas');
   const cRect  = canvas.getBoundingClientRect();
   const ts     = canvas.width / 11;
@@ -1043,7 +1048,7 @@ function _executeSkill(skill) {
       const sx = cRect.left + tx * ts + ts / 2;
       const sy = cRect.top  + ty * ts + ts / 2;
       const anchor = { left: sx - 18, top: sy - 18, width: 36, height: 36 };
-      explosion(anchor, { color: '#b070dd' });
+      explosion(anchor, { color: elColor });
       if (h.m.hp <= 0) deathBurst(anchor, { color: h.m.rarityColor ?? '#ff7043' });
     }, 60 + i * 70);
   });
@@ -1354,6 +1359,16 @@ const SKILL_ELEMENT_EMOJI = {
   '火': '🔥', '水': '💧', '草': '🌿',
   '雷': '⚡', '光': '✨', '闇': '🌑',
 };
+
+// #rrggbb と alpha (0-1) を rgba(...) 文字列に。VFX の半透明色合成用
+function _alphaize(hex, a) {
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  if (!m) return hex;
+  const r = parseInt(m[1], 16);
+  const g = parseInt(m[2], 16);
+  const b = parseInt(m[3], 16);
+  return `rgba(${r},${g},${b},${a})`;
+}
 function _refreshWazaBar() {
   const bar = document.getElementById('waza-bar');
   if (!bar) return;
