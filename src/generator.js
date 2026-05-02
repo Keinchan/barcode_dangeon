@@ -247,8 +247,8 @@ export function generateFloorItems(dungeonData, floor, rooms) {
   const items     = [];
   const itemLevel = enemyLevel(dungeonData, floor, false);
 
-  // 不思議系巻物：このフロアに 1 個（25% 確率）配置
-  if (rng() <= 0.25 && rooms.length > 2) {
+  // 不思議系巻物：このフロアに 1 個（18% 確率）配置
+  if (rng() <= 0.18 && rooms.length > 2) {
     const room = rooms[1 + Math.floor(rng() * Math.max(1, rooms.length - 2))];
     const scroll = randomMysteryScroll(rng);
     scroll.x = room.x + 1 + Math.floor(rng() * Math.max(1, room.w - 2));
@@ -256,8 +256,8 @@ export function generateFloorItems(dungeonData, floor, rooms) {
     items.push(scroll);
   }
 
-  // 技の書：このフロアに 1 個（15% 確率）配置
-  if (rng() <= 0.15 && rooms.length > 2) {
+  // 技の書：このフロアに 1 個（10% 確率）配置
+  if (rng() <= 0.10 && rooms.length > 2) {
     const room = rooms[1 + Math.floor(rng() * Math.max(1, rooms.length - 2))];
     const book = randomSkillBook(rng, dungeonData.rarityBase.name);
     if (book) {
@@ -267,9 +267,9 @@ export function generateFloorItems(dungeonData, floor, rooms) {
     }
   }
 
-  // 宝箱：このフロアに最大 1 個（25% 確率）。中身は武器 (75%) または防具 (25%)。
+  // 宝箱：このフロアに最大 1 個（18% 確率）。中身は武器 (75%) または防具 (25%)。
   // 装備獲得の主経路をここに集約する（敵からは武器が出ない）。
-  if (rng() <= 0.25 && rooms.length > 2) {
+  if (rng() <= 0.18 && rooms.length > 2) {
     const room = rooms[1 + Math.floor(rng() * Math.max(1, rooms.length - 2))];
     const seed = hashString(`chest:${dungeonData.seed}:${floor}`);
     const code = seed.toString().padStart(13, '0').slice(0, 13);
@@ -292,9 +292,8 @@ export function generateFloorItems(dungeonData, floor, rooms) {
   }
 
   rooms.slice(1, -1).forEach((room, idx) => {
-    // 通常アイテム（出現率 35%）。雑魚エリアでは消耗品中心に絞る
-    // （旧仕様の 70% で武器/防具が氾濫していたのを抑制）
-    if (rng() <= 0.35) {
+    // 通常アイテム（出現率 22%）。床落ち消耗品が多すぎたので段階的に削減
+    if (rng() <= 0.22) {
       const subHash  = hashString(`${dungeonData.barcode}:${floor}:room${idx}`);
       const subCode  = subHash.toString().padStart(13, '0').slice(0, 13);
       // 床落ちは consumable（potion/mpPotion/scroll）に限定。
@@ -309,8 +308,8 @@ export function generateFloorItems(dungeonData, floor, rooms) {
       }
     }
 
-    // ゴールドの山（部屋ごと 40% で出現）。スロットを消費しない即時加算アイテム
-    if (rng() <= 0.4) {
+    // ゴールドの山（部屋ごと 28% で出現）。スロットを消費しない即時加算アイテム
+    if (rng() <= 0.28) {
       const amount = Math.max(8, Math.floor((20 + itemLevel * 4) * (0.7 + rng() * 0.8)));
       let gx = room.x + 1 + Math.floor(rng() * Math.max(1, room.w - 2));
       let gy = room.y + 1 + Math.floor(rng() * Math.max(1, room.h - 2));

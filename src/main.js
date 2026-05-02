@@ -25,7 +25,6 @@ import {
 } from './items.js';
 import { hashString } from './rng.js';
 import { Dungeon } from './dungeon.js';
-import { Battle } from './battle.js';
 import {
   showFloatingDamage, showItemBanner, shockwave, magicCircle, playerVfxAnchor,
   hitFlash, screenShake, deathBurst, sparkSpray, explosion,
@@ -159,8 +158,6 @@ let player       = createPlayer();      // セッション通して維持
 let dungeonData  = null;
 let dungeon      = null;
 let currentFloor = 1;
-let battle       = null;
-let combatActive = false;               // 戦闘中フラグ（インライン化のため screen は dungeon のまま）
 const clearedSet = new Set();
 
 // ダンジョン入場時のスナップショット（敗北時ロールバック用）
@@ -187,9 +184,8 @@ function show(name) {
   _bgmForScreen(name);
 }
 
-// 画面 → BGM のマッピング。combat 中は startBattle 側で battle に切り替える
+// 画面 → BGM のマッピング
 function _bgmForScreen(name) {
-  if (combatActive) return;       // 戦闘中はそちらの BGM を維持
   switch (name) {
     case 'title':    startBgm('title');   break;
     case 'map':      startBgm('map');     break;
@@ -398,10 +394,6 @@ document.getElementById('btn-menu-close').addEventListener('click', () => {
 // ダンジョン画面のメニューボタン
 const btnDungeonMenu = document.getElementById('btn-dungeon-menu');
 btnDungeonMenu.addEventListener('click', () => {
-  if (combatActive) {
-    showAlert('戦闘中はメニューを開けません');
-    return;
-  }
   playSfx('click');
   openMenu();
 });
@@ -943,7 +935,7 @@ function _renderInventoryRow(item, idx) {
   const isEquippable = item.type === 'weapon' || item.type === 'armor';
   const isUsableHere =
     (item.type === 'potion' || item.type === 'mpPotion' || item.type === 'mysteryScroll')
-    && screen === 'dungeon' && !combatActive;
+    && screen === 'dungeon';
   const isLearnable = item.type === 'skillBook';   // 場所問わず学べる
   const hasMainAction = isEquippable || isUsableHere || isLearnable;
   const action =
@@ -1100,9 +1092,45 @@ function _openForgetSkillModal(newSkill, bookIdx) {
   });
 }
 
-// 技を発動（ダンジョン探索中、戦闘パネル中ではなく）
+// 向き [fx, fy] に応じてオフセット [dx, dy] を回転。45° 単位（8 方向）。
+// 「向き」は基準を [0, 1]（下）として、向きベクトルの角度ぶんだけ回転。
+function _rotateOffsetByFacing([dx, dy], [fx, fy]) {
+  const baseAng    = Math.atan2(1, 0);              // 基準: 下向き = π/2
+  const facingAng  = Math.atan2(fy, fx);
+  const delta      = facingAng - baseAng;
+  const cos45 = Math.SQRT1_2;
+  const sin45 = Math.SQRT1_2;
+  // 45° 単位スナップ
+  const snapped = Math.round(delta / (Math.PI / 4)) * (Math.PI / 4);
+  const c = Math.cos(snapped);
+  const s = Math.sin(snapped);
+  // 通常の 2D 回転（誤差吸収のため round）
+  const rx = dx * c - dy * s;
+  const ry = dx * s + dy * c;
+  return [Math.round(rx), Math.round(ry)];
+}
+
+function _facingRotatedOffsets(pattern, facing) {
+  const base = PATTERN_OFFSETS[pattern] ?? [];
+  // B / D は元から放射状なので回転しても見た目同じ
+  if (pattern === 'B' || pattern === 'D') return base;
+  if (!facing || (facing[0] === 0 && facing[1] === 0)) return base;
+  // 重複除去
+  const seen = new Set();
+  const out  = [];
+  for (const off of base) {
+    const r = _rotateOffsetByFacing(off, facing);
+    const k = `${r[0]},${r[1]}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(r);
+  }
+  return out;
+}
+
+// 技を発動（ダンジョン探索中。向きに合わせてパターンを回転して発射）
 function _executeSkill(skill) {
-  if (!dungeon || screen !== 'dungeon' || combatActive) {
+  if (!dungeon || screen !== 'dungeon') {
     showAlert('技はダンジョン探索中にだけ使えます');
     return;
   }
@@ -1112,7 +1140,8 @@ function _executeSkill(skill) {
   }
   player.mp = Math.max(0, (player.mp ?? 0) - skill.mpCost);
 
-  const offsets = PATTERN_OFFSETS[skill.pattern] ?? [];
+  const facing = dungeon.playerPos.facing ?? [0, 1];
+  const offsets = _facingRotatedOffsets(skill.pattern, facing);
   const px = dungeon.playerPos.x;
   const py = dungeon.playerPos.y;
   const hits = [];
@@ -1473,7 +1502,13 @@ document.getElementById('btn-shop-attack').addEventListener('click', async () =>
   document.getElementById('shop-modal').classList.add('hidden');
   const target = _currentShopkeeper;
   _currentShopkeeper = null;
-  startBattle(target);
+  // 敵対化：以後はバンプ近接攻撃の対象になり、敵 AI も動く。在庫は撃破時に
+  // _handleMonsterDefeated 側で getShopStock() 経由で床にぶちまく
+  target.isShopkeeper = false;
+  target.hostile      = true;
+  dungeonLog(`💢 ${target.name} は敵意をあらわにした！`, { rarity: 'レジェンド' });
+  // 商人がプレイヤーの隣にいることが多い。即時に 1 撃殴る形にしてテンポ維持
+  _bumpMeleeAttack(target);
 });
 
 // 技クイックバー描画：4 スロットに player.skills を順番にバインド。
@@ -1522,7 +1557,7 @@ function _refreshWazaBar() {
     const emoji = SKILL_ELEMENT_EMOJI[sk.element] ?? '✨';
     const lowMp = (player.mp ?? 0) < sk.mpCost;
     btn.classList.toggle('lowmp', lowMp);
-    btn.disabled = lowMp || combatActive || screen !== 'dungeon';
+    btn.disabled = lowMp || screen !== 'dungeon';
     btn.style.borderColor = color;
     btn.style.background  = `linear-gradient(180deg, ${color}33 0%, ${color}11 100%)`;
     btn.style.color       = color;
@@ -1542,7 +1577,7 @@ function _refreshWazaBar() {
 // モーダルは「技スロットを並び替える/詳細を見たい」時用に残しても良いが
 // 現状は不要なので関数だけ残しておく（将来の slot 編集 UI へ転用予定）
 function _openWazaModal() {
-  if (!dungeon || screen !== 'dungeon' || combatActive) {
+  if (!dungeon || screen !== 'dungeon') {
     showAlert('技はダンジョン探索中にだけ使えます'); return;
   }
   const skills = Array.isArray(player.skills) ? player.skills : [];
@@ -1585,7 +1620,7 @@ document.getElementById('btn-waza-cancel').addEventListener('click', () => {
 function _useMysteryScrollFromInventory(idx) {
   const item = player.inventory[idx];
   if (!item || item.type !== 'mysteryScroll') return;
-  if (!dungeon || screen !== 'dungeon' || combatActive) {
+  if (!dungeon || screen !== 'dungeon') {
     showAlert('巻物はダンジョン探索中にしか使えません');
     return;
   }
@@ -1791,10 +1826,6 @@ function _acquireItem(item) {
 // ダンジョン
 // ─────────────────────────────────────────────
 function enterDungeon(data) {
-  // 戦闘UIを必ずリセット（デバッグ操作で途中離脱した場合の保険）
-  combatActive = false;
-  battle       = null;
-  document.getElementById('combat-panel').classList.add('hidden');
   document.getElementById('dungeon-footer').classList.remove('hidden');
 
   dungeonData  = data;
@@ -1914,58 +1945,76 @@ function _celebratePickup(item, action = '入手') {
   }
 }
 
-// ── 移動 ──
+// ── 移動（2 段階：向き変更 → 同方向で前進）──
+//   - 待機 (0,0): その場で 1 ターン経過（向きは変えない）
+//   - 入力方向と現在の向きが違う: 向きだけ変更、ターンは経過しない
+//   - 入力方向と現在の向きが同じ: 1 マス前進（敵がいれば近接攻撃、壁越しは魔法）
 function move(dx, dy) {
-  if (!dungeon || screen !== 'dungeon' || combatActive) return;
+  if (!dungeon || screen !== 'dungeon') return;
 
-  // 移動 or 待機の処理
-  if (dx !== 0 || dy !== 0) {
-    const px = dungeon.playerPos.x;
-    const py = dungeon.playerPos.y;
-    const nx = px + dx;
-    const ny = py + dy;
+  // 待機: その場で敵ターンを進める
+  if (dx === 0 && dy === 0) {
+    _runEnemyTurn();
+    return;
+  }
 
-    // 斜め移動の壁抜け禁止：縦横どちらか1つでも壁ならその角の斜めへは進めない
-    if (dx !== 0 && dy !== 0) {
-      const sideX = dungeon.canWalk(px + dx, py);
-      const sideY = dungeon.canWalk(px, py + dy);
-      if (!sideX || !sideY) {
-        // 壁の角越しに敵がいれば、戦闘パネルを開く（壁越しの戦闘＝魔法のみ）
-        const mob = dungeon.monsterAt(nx, ny);
-        if (mob && dungeon.canWalk(nx, ny)) {
-          startBattle(mob, { wallPiercing: true });
-        }
-        return;
-      }
-    }
+  const facing = dungeon.playerPos.facing ?? [0, 1];
+  const sameDir = facing[0] === dx && facing[1] === dy;
+  if (!sameDir) {
+    // 向きを変えるだけ。敵ターンは進めない（1 アクションを「向く」だけで消費しない）
+    dungeon.playerPos.facing = [dx, dy];
+    dungeon.render(document.getElementById('dungeon-canvas'));
+    return;
+  }
 
-    if (!dungeon.canWalk(nx, ny)) return;
+  const px = dungeon.playerPos.x;
+  const py = dungeon.playerPos.y;
+  const nx = px + dx;
+  const ny = py + dy;
 
-    const mob = dungeon.monsterAt(nx, ny);
-    if (mob) {
-      // 商人マスへ進入 → 戦闘ではなく購入モーダル
-      if (mob.isShopkeeper) {
-        _openShopModal(mob);
-        return;
-      }
-      startBattle(mob); return;
-    }   // 戦闘パネル発動 → 敵ターン無し
-
-    dungeon.playerPos = { x: nx, y: ny };
-
-    const floorItem = dungeon.itemAt(nx, ny);
-    if (floorItem) pickupItem(floorItem);
-
-    if (dungeon.atStairs(nx, ny)) {
-      playSfx('stairs');
-      if (currentFloor >= dungeonData.floors) {
-        dungeonClear();
-      } else {
-        dungeonLog(`B${currentFloor + 1}F へ降りた`);
-        loadFloor(currentFloor + 1);
+  // 斜め移動の壁抜け禁止：縦横どちらか1つでも壁なら斜めへは進めない
+  if (dx !== 0 && dy !== 0) {
+    const sideX = dungeon.canWalk(px + dx, py);
+    const sideY = dungeon.canWalk(px, py + dy);
+    if (!sideX || !sideY) {
+      // 壁の角越しに敵がいる場合は遠隔魔法で殴る（旧 wallPiercing 戦闘の代替）
+      const mob = dungeon.monsterAt(nx, ny);
+      if (mob && dungeon.canWalk(nx, ny)) {
+        _wallPiercingAttack(mob);
       }
       return;
     }
+  }
+
+  if (!dungeon.canWalk(nx, ny)) return;
+
+  const mob = dungeon.monsterAt(nx, ny);
+  if (mob) {
+    // 商人マスへ進入 → 戦闘ではなく購入モーダル
+    if (mob.isShopkeeper) {
+      _openShopModal(mob);
+      return;
+    }
+    // バンプ近接攻撃（戦闘パネルは無し）。1 撃で倒せなければ敵ターン
+    _bumpMeleeAttack(mob);
+    return;
+  }
+
+  dungeon.playerPos.x = nx;
+  dungeon.playerPos.y = ny;
+
+  const floorItem = dungeon.itemAt(nx, ny);
+  if (floorItem) pickupItem(floorItem);
+
+  if (dungeon.atStairs(nx, ny)) {
+    playSfx('stairs');
+    if (currentFloor >= dungeonData.floors) {
+      dungeonClear();
+    } else {
+      dungeonLog(`B${currentFloor + 1}F へ降りた`);
+      loadFloor(currentFloor + 1);
+    }
+    return;
   }
 
   _runEnemyTurn();
@@ -2142,7 +2191,7 @@ document.querySelectorAll('.dpad-btn').forEach(btn => {
 
 // キーボード（PC確認用、8方向対応 + 技クイックバー 1〜4）
 document.addEventListener('keydown', e => {
-  if (screen !== 'dungeon' || combatActive) return;
+  if (screen !== 'dungeon') return;
   // 1〜4 で技スロットを発動（PC からのデバッグ動作確認用）
   if (e.key === '1' || e.key === '2' || e.key === '3' || e.key === '4') {
     const idx = parseInt(e.key, 10) - 1;
@@ -2166,7 +2215,7 @@ canvas.addEventListener('touchstart', e => {
   touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
 }, { passive: true });
 canvas.addEventListener('touchend', e => {
-  if (!touchStart || combatActive) return;
+  if (!touchStart) return;
   const dx = e.changedTouches[0].clientX - touchStart.x;
   const dy = e.changedTouches[0].clientY - touchStart.y;
   const adx = Math.abs(dx);
@@ -2191,129 +2240,158 @@ canvas.addEventListener('touchend', e => {
 }, { passive: true });
 
 // ─────────────────────────────────────────────
-// バトル
+// バトル（インライン化：戦闘パネルは廃止し、ダンジョン上で全完結）
+//   ・近接バンプ攻撃: 敵マスに向かって 1 マス前進すると 1 撃殴る
+//   ・壁越し攻撃:     斜め隣で壁角越しにいる敵に弱魔法を当てる（無 MP）
+//   ・技:             方向キーで向きを決め、技ボタンで向きに合わせて発射
 // ─────────────────────────────────────────────
-function startBattle(mob, opts = {}) {
-  // 戦闘モードに切替（screen は dungeon のままインライン化）
-  combatActive = true;
-  document.getElementById('dungeon-footer').classList.add('hidden');
-  document.getElementById('combat-panel').classList.remove('hidden');
-  // クイックバーは戦闘中は disabled（探索中の技なので意味がない）
-  _refreshWazaBar();
 
-  // ボス遭遇は専用 SFX、その後バトル BGM へ
-  if (mob.isBoss) playSfx('boss');
-  startBgm('battle');
+// 共通：撃破処理（XP・ドロップ・ボスならクリア）。Battle.onEnd の win 分岐の流用
+function _handleMonsterDefeated(mob) {
+  dungeon.removeMonster(mob);
 
-  battle = new Battle(player, mob, (result /*, defeated (cloneのため使わない) */) => {
-    // 戦闘終了：探索モードに復帰
-    combatActive = false;
-    document.getElementById('combat-panel').classList.add('hidden');
-    document.getElementById('dungeon-footer').classList.remove('hidden');
-    _refreshWazaBar();   // 探索復帰時にクイックバーも再活性化
+  // 商人撃破: 在庫を全て床にぶちまける + 大量ゴールド
+  if (mob.isShopkeeper || dungeon.shopkeeperToStock?.has(mob)) {
+    const stock = dungeon.getShopStock(mob);
+    const placed = [];
+    for (const entry of stock) {
+      const it = { ...entry.item, x: mob.x, y: mob.y };
+      for (const [dx, dy] of [[0,0],[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,-1],[1,-1],[-1,1]]) {
+        const tx = mob.x + dx, ty = mob.y + dy;
+        if (!dungeon.canWalk(tx, ty)) continue;
+        if (placed.some(p => p.x === tx && p.y === ty)) continue;
+        it.x = tx; it.y = ty;
+        placed.push(it);
+        break;
+      }
+      dungeon.floorItems.push(it);
+    }
+    dungeon.shopkeeperToStock?.delete(mob);
+    const bonus = 500 + (mob.level ?? 30) * 30;
+    player.gold = (player.gold ?? 0) + bonus;
+    dungeonLog(`💰 商人を撃破！ ${bonus} ゴールドと在庫すべてが床に...`, { rarity: 'レジェンド' });
+  }
 
-    player.hp  = battle.player.hp;
-    player.mp  = battle.player.mp ?? player.mp;
-    player.atk = battle.player.atk;
-    player.def = battle.player.def;
+  gainXp(_xpFromMonster(mob));
+
+  const gold = rollGoldDropFromMonster(mob);
+  if (gold > 0) {
+    if (mob.isBoss) {
+      player.gold = (player.gold ?? 0) + gold;
+      dungeonLog(`🪙 ${mob.name} から ${gold} ゴールドを得た`);
+      refreshHUD();
+    } else {
+      const goldItem = makeGoldFloorItem(gold);
+      goldItem.x = mob.x; goldItem.y = mob.y;
+      dungeon.floorItems.push(goldItem);
+      dungeonLog(`🪙 ${mob.name} は ${gold} ゴールドを落とした`);
+    }
+  }
+
+  const mat = _rollMaterialDrop(mob);
+  if (mat) _autoCollectDrop(mat);
+
+  const drop = _rollMonsterDrop(mob);
+  if (drop) {
+    if (mob.isBoss) {
+      _autoCollectDrop(drop);
+    } else {
+      drop.x = mob.x; drop.y = mob.y;
+      dungeon.floorItems.push(drop);
+      dungeonLog(`💎 ${mob.name} は ${drop.name} を落とした！`, { rarity: drop.rarity });
+      playSfx('drop', { rarityTier: rarityTier(drop.rarity) });
+      _celebratePickup(drop, 'ドロップ');
+    }
+  } else {
+    dungeonLog(`${mob.name} を倒した！`);
+  }
+
+  if (mob.isBoss) {
+    dungeonClear();
+  }
+}
+
+// 敵マス座標 → スクリーンアンカー（VFX 用）
+function _enemyAnchor(mob) {
+  return _mobScreenAnchor(mob);
+}
+
+// 物理バンプ近接攻撃。単発打撃 → 命中 VFX → 死亡判定 → 敵ターン
+function _bumpMeleeAttack(mob) {
+  const matchup = elementMatchup(player.weapon?.element, mob.element);
+  const base = Math.max(1, player.atk - mob.def);
+  const roll = 1 + Math.floor(Math.random() * Math.ceil(base * 0.4));
+  const dmg  = Math.floor((base + roll) * matchup);
+  const isCrit      = dmg >= Math.max(2, Math.floor((player.atk - mob.def) * 1.4 * matchup));
+  const isEffective = matchup >= 1.5;
+  const isWeak      = matchup <= 0.7;
+  mob.hp = Math.max(0, mob.hp - dmg);
+  const matchLbl = matchupLabel(matchup);
+  dungeonLog(`⚔️ ${mob.name} に ${dmg} ダメージ${matchLbl ? '　' + matchLbl : ''}`);
+
+  const enemyAt = _enemyAnchor(mob);
+  const elColor = SKILL_ELEMENT_COLOR[player.weapon?.element] ?? null;
+  const playerAt = playerVfxAnchor();
+  if (enemyAt && playerAt) attackTrail(playerAt, enemyAt, { color: elColor ?? '#ffd54f' });
+  const dmgKind = isCrit ? 'crit' : isEffective ? 'effective' : isWeak ? 'weak' : 'normal';
+  if (enemyAt) showDamageAt(enemyAt, dmg, { kind: dmgKind });
+  playSfx(isCrit ? 'crit' : 'hit');
+  if (isCrit) {
+    hitFlash({ color: 'rgba(255,213,79,0.55)' });
+    screenShake(10, 320);
+    if (enemyAt) explosion(enemyAt, { color: elColor ?? '#ff7043' });
+    if (enemyAt) sparkSpray(enemyAt, { count: 18, color: '#fff' });
+  } else if (isEffective) {
+    screenShake(5, 200);
+    if (enemyAt) sparkSpray(enemyAt, { color: elColor ?? '#ffd54f', count: 14 });
+  } else if (enemyAt) {
+    sparkSpray(enemyAt, { color: elColor ?? '#ffd54f', count: 10 });
+  }
+
+  if (mob.hp <= 0) {
+    if (enemyAt) deathBurst(enemyAt, { color: mob.rarityColor ?? '#ff7043' });
+    _handleMonsterDefeated(mob);
     refreshHUD();
+    if (!mob.isBoss) requestAnimationFrame(() => dungeon.render(document.getElementById('dungeon-canvas')));
+    return;
+  }
 
-    // 通常勝利・逃走時はダンジョンBGMに戻す（ボス勝利は dungeonClear 経由で result 画面）
-    if (result !== 'lose' && !(result === 'win' && mob.isBoss)) {
-      startBgm('dungeon');
-    }
+  refreshHUD();
+  dungeon.render(document.getElementById('dungeon-canvas'));
+  _runEnemyTurn();
+}
 
-    if (result === 'win') {
-      // 元のmobリファレンスで確実に削除（cloneのdefeatedではindexOf不一致）
-      dungeon.removeMonster(mob);
-      // 商人撃破: 在庫を全て床にぶちまける + 大量ゴールド
-      if (mob.isShopkeeper) {
-        const stock = dungeon.getShopStock(mob);
-        const placed = [];
-        for (const entry of stock) {
-          const it = { ...entry.item, x: mob.x, y: mob.y };
-          // 周囲 8 マスを埋めながら配置（壁/他mob を避ける）
-          for (const [dx, dy] of [[0,0],[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,-1],[1,-1],[-1,1]]) {
-            const tx = mob.x + dx, ty = mob.y + dy;
-            if (!dungeon.canWalk(tx, ty)) continue;
-            if (placed.some(p => p.x === tx && p.y === ty)) continue;
-            it.x = tx; it.y = ty;
-            placed.push(it);
-            break;
-          }
-          dungeon.floorItems.push(it);
-        }
-        dungeon.shopkeeperToStock?.delete(mob);
-        // 巨額ゴールドのボーナス
-        const bonus = 500 + (mob.level ?? 30) * 30;
-        player.gold = (player.gold ?? 0) + bonus;
-        dungeonLog(`💰 商人を撃破！ ${bonus} ゴールドと在庫すべてが床に...`, { rarity: 'レジェンド' });
-      }
-      // XP獲得
-      gainXp(_xpFromMonster(mob));
-      // ゴールドドロップ：床に金貨アイテムとして落とす（拾わないと取れない）。
-      // ボスは確定で発生、雑魚は rollGoldDropFromMonster の中で 50% に間引き済み。
-      // ボスは離脱するので即時取得、雑魚は床に置いて拾わせる。
-      const gold = rollGoldDropFromMonster(mob);
-      if (gold > 0) {
-        if (mob.isBoss) {
-          player.gold = (player.gold ?? 0) + gold;
-          dungeonLog(`🪙 ${mob.name} から ${gold} ゴールドを得た`);
-          refreshHUD();
-        } else {
-          const goldItem = makeGoldFloorItem(gold);
-          goldItem.x = mob.x; goldItem.y = mob.y;
-          dungeon.floorItems.push(goldItem);
-          dungeonLog(`🪙 ${mob.name} は ${gold} ゴールドを落とした`);
-        }
-      }
-      // 素材ドロップ（装備ドロップとは独立）
-      const mat = _rollMaterialDrop(mob);
-      if (mat) {
-        _autoCollectDrop(mat);
-      }
-      // ドロップ判定
-      const drop = _rollMonsterDrop(mob);
-      if (drop) {
-        if (mob.isBoss) {
-          // ボスは即 dungeonClear で離脱するためフロアに置けない。直接取得し、
-          // インベントリ満杯ならストレージに自動退避（永久消失を防ぐ）。
-          _autoCollectDrop(drop);
-        } else {
-          drop.x = mob.x;
-          drop.y = mob.y;
-          dungeon.floorItems.push(drop);
-          dungeonLog(`💎 ${mob.name} は ${drop.name} を落とした！`, { rarity: drop.rarity });
-          playSfx('drop', { rarityTier: rarityTier(drop.rarity) });
-          _celebratePickup(drop, 'ドロップ');
-        }
-      } else {
-        dungeonLog(`${mob.name} を倒した！`);
-      }
-      if (mob.isBoss) {
-        dungeonClear();
-      } else {
-        requestAnimationFrame(() => dungeon.render(document.getElementById('dungeon-canvas')));
-      }
-    } else if (result === 'lose') {
-      showResult(false);
-    } else if (result === 'run') {
-      dungeonLog('逃げた！');
-      requestAnimationFrame(() => dungeon.render(document.getElementById('dungeon-canvas')));
-    }
-  }, {
-    ...opts,
-    dungeon,                       // 戦闘中に他敵をティックさせる
-    mobRef: mob,                   // ティックから除外する戦闘中 mob
-    onTick: () => {                // 他敵が動いた後の再描画
-      dungeon.render(document.getElementById('dungeon-canvas'));
-    },
-  });
-  document.getElementById('battle-log').innerHTML = '';
-  battle.updateUI();
+// 壁角越しの斜めバンプ → 弱体魔法（無 MP）。プレイヤーは移動しない
+function _wallPiercingAttack(mob) {
+  const matchup = elementMatchup(player.weapon?.element, mob.element);
+  const base = Math.max(1, Math.floor(player.atk * 0.6) - mob.def);
+  const dmg = Math.max(1, Math.floor((base + Math.floor(Math.random() * Math.max(1, base * 0.4))) * matchup));
+  mob.hp = Math.max(0, mob.hp - dmg);
+  const matchLbl = matchupLabel(matchup);
+  dungeonLog(`✨ 壁越しの魔弾！ ${mob.name} に ${dmg} ダメージ${matchLbl ? '　' + matchLbl : ''}`);
 
-  // 戦闘パネルが表示・レイアウト確定された後に canvas を再サイズして再描画
-  requestAnimationFrame(() => dungeon.render(document.getElementById('dungeon-canvas')));
+  const enemyAt = _enemyAnchor(mob);
+  const playerAt = playerVfxAnchor();
+  const elColor = SKILL_ELEMENT_COLOR[player.weapon?.element] ?? '#b070dd';
+  if (enemyAt && playerAt) attackTrail(playerAt, enemyAt, { color: elColor });
+  if (enemyAt) {
+    magicCircle(enemyAt, player.weapon?.element ?? '闇');
+    setTimeout(() => explosion(enemyAt, { color: elColor }), 200);
+    showDamageAt(enemyAt, dmg, { kind: matchup >= 1.5 ? 'effective' : 'normal' });
+  }
+  playSfx('hit');
+
+  if (mob.hp <= 0) {
+    if (enemyAt) deathBurst(enemyAt, { color: mob.rarityColor ?? '#ff7043' });
+    _handleMonsterDefeated(mob);
+    refreshHUD();
+    if (!mob.isBoss) requestAnimationFrame(() => dungeon.render(document.getElementById('dungeon-canvas')));
+    return;
+  }
+
+  refreshHUD();
+  dungeon.render(document.getElementById('dungeon-canvas'));
+  _runEnemyTurn();
 }
 
 // 画面サイズ変動時にも canvas を追従させる
@@ -2364,57 +2442,10 @@ function _rollMonsterDrop(mob) {
   return generateItemFromBarcode(adjusted, rarityOverride, itemLevel);
 }
 
-document.getElementById('btn-attack').addEventListener('click', () => battle?.attack());
-document.getElementById('btn-skill' ).addEventListener('click', () => battle?.skill());
-document.getElementById('btn-run'   ).addEventListener('click', () => battle?.run());
-
-// アイテムボタン → モーダル表示
-document.getElementById('btn-item').addEventListener('click', () => {
-  showItemModal();
-});
-
-document.getElementById('btn-item-cancel').addEventListener('click', () => {
-  document.getElementById('item-modal').classList.add('hidden');
-});
-
-function showItemModal() {
-  const list = document.getElementById('item-list');
-
-  if (player.inventory.length === 0) {
-    list.innerHTML = '<div style="text-align:center;color:#888;padding:12px">アイテムを持っていない</div>';
-  } else {
-    list.innerHTML = player.inventory.map((it, idx) => {
-      const canUse = it.type === 'potion' || it.type === 'mpPotion' || it.type === 'scroll';
-      const lvHtml = it.level ? `<span class="menu-row-lv">Lv${it.level}</span>` : '';
-      const cnt    = (isStackable(it) && (it.count ?? 1) > 1) ? `<span class="menu-row-count">×${it.count}</span>` : '';
-      return `
-        <div class="item-row${canUse ? '' : ' disabled'}" data-idx="${idx}">
-          <span class="item-emoji">${iconImg(it, 32)}</span>
-          <div class="item-info">
-            <div class="item-name">${it.name} ${lvHtml} ${cnt}</div>
-            <div class="item-desc">${it.desc}</div>
-          </div>
-          <span class="item-rarity" style="color:${it.rarityColor}">${it.rarity}</span>
-        </div>`;
-    }).join('');
-
-    list.querySelectorAll('.item-row:not(.disabled)').forEach(row => {
-      row.addEventListener('click', () => {
-        const idx  = parseInt(row.dataset.idx, 10);
-        const item = takeOneFromInventory(idx);
-        if (!item) return;
-        document.getElementById('item-modal').classList.add('hidden');
-        // battle 内では this.player.inventory が clone され同一参照。
-        // takeOneFromInventory が player.inventory を変更したので battle 側にも
-        // 反映させる必要がある（戦闘終了時に inventory を書き戻していないため）
-        battle.player.inventory = player.inventory;
-        battle.useItem(item);
-      });
-    });
-  }
-
-  document.getElementById('item-modal').classList.remove('hidden');
-}
+// 旧戦闘パネルの 4 ボタン（こうげき/スキル/アイテム/にげる）は廃止。
+// 代わりに：方向キーで向き → 同方向で前進（敵に当たればバンプ近接）、
+// 1〜4 キー or わざバーで技を発射（向きに合わせて回転）。
+// アイテム使用は街/メニューから（ダンジョン内では持ち物 → 使う）。
 
 // ─────────────────────────────────────────────
 // クリア / ゲームオーバー
@@ -2684,10 +2715,6 @@ if (DEBUG) {
 
   // モックスキャン
   document.getElementById('debug-mock-scan').addEventListener('click', () => {
-    if (combatActive) {
-      showAlert('戦闘中はスキャンできません（戦闘を終わらせてください）');
-      return;
-    }
     if (screen === 'dungeon') {
       showAlert('ダンジョン内ではスキャンできません（マップに戻ってから）');
       return;
@@ -2750,7 +2777,7 @@ if (DEBUG) {
 
   // 隣接敵を即時撃破（ドロップ判定は通る）
   document.getElementById('debug-kill-adj').addEventListener('click', () => {
-    if (!dungeon || screen !== 'dungeon' || combatActive) {
+    if (!dungeon || screen !== 'dungeon') {
       showAlert('ダンジョン探索中のみ実行可能です');
       return;
     }

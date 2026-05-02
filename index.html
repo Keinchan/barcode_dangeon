@@ -125,54 +125,6 @@
       </div>
     </div>
 
-    <!-- 戦闘中パネル：敵情報・自HP・ログ・行動ボタン -->
-    <div class="combat-panel hidden" id="combat-panel">
-      <div class="combat-enemy">
-        <div class="combat-enemy-row">
-          <span id="enemy-sprite" class="enemy-sprite-mini">❓</span>
-          <div class="combat-enemy-text">
-            <div id="enemy-name" class="combat-enemy-name">???</div>
-            <div class="enemy-meta">
-              <span id="enemy-rarity">[コモン]</span>
-              <span id="enemy-element">火属性</span>
-            </div>
-          </div>
-        </div>
-        <div class="hp-bar-wrap"><div id="enemy-hp-bar" class="hp-bar" style="width:100%"></div></div>
-        <div id="enemy-stat-text"></div>
-      </div>
-
-      <div class="combat-player">
-        <div class="combat-player-row">
-          <span>🧙 自分</span>
-          <span id="battle-player-hp">HP 35/35</span>
-        </div>
-        <div class="hp-bar-wrap"><div id="battle-player-hp-bar" class="hp-bar" style="width:100%"></div></div>
-        <div class="combat-player-row" style="margin-top:4px">
-          <span style="font-size:12px;color:#9adfff">💧 MP</span>
-          <span id="battle-player-mp" style="font-size:12px;color:#9adfff">MP 20/20</span>
-        </div>
-        <div class="hp-bar-wrap"><div id="battle-player-mp-bar" class="hp-bar" style="width:100%;background:#4dc4ff"></div></div>
-      </div>
-
-      <div id="battle-log" class="battle-log"></div>
-      <div class="battle-buttons">
-        <button class="btn-battle" id="btn-attack">⚔️ こうげき</button>
-        <button class="btn-battle" id="btn-skill">✨ スキル</button>
-        <button class="btn-battle" id="btn-item">🎒 アイテム</button>
-        <button class="btn-battle" id="btn-run">🏃 にげる</button>
-      </div>
-    </div>
-
-    <!-- アイテム選択モーダル -->
-    <div id="item-modal" class="modal hidden">
-      <div class="modal-box">
-        <div class="modal-title">アイテムを使う</div>
-        <div id="item-list"></div>
-        <button id="btn-item-cancel" class="btn-back">キャンセル</button>
-      </div>
-    </div>
-
     <!-- 技選択モーダル（わざボタン押下） -->
     <div id="waza-modal" class="modal hidden">
       <div class="modal-box">
