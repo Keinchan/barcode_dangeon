@@ -17,7 +17,9 @@ export class Dungeon {
     this.monsters   = [];
     this.floorItems = [];
     this.rooms      = [];
-    this.playerPos  = { x: 2, y: 2 };
+    // facing: [dx, dy]。プレイヤーが向いている方向。技の発射方向 / 2 段階移動の
+    // 「確定方向」を兼ねる。new Dungeon の度（フロア境界）に下向きでリセット
+    this.playerPos  = { x: 2, y: 2, facing: [0, 1] };
     this.stairsPos  = null;
     this.discovered = Array.from({ length: H }, () => new Uint8Array(W));
     this.visible    = new Set();
@@ -40,7 +42,7 @@ export class Dungeon {
     }
 
     const c0 = this._center(rooms[0]);
-    this.playerPos = { x: c0.x, y: c0.y };
+    this.playerPos = { x: c0.x, y: c0.y, facing: [0, 1] };
 
     const cl = this._center(rooms[rooms.length - 1]);
     this.stairsPos = { x: cl.x, y: cl.y };
@@ -378,11 +380,8 @@ export class Dungeon {
     const VIEW = 11;
     const half = Math.floor(VIEW / 2);
     const header  = document.querySelector('#screen-dungeon .dungeon-header');
-    const combat  = document.getElementById('combat-panel');
     const explore = document.getElementById('dungeon-footer');
-    const visibleFooter =
-      combat  && !combat.classList .contains('hidden') ? combat  :
-      explore && !explore.classList.contains('hidden') ? explore : null;
+    const visibleFooter = explore && !explore.classList.contains('hidden') ? explore : null;
 
     const headerH = header?.offsetHeight ?? 60;
     const footerH = visibleFooter?.offsetHeight ?? 200;
@@ -536,6 +535,34 @@ export class Dungeon {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('🧙', half * ts + ts / 2, half * ts + ts / 2);
+
+    // 向きインジケータ：技の発射方向と移動の確定方向を兼ねる「向き」を矢印で表示。
+    // playerPos.facing = [fx, fy] (-1,0,1 のいずれか) を main.js が更新する想定
+    const facing = this.playerPos.facing;
+    if (facing && (facing[0] !== 0 || facing[1] !== 0)) {
+      const cx = half * ts + ts / 2;
+      const cy = half * ts + ts / 2;
+      const r  = ts * 0.42;
+      const tipX = cx + facing[0] * r;
+      const tipY = cy + facing[1] * r;
+      const ang  = Math.atan2(facing[1], facing[0]);
+      const wing = ts * 0.18;
+      const ax1 = tipX - Math.cos(ang - 0.5) * wing;
+      const ay1 = tipY - Math.sin(ang - 0.5) * wing;
+      const ax2 = tipX - Math.cos(ang + 0.5) * wing;
+      const ay2 = tipY - Math.sin(ang + 0.5) * wing;
+      ctx.beginPath();
+      ctx.moveTo(tipX, tipY);
+      ctx.lineTo(ax1, ay1);
+      ctx.lineTo(ax2, ay2);
+      ctx.closePath();
+      ctx.fillStyle = '#ffd54f';
+      ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+      ctx.lineWidth = 1.5;
+      ctx.fill();
+      ctx.stroke();
+      ctx.lineWidth = 1;
+    }
 
     // ミニマップ
     const mini = document.getElementById('minimap');
