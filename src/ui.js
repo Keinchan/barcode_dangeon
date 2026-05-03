@@ -441,14 +441,58 @@ function _toCenterPoint(target) {
 //   呼び出し側は技の属性カラーと「マス幅 (tileSize)」を渡す。
 //   playerCenter = { x, y } はプレイヤーの画面中心（canvas 内中央）。
 // ─────────────────────────────────────────────
-export function showSkillPatternVfx(pattern, playerCenter, tileSize, color = '#b070dd') {
+export function showSkillPatternVfx(pattern, playerCenter, tileSize, color = '#b070dd', opts = {}) {
   switch (pattern) {
     case 'A': _vfxCrossSlash (playerCenter, tileSize, color); break;
     case 'B': _vfxOmniSweep  (playerCenter, tileSize, color); break;
     case 'C': _vfxFourBeams  (playerCenter, tileSize, color); break;
     case 'D': _vfxBigAoeRing (playerCenter, tileSize, color); break;
+    case 'E': _vfxLongBeam   (playerCenter, tileSize, color, opts.facing ?? [0, 1]); break;
+    case 'F': _vfxRoomFlash  (playerCenter, tileSize, color); break;
     default:  _vfxOmniSweep  (playerCenter, tileSize, color);
   }
+}
+
+// E 型: 正面方向に伸びる長尺ビーム（C 型の 4 方向版に対し 1 方向で長い）。
+// facing は dungeon の playerPos.facing をそのまま渡す ([dx, dy] / 8 方向)。
+function _vfxLongBeam(c, ts, color, facing) {
+  const fx = facing[0];
+  const fy = facing[1];
+  if (fx === 0 && fy === 0) return;
+  const len = ts * 6.4;
+  // 角度: 基準は右方向（rotate 0deg = ベース向き）。faceing [1,0] → 0deg, [0,1] → 90deg
+  const ang = Math.atan2(fy, fx) * 180 / Math.PI;
+  const offX = Math.cos(ang * Math.PI / 180) * (len / 2 + ts * 0.3);
+  const offY = Math.sin(ang * Math.PI / 180) * (len / 2 + ts * 0.3);
+  const el = document.createElement('div');
+  el.className = 'vfx-beam';
+  el.style.left = (c.x + offX) + 'px';
+  el.style.top  = (c.y + offY) + 'px';
+  el.style.width  = len + 'px';
+  el.style.height = (ts * 0.30) + 'px';
+  el.style.background = `linear-gradient(90deg, transparent 0%, ${color} 30%, #fff 50%, ${color} 70%, transparent 100%)`;
+  el.style.boxShadow = `0 0 18px ${color}, 0 0 36px ${color}`;
+  el.style.transform = `translate(-50%,-50%) rotate(${ang}deg)`;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 560);
+}
+
+// F 型: 部屋全体を覆う色付きフラッシュ + 大型 AoE リング（部屋掃除感）。
+function _vfxRoomFlash(c, ts, color) {
+  // 画面全体の薄い色フラッシュ（hitFlash と同じ系統だが色を技色に）
+  const flash = document.createElement('div');
+  flash.className = 'vfx-hitflash';
+  flash.style.background = color.replace(/^#/, 'rgba(') ; // fallback
+  // 確実に色を出すため inline で alpha 付きの色を作る
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(color);
+  if (m) {
+    const r = parseInt(m[1], 16), g = parseInt(m[2], 16), b = parseInt(m[3], 16);
+    flash.style.background = `rgba(${r},${g},${b},0.40)`;
+  }
+  document.body.appendChild(flash);
+  setTimeout(() => flash.remove(), 220);
+  // 大型 AoE リング（D 型の流用、より大きく）
+  _vfxBigAoeRing(c, ts * 1.25, color);
 }
 
 // 十字スラッシュ：上下左右に 4 つのスラッシュ片（細長矩形）を伸ばす
