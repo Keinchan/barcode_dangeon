@@ -68,6 +68,7 @@ import {
 } from './audio.js';
 import { getItemIconUrl } from './icons.js';
 import { showAlert, showConfirm } from './dialog.js';
+import { MINION_LIBRARY, makeMinion } from './minions.js';
 import {
   ensureScanBudget,
   getScanStatus,
@@ -1960,11 +1961,17 @@ function enterDungeon(data) {
 function loadFloor(floor) {
   currentFloor = floor;
   dungeon = new Dungeon(dungeonData, floor);
+  // 仲間ミニオンをプレイヤーの隣に配置。フロアごとに展開し直す
+  dungeon.initializePlayerMinions(player);
   document.getElementById('dungeon-title').textContent = dungeonData.name;
   document.getElementById('floor-label').textContent   = `B${floor}F`;
   // フロア進入時に MP 全回復（HP は据え置き）。スキル/技を毎フロアで気軽に振れる
   // よう、ローグライクの「フロア境界＝休憩」の感覚に合わせる
   player.mp = player.maxMp ?? 0;
+  // ミニオン HP もフロア境界で全回復（休憩感）
+  for (const mi of (player.minions ?? [])) {
+    mi.hp = mi.maxHp ?? mi.hp ?? 0;
+  }
   refreshHUD();
   dungeonLog(`B${floor}F に入った（MP 全回復）`);
   dungeon.render(document.getElementById('dungeon-canvas'));
@@ -2131,6 +2138,19 @@ function move(dx, dy) {
 //   各敵の魔法攻撃を 1 件ずつ時間差で表示する（合算しない）。
 //   1 体撃破でも複数体に囲まれていると連続でダメージ表示・SFX・ログが重なる演出。
 function _runEnemyTurn() {
+  // ミニオン行動を敵ターンの直前に入れる: プレイヤー → ミニオン → 敵 の順。
+  // ミニオンが敵を倒した場合は XP/ゴールド/ドロップは現状ノーリワード（v1。
+  // 後でプレイヤーに恩恵を分配する設計に変える可能性あり）。
+  const minionRes = dungeon.tickMinions(player);
+  for (const ev of (minionRes?.events ?? [])) {
+    if (ev.type !== 'minion-attack') continue;
+    dungeonLog(`${ev.minion.emoji} ${ev.minion.name} の攻撃！ ${ev.mob.name} に ${ev.dmg} ダメージ`);
+    if (ev.killed) {
+      dungeonLog(`${ev.minion.emoji} ${ev.minion.name} が ${ev.mob.name} を倒した！`);
+      dungeon.removeMonster(ev.mob);
+    }
+  }
+
   const result = dungeon.tickEnemies(player);
   const magics = result.events.filter(e => e.type === 'magic');
 
@@ -2623,6 +2643,8 @@ function autoSave() {
       platinum:   player.platinum   ?? 0,
       scanBudget: player.scanBudget ?? null,
       skills:     player.skills     ?? [],
+      // ミニオンは座標 x,y を持つ場合があるが永続データには不要なので落とす
+      minions:    (player.minions ?? []).map(({ x, y, ...rest }) => rest),
     },
     clearedSeeds: Array.from(clearedSet),
     savedAt: Date.now(),
@@ -2635,9 +2657,10 @@ function _applySave(data) {
   // フィールドの取り残しを防ぐため初期化してから上書き
   player = createPlayer();
   Object.assign(player, data.player);
-  // 旧セーブ互換: storage / materials が無いケース
+  // 旧セーブ互換: storage / materials / minions が無いケース
   if (!Array.isArray(player.storage))   player.storage   = [];
   if (!Array.isArray(player.materials)) player.materials = [];
+  if (!Array.isArray(player.minions))   player.minions   = [];
   if (typeof player.gold !== 'number') player.gold = 0;
   // 旧セーブで持ち物・ストレージに混ざっていた素材を素材ボックスへ移送
   _migrateMaterialsFromOldSlots(player);

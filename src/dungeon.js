@@ -17,6 +17,9 @@ export class Dungeon {
     this.monsters   = [];
     this.floorItems = [];
     this.rooms      = [];
+    // 仲間ミニオン: フロア入場時に initializePlayerMinions(player) で展開する。
+    // 配列内の各要素は player.minions のコピーに { x, y } を加えたもの。
+    this.minions    = [];
     // facing: [dx, dy]。プレイヤーが向いている方向。技の発射方向 / 2 段階移動の
     // 「確定方向」を兼ねる。new Dungeon の度（フロア境界）に下向きでリセット
     this.playerPos  = { x: 2, y: 2, facing: [0, 1] };
@@ -138,8 +141,99 @@ export class Dungeon {
 
   monsterAt(x, y)     { return this._monsterAt(x, y); }
   itemAt(x, y)        { return this.floorItems.find(i => i.x === x && i.y === y); }
+  minionAt(x, y)      { return this.minions.find(mi => mi.x === x && mi.y === y); }
   removeMonster(m)    { const i = this.monsters.indexOf(m);    if (i !== -1) this.monsters.splice(i, 1); }
   removeFloorItem(it) { const i = this.floorItems.indexOf(it); if (i !== -1) this.floorItems.splice(i, 1); }
+
+  // ミニオンをプレイヤーの周囲 8 マスに展開する。フロア入場時に 1 度だけ呼ぶ。
+  // 入場直後は player.minions（テンプレート＋現在 HP）と同じ並びでスポーンし、
+  // 階層を越えるたびにこれを呼び直すため、各フロアでスポーン位置がリセットされる。
+  initializePlayerMinions(player) {
+    this.minions = [];
+    const list = Array.isArray(player?.minions) ? player.minions : [];
+    if (list.length === 0) return;
+    const px = this.playerPos.x;
+    const py = this.playerPos.y;
+    const dirs = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,1],[1,-1],[-1,-1]];
+    let di = 0;
+    for (const src of list) {
+      let placed = null;
+      for (let tries = 0; tries < dirs.length; tries++) {
+        const [dx, dy] = dirs[(di + tries) % dirs.length];
+        const x = px + dx;
+        const y = py + dy;
+        if (!this.canWalk(x, y)) continue;
+        if (this._monsterAt(x, y)) continue;
+        if (this.minions.some(m => m.x === x && m.y === y)) continue;
+        placed = { x, y };
+        di = (di + tries + 1) % dirs.length;
+        break;
+      }
+      if (!placed) continue;
+      this.minions.push({
+        ...src,                  // id, name, emoji, level, atk, def, hp, maxHp など
+        x: placed.x, y: placed.y,
+      });
+    }
+  }
+
+  // ミニオン AI: プレイヤーの行動後に 1 ティック動かす。
+  //   1. 隣接 8 マスに敵がいたら最寄り 1 体を攻撃（whiff なし、固定で当たる）
+  //   2. なければプレイヤーに 1 マス近づく（壁・敵・他ミニオンで詰まれば待機）
+  // 戻り値: events = [{ type:'minion-attack', minion, mob, dmg, killed }]
+  tickMinions(player) {
+    const events = [];
+    if (!Array.isArray(this.minions) || this.minions.length === 0) return { events };
+    if (getDebugState().disableEnemyAI) return { events };
+
+    for (const mi of this.minions) {
+      // 攻撃対象の探索（隣接 8 マス）
+      let target = null;
+      let bestDist = Infinity;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          const m = this._monsterAt(mi.x + dx, mi.y + dy);
+          if (!m) continue;
+          if (m.isShopkeeper) continue;
+          const d = Math.abs(dx) + Math.abs(dy);
+          if (d < bestDist) { bestDist = d; target = m; }
+        }
+      }
+
+      if (target) {
+        const base = Math.max(1, mi.atk - target.def);
+        const dmg  = base + Math.floor(Math.random() * Math.max(1, base * 0.4));
+        target.hp = Math.max(0, target.hp - dmg);
+        events.push({ type: 'minion-attack', minion: mi, mob: target, dmg, killed: target.hp <= 0 });
+        continue;
+      }
+
+      // プレイヤーに近づく（既に隣接していたら待機）
+      const px = this.playerPos.x;
+      const py = this.playerPos.y;
+      const adx = Math.abs(mi.x - px);
+      const ady = Math.abs(mi.y - py);
+      if (adx <= 1 && ady <= 1) continue;
+      const sx = Math.sign(px - mi.x);
+      const sy = Math.sign(py - mi.y);
+      const tryStep = (dx, dy) => {
+        if (dx === 0 && dy === 0) return false;
+        const tx = mi.x + dx;
+        const ty = mi.y + dy;
+        if (!this.canWalk(tx, ty)) return false;
+        if (px === tx && py === ty) return false;
+        if (this._monsterAt(tx, ty)) return false;
+        if (this.minions.some(o => o !== mi && o.x === tx && o.y === ty)) return false;
+        return true;
+      };
+      if      (tryStep(sx, sy)) { mi.x += sx; mi.y += sy; }
+      else if (tryStep(sx, 0))  { mi.x += sx; }
+      else if (tryStep(0, sy))  { mi.y += sy; }
+      // どこにも進めなければ待機
+    }
+    return { events };
+  }
 
   canWalk(x, y) {
     return x >= 0 && x < W && y >= 0 && y < H && this.grid[y][x] !== T.WALL;
@@ -372,7 +466,10 @@ export class Dungeon {
     if (!this.canWalk(x, y)) return false;
     if (this.playerPos.x === x && this.playerPos.y === y) return false;
     const other = this._monsterAt(x, y);
-    return !other || other === self;
+    if (other && other !== self) return false;
+    // ミニオンが居るマスにも入れない（壁役にして敵の動線を制限する）
+    if (this.minionAt && this.minionAt(x, y)) return false;
+    return true;
   }
 
   _monsterSeesPlayer(m) {
@@ -564,6 +661,25 @@ export class Dungeon {
         ctx.fillText(String(m.status.turns), dx * ts + ts - 4, dy * ts + ts - 6);
       }
       ctx.globalAlpha = 1;
+    }
+
+    // ミニオン（プレイヤー視野内）: emoji + 緑のマーカーで「味方」と分かるように
+    for (const mi of (this.minions ?? [])) {
+      const dxm = mi.x - (px - half);
+      const dym = mi.y - (py - half);
+      if (dxm < 0 || dxm >= VIEW || dym < 0 || dym >= VIEW) continue;
+      const inSight = this.visible.has(`${mi.x},${mi.y}`);
+      if (!revealAll && !inSight) continue;
+      const fsm = Math.floor(ts * 0.65);
+      ctx.font = `${fsm}px serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(mi.emoji ?? '🌼', dxm * ts + ts / 2, dym * ts + ts / 2);
+      // 仲間マーカー（緑円・敵の rarityColor 円と区別）
+      ctx.fillStyle = '#66bb6a';
+      ctx.beginPath();
+      ctx.arc(dxm * ts + 6, dym * ts + 6, 4, 0, Math.PI * 2);
+      ctx.fill();
     }
 
     // プレイヤー（常に中央）

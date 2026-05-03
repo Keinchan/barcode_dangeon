@@ -411,6 +411,7 @@ export function createPlayer() {
     materials: [],          // 合成素材専用ボックス（持ち物を圧迫しない / 敗北時はロスト）
     gold:      0,           // 所持金（敵撃破・床落ちで増加。死亡しても持ち越し）
     skills:    [],          // 習得済み技 [{ id, name, pattern, dmgMult, mpCost, element, rarity, desc }]
+    minions:   [],          // 仲間ミニオン [{ id, name, level, atk, def, hp, maxHp, ... }]
   };
 }
 
