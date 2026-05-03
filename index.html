@@ -510,6 +510,21 @@
         <legend>🖼 アイコン</legend>
         <button id="debug-icon-gallery" class="debug-action">ギャラリーを開く</button>
       </fieldset>
+
+      <!-- ミニオン操作（仲間化・解除・伝説の書付与・試練突入） -->
+      <!-- ボタンは MINION_LIBRARY を見て JS 側で動的生成するので、空のコンテナだけ用意 -->
+      <fieldset class="debug-section">
+        <legend>🌸 ミニオン</legend>
+        <div id="debug-minion-list" class="debug-meta">仲間: なし</div>
+        <div id="debug-minion-recruit-buttons" class="debug-row" style="flex-wrap:wrap;gap:4px"></div>
+        <button id="debug-minion-clear" class="debug-action ghost">仲間を全解除</button>
+      </fieldset>
+
+      <fieldset class="debug-section">
+        <legend>📖 伝説の書 / 試練</legend>
+        <div id="debug-tome-give-buttons"   class="debug-row" style="flex-wrap:wrap;gap:4px"></div>
+        <div id="debug-trial-enter-buttons" class="debug-row" style="flex-wrap:wrap;gap:4px"></div>
+      </fieldset>
     </div>
   </div>
 

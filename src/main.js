@@ -3231,6 +3231,115 @@ if (DEBUG) {
   document.getElementById('btn-gallery-close').addEventListener('click', () => {
     document.getElementById('icon-gallery-modal').classList.add('hidden');
   });
+
+  // ── 🌸 ミニオン / 📖 伝説の書 デバッグ ──
+  // ボタンは MINION_LIBRARY を見て動的生成。新ミニオンを追加すれば自動で並ぶ。
+  function _refreshMinionDebugList() {
+    const el = document.getElementById('debug-minion-list');
+    if (!el) return;
+    const list = (player.minions ?? []);
+    if (list.length === 0) {
+      el.textContent = '仲間: なし';
+    } else {
+      el.textContent = '仲間: ' + list.map(m => `${m.emoji}${m.name}(Lv${m.level})`).join(' / ');
+    }
+  }
+
+  function _debugRecruitMinion(minionId) {
+    if (!Array.isArray(player.minions)) player.minions = [];
+    if (player.minions.some(m => m.id === minionId)) {
+      showAlert('既に仲間にいます');
+      return;
+    }
+    const lv  = Math.max(1, Math.floor((player.level ?? 1) / 2));
+    const mi  = makeMinion(minionId, lv);
+    if (!mi) return;
+    player.minions.push(mi);
+    // ダンジョン中なら現フロアにも実体化
+    if (dungeon && Array.isArray(dungeon.minions)) {
+      const px = dungeon.playerPos.x;
+      const py = dungeon.playerPos.y;
+      const dirs = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,1],[1,-1],[-1,-1]];
+      let placed = null;
+      for (const [dx, dy] of dirs) {
+        const x = px + dx, y = py + dy;
+        if (!dungeon.canWalk(x, y)) continue;
+        if (dungeon.monsterAt(x, y)) continue;
+        if (dungeon.minions.some(m => m.x === x && m.y === y)) continue;
+        placed = { x, y };
+        break;
+      }
+      if (placed) dungeon.minions.push({ ...mi, x: placed.x, y: placed.y });
+      dungeon.render(document.getElementById('dungeon-canvas'));
+    }
+    playSfx('levelup');
+    _refreshMinionDebugList();
+    autoSave();
+  }
+
+  function _debugGiveTome(minionId) {
+    const tpl = findMinionTemplate(minionId);
+    if (!tpl) return;
+    if (!Array.isArray(player.inventory)) player.inventory = [];
+    if (player.inventory.length >= 8) {
+      showAlert('インベントリ満杯です（先に廃棄）');
+      return;
+    }
+    player.inventory.push(makeLegendaryTome(tpl.id, tpl.fullName, tpl.element));
+    playSfx('pickup', { rarityTier: 3 });
+    if (!document.getElementById('menu-modal').classList.contains('hidden')) refreshMenu();
+    autoSave();
+  }
+
+  function _debugEnterTrial(minionId) {
+    const tpl = findMinionTemplate(minionId);
+    if (!tpl) return;
+    if (screen === 'dungeon') {
+      showAlert('既にダンジョン内です');
+      return;
+    }
+    // 書を消費せずに直接突入できるよう、ダミー tome を渡す（debug 専用）
+    const fakeTome = { type: 'legendaryTome', minionId, name: `${tpl.fullName} の試練(debug)`, element: tpl.element };
+    const data = buildSpecialDungeonForTome(fakeTome, tpl);
+    playSfx('confirm');
+    enterDungeon(data);
+  }
+
+  // 動的にボタンを生成
+  const recruitBox = document.getElementById('debug-minion-recruit-buttons');
+  const tomeBox    = document.getElementById('debug-tome-give-buttons');
+  const trialBox   = document.getElementById('debug-trial-enter-buttons');
+  for (const tpl of MINION_LIBRARY) {
+    const recruitBtn = document.createElement('button');
+    recruitBtn.className = 'debug-action';
+    recruitBtn.textContent = `${tpl.emoji} ${tpl.name} 仲間化`;
+    recruitBtn.addEventListener('click', () => _debugRecruitMinion(tpl.id));
+    recruitBox.appendChild(recruitBtn);
+
+    const tomeBtn = document.createElement('button');
+    tomeBtn.className = 'debug-action';
+    tomeBtn.textContent = `📖 ${tpl.name}書`;
+    tomeBtn.addEventListener('click', () => _debugGiveTome(tpl.id));
+    tomeBox.appendChild(tomeBtn);
+
+    const trialBtn = document.createElement('button');
+    trialBtn.className = 'debug-action ghost';
+    trialBtn.textContent = `${tpl.emoji} ${tpl.name} 試練突入`;
+    trialBtn.addEventListener('click', () => _debugEnterTrial(tpl.id));
+    trialBox.appendChild(trialBtn);
+  }
+
+  document.getElementById('debug-minion-clear').addEventListener('click', async () => {
+    const ok = await showConfirm('仲間ミニオンを全解除しますか？', { danger: true, okLabel: '全解除' });
+    if (!ok) return;
+    player.minions = [];
+    if (dungeon) dungeon.minions = [];
+    if (dungeon) dungeon.render(document.getElementById('dungeon-canvas'));
+    _refreshMinionDebugList();
+    autoSave();
+  });
+
+  _refreshMinionDebugList();
 }
 
 // アイコンギャラリー：4種別×4レアリティ×3属性のサンプルを並べて目視確認
