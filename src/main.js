@@ -22,6 +22,7 @@ import {
   elementMatchupTable, ELEMENTS,
   shopPriceFor,
   ENHANCE_RECIPES, applyEnhanceRecipe, fuseLegendaries,
+  makeLegendaryTome,
 } from './items.js';
 import { hashString } from './rng.js';
 import { Dungeon } from './dungeon.js';
@@ -68,7 +69,7 @@ import {
 } from './audio.js';
 import { getItemIconUrl } from './icons.js';
 import { showAlert, showConfirm } from './dialog.js';
-import { MINION_LIBRARY, makeMinion } from './minions.js';
+import { MINION_LIBRARY, makeMinion, findMinionTemplate } from './minions.js';
 import {
   ensureScanBudget,
   getScanStatus,
@@ -800,6 +801,7 @@ function _statLine(item) {
   if (item.type === 'mpPotion')      return `MP +${item.mpHeal} 回復`;
   if (item.type === 'mysteryScroll') return item.desc;
   if (item.type === 'skillBook')     return `📕 ${item.skillName} を習得`;
+  if (item.type === 'legendaryTome') return item.desc;
   if (item.type === 'scroll') return `${item.element}属性 ${item.dmg}ダメージ`;
   return '';
 }
@@ -938,10 +940,14 @@ function _renderInventoryRow(item, idx) {
     (item.type === 'potion' || item.type === 'mpPotion' || item.type === 'mysteryScroll')
     && screen === 'dungeon';
   const isLearnable = item.type === 'skillBook';   // 場所問わず学べる
-  const hasMainAction = isEquippable || isUsableHere || isLearnable;
+  // 伝説の書はダンジョン外でだけ使える（読むと特殊ダンジョンへ突入するため、
+  // 別ダンジョン内からは使わせない）
+  const isTomeUsable = item.type === 'legendaryTome' && screen !== 'dungeon';
+  const hasMainAction = isEquippable || isUsableHere || isLearnable || isTomeUsable;
   const action =
     isEquippable                  ? 'equip'   :
     isLearnable                   ? 'learn'   :
+    isTomeUsable                  ? 'tome'    :
     item.type === 'mysteryScroll' ? 'mystery' :
     isUsableHere                  ? 'use'     : 'none';
 
@@ -986,6 +992,10 @@ function _renderInventoryRow(item, idx) {
       } else if (action === 'learn') {
         showActionConfirm(`${item.name} を読んで「${item.skillName}」を習得しますか？\n${item.skillDesc}`, item, '習得する', () => {
           _learnSkillFromBook(idx);
+        });
+      } else if (action === 'tome') {
+        showActionConfirm(`${item.name} を読んで試練ダンジョンへ向かいますか？\n（書は使うと消費されます）`, item, '挑む', () => {
+          _useLegendaryTomeFromInventory(idx);
         });
       }
     });
@@ -1724,6 +1734,33 @@ document.getElementById('btn-waza-cancel').addEventListener('click', () => {
   document.getElementById('waza-modal').classList.add('hidden');
 });
 
+// 伝説の書: ミニオン試練ダンジョンへの招待状。
+//   書を消費して buildSpecialDungeonForTome で生成した一回限りのダンジョンに入る。
+//   ダンジョン中（screen==='dungeon'）からは使えない（インベントリ表示で
+//   action='tome' が出ない仕様）が、念のため runtime ガードもかけておく。
+function _useLegendaryTomeFromInventory(idx) {
+  const item = player.inventory[idx];
+  if (!item || item.type !== 'legendaryTome') return;
+  if (screen === 'dungeon') {
+    showAlert('伝説の書はダンジョン外でしか使えません');
+    return;
+  }
+  const tpl = findMinionTemplate(item.minionId);
+  if (!tpl) {
+    showAlert('この書に対応するミニオンが見つからない…（書は消費されません）');
+    return;
+  }
+  // 書を 1 枚消費
+  takeOneFromInventory(idx);
+  // 動的に generator を呼ぶ（循環依存を避けるため遅延 require は不要、ESM の動的 import）
+  import('./generator.js').then(({ buildSpecialDungeonForTome }) => {
+    const data = buildSpecialDungeonForTome(item, tpl);
+    playSfx('confirm');
+    dungeonLog(`📖 ${item.name} を読んだ！${tpl.fullName} の試練に挑む`);
+    enterDungeon(data);
+  });
+}
+
 // 不思議系巻物の使用：効果フラグを dungeon に書き込み再描画。フロアでのみ使える
 function _useMysteryScrollFromInventory(idx) {
   const item = player.inventory[idx];
@@ -1826,7 +1863,19 @@ async function launchScanner() {
   }
 }
 
+// 伝説の書ドロップ確率（バーコード 1 回スキャンあたり）。
+// 数値感: 約 2%（50 回に 1 回）。レシート系はレアブーストの代わりに、
+// 既に rarityOverride が立つので tome 抽選は同じ確率にしておく。
+const _LEGENDARY_TOME_DROP_RATE = 0.02;
+
 function _itemFromScan({ text, category }) {
+  // 伝説の書: 通常アイテムの代わりに低確率で出現。出る場合はランダムなミニオン枠の
+  // 書を返す（同じバーコードでも毎回違うミニオンになる）。
+  if (Math.random() < _LEGENDARY_TOME_DROP_RATE && MINION_LIBRARY.length > 0) {
+    const tpl = MINION_LIBRARY[Math.floor(Math.random() * MINION_LIBRARY.length)];
+    return makeLegendaryTome(tpl.id, tpl.fullName, tpl.element);
+  }
+
   // レシート系（Code 128 / ITF）はレア度を1段階底上げ
   let rarityOverride = null;
   if (category === 'receipt') {
@@ -1845,7 +1894,8 @@ function _showItemResult(item, scan) {
     item.type === 'armor'  ? `DEF +${item.defBonus}（${item.element}属性）` :
     item.type === 'potion'   ? `HP +${item.heal} 回復`   :
     item.type === 'mpPotion' ? `MP +${item.mpHeal} 回復` :
-    item.type === 'scroll' ? `${item.element}属性 ${item.dmg}ダメージ` : '';
+    item.type === 'scroll' ? `${item.element}属性 ${item.dmg}ダメージ` :
+    item.type === 'legendaryTome' ? item.desc : '';
 
   const skillBlock = item.skill?.name
     ? `<div class="item-result-skill">

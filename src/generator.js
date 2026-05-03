@@ -144,6 +144,58 @@ export function enemyLevel(dungeonData, floor, isBoss) {
 }
 
 // ──────────────────────────────────────────
+// 伝説の書 → 特殊ダンジョン（ミニオンの試練）データ
+//   通常のグリッドダンジョンと違い、バーコード/位置を持たない一回限りのダンジョン。
+//   最上階に minionId に対応した「ミニオン王」が出現し、撃破で仲間化する。
+//   tome は使った時点で消費される。再挑戦したい場合はもう一度書を入手する必要がある。
+// ──────────────────────────────────────────
+export function buildSpecialDungeonForTome(tome, minionTemplate) {
+  const seed = `tome:${tome.minionId}:${Date.now()}:${Math.floor(Math.random() * 1e6)}`;
+  const themeIdx = Math.floor(Math.random() * DUNGEON_THEMES.length);
+  return {
+    seed,
+    barcode:    String(hashString(seed)).padStart(13, '0').slice(0, 13),
+    name:       `${minionTemplate.fullName} の試練`,
+    theme:      DUNGEON_THEMES[themeIdx],
+    floors:     3,                      // 短めの試練
+    difficulty: 2,
+    monsterTypeIdx: 0,                  // mooks は適当（最上階だけが本命）
+    elementIdx: ELEMENTS.indexOf(minionTemplate.element),
+    element:    minionTemplate.element,
+    rarityBase: RARITIES[2],            // エピック相当
+    isSpecial:  true,
+    bossMinionId: tome.minionId,
+  };
+}
+
+// ミニオン王（特殊ダンジョン最上階のボス）。
+//   通常 generateMonster のレジェンド級ボス相当のステータスに、
+//   元のミニオン名・絵文字・属性を流用する。recruitMinionId をぶら下げ、
+//   撃破処理側で「これを倒したら仲間化する」と判定できるようにする。
+export function generateMinionBoss(dungeonData, floor, minionTemplate) {
+  const lvl   = enemyLevel(dungeonData, floor, true);
+  const stats = statsForLevel(lvl);
+  // 試練ボスは通常ボスより少し硬い（HP×1.3 / ATK+10%）
+  const hp  = Math.floor(stats.maxHp   * 1.3);
+  const atk = Math.floor(stats.atkBase * 1.1);
+  const def = Math.floor(stats.defBase * 1.1);
+  return {
+    base:   minionTemplate.fullName,
+    emoji:  minionTemplate.emoji,
+    isBoss: true,
+    name:   `👑 ${minionTemplate.fullName} 王`,
+    level:  lvl,
+    rarity: 'レジェンド',
+    rarityColor: '#ffc107',
+    element: minionTemplate.element,
+    skill: SKILLS[minionTemplate.element] ?? null,
+    skillCharge: 0,
+    hp, maxHp: hp, atk, def, floor,
+    recruitMinionId: minionTemplate.id,   // 倒したら仲間化対象（Task #8）
+  };
+}
+
+// ──────────────────────────────────────────
 // バーコード → モンスター（レベル制度ベース）
 // ──────────────────────────────────────────
 export function generateMonster(dungeonData, floor, isBoss = false) {
