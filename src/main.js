@@ -14,6 +14,7 @@ import {
   ATK_PER_LEVEL,
   DEF_PER_LEVEL,
   SKILL_SLOTS_MAX,
+  buildSpecialDungeonForTome,
 } from './generator.js';
 import {
   generateItemFromBarcode, rarityFromDigit, bumpRarity, RARITIES, migrateElement,
@@ -1751,15 +1752,12 @@ function _useLegendaryTomeFromInventory(idx) {
     showAlert('この書に対応するミニオンが見つからない…（書は消費されません）');
     return;
   }
-  // 書を 1 枚消費
+  // 書を 1 枚消費 → 試練ダンジョン生成 → 突入
   takeOneFromInventory(idx);
-  // 動的に generator を呼ぶ（循環依存を避けるため遅延 require は不要、ESM の動的 import）
-  import('./generator.js').then(({ buildSpecialDungeonForTome }) => {
-    const data = buildSpecialDungeonForTome(item, tpl);
-    playSfx('confirm');
-    dungeonLog(`📖 ${item.name} を読んだ！${tpl.fullName} の試練に挑む`);
-    enterDungeon(data);
-  });
+  const data = buildSpecialDungeonForTome(item, tpl);
+  playSfx('confirm');
+  dungeonLog(`📖 ${item.name} を読んだ！${tpl.fullName} の試練に挑む`);
+  enterDungeon(data);
 }
 
 // 不思議系巻物の使用：効果フラグを dungeon に書き込み再描画。フロアでのみ使える
