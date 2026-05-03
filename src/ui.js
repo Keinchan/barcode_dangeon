@@ -40,6 +40,23 @@ export function showDamageAt(rect, amount, opts = {}) {
   setTimeout(() => el.remove(), 1300);
 }
 
+// 技のすかし（whiff）演出。技が命中しなかったマスに「MISS」をフロート表示。
+// damage-miss クラスのみ違い、サイズや動きは damage-float の流用で十分（淡色 +
+// 縮小気味の動きで「効いてない感」を出す）。
+export function showMissAt(rect) {
+  if (!rect) return;
+  const cx = rect.left + (rect.width  ?? 0) / 2;
+  const cy = rect.top  + (rect.height ?? 0) / 2;
+  const el = document.createElement('div');
+  el.className = 'damage-float damage-miss';
+  el.textContent = 'MISS';
+  el.style.left = cx + 'px';
+  el.style.top  = cy + 'px';
+  el.style.fontSize = '20px';
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 1100);
+}
+
 // 敵に与えたダメージを戦闘パネル上の敵情報ボックス上端付近にフロート表示（緑）
 export function showEnemyDamage(amount, opts = {}) {
   const target = document.querySelector('.combat-enemy');

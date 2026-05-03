@@ -1094,6 +1094,22 @@ html, body {
   opacity: 0.85;
 }
 
+/* すかし（whiff）: 薄シアン + 文字を傾けて軽く流す */
+.damage-float.damage-miss {
+  color: #80deea;
+  letter-spacing: 2px;
+  font-weight: 900;
+  text-shadow:
+    0 0 10px rgba(128, 222, 234, 0.8),
+    0 0 4px  rgba(0,0,0,0.95);
+  animation: damageMiss 1.1s ease-out forwards;
+}
+@keyframes damageMiss {
+  0%   { transform: translate(-50%, 0%)    rotate(-8deg) scale(0.7); opacity: 0; }
+  20%  { transform: translate(-50%, -20%)  rotate(-6deg) scale(1.1); opacity: 1; }
+  100% { transform: translate(-30%, -110%) rotate(-2deg) scale(0.9); opacity: 0; }
+}
+
 /* 全画面ヒットフラッシュ（クリ・大技時の一瞬の閃光） */
 .vfx-hitflash {
   position: fixed;
