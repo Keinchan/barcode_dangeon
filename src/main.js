@@ -1197,6 +1197,21 @@ function _executeSkill(skill) {
     hits.push({ m: t.m, dmg, matchup, dx: t.dx, dy: t.dy });
   }
 
+  // 状態異常付与（フラッシュ/封じ込み等）: 命中した生存中の敵に status を上書き。
+  // 既に同じ status が付いている場合は turns を最大値で更新（合算しない）。
+  // すかした敵には付かない。
+  if (skill.status && hits.length > 0) {
+    for (const h of hits) {
+      if (h.m.hp <= 0) continue;
+      const cur = h.m.status;
+      if (cur && cur.kind === skill.status.kind) {
+        cur.turns = Math.max(cur.turns, skill.status.turns);
+      } else {
+        h.m.status = { kind: skill.status.kind, turns: skill.status.turns };
+      }
+    }
+  }
+
   // 吹き飛ばし（knockback）: 命中した（生存中の）敵を、プレイヤーから見て外側に
   // skill.knockback マス押し出す。壁・他の敵・盤外で詰まったらそこで止まる。
   // 死んだ敵は処理しない（死亡演出は元位置で出した方が分かりやすい）。
@@ -1232,6 +1247,10 @@ function _executeSkill(skill) {
     logMsg = `${SKILL_ELEMENT_EMOJI[skill.element] ?? '✨'} 技「${skill.name}」発動！ ${hits.length} 体命中 / ${misses.length} 体すかし（MP -${skill.mpCost}）`;
   } else {
     logMsg = `${SKILL_ELEMENT_EMOJI[skill.element] ?? '✨'} 技「${skill.name}」発動！ ${hits.length} 体に命中（MP -${skill.mpCost}）`;
+  }
+  if (skill.status && hits.length > 0) {
+    const statusLabel = skill.status.kind === 'stun' ? '気絶' : '攻撃封印';
+    logMsg += ` / ${statusLabel} ${skill.status.turns} ターン`;
   }
   dungeonLog(logMsg);
   playSfx('crit');

@@ -492,6 +492,12 @@ export const SKILLS_LIBRARY = [
   { id: 'doom',      name: '草薙ぎ',     pattern: 'D', dmgMult: 2.5, mpCost: 28, element: '草', rarity: 'レジェンド', desc: '広範囲・高威力' },
   { id: 'overdrive', name: '神無双',     pattern: 'B', dmgMult: 3.0, mpCost: 22, element: '火', rarity: 'レジェンド', desc: '周囲 8 マスを必殺 + 2 マス吹き飛ばし', knockback: 2 },
   { id: 'meteor',    name: '隕石落とし', pattern: 'F', dmgMult: 2.0, mpCost: 32, element: '火', rarity: 'レジェンド', desc: '部屋全体に大隕石、敵を 2 マス吹き飛ばす', knockback: 2 },
+  // 行動阻害技: ダメージは控えめだが命中した敵を行動不能/攻撃不能にする。
+  //   stun = 移動も攻撃も不可（フラッシュ）/ seal = 移動可・攻撃不可（封じ込み）
+  { id: 'flash',     name: 'フラッシュ', pattern: 'B', dmgMult: 0.4, mpCost: 12, element: '光', rarity: 'レア',       desc: '周囲 8 マスを目眩で 2 ターン気絶', status: { kind: 'stun', turns: 2 } },
+  { id: 'seal',      name: '封じ込み',   pattern: 'A', dmgMult: 0.5, mpCost: 10, element: '闇', rarity: 'レア',       desc: '隣接 4 マスを 3 ターン攻撃封印',     status: { kind: 'seal', turns: 3 } },
+  { id: 'roomFlash', name: '閃光弾',     pattern: 'F', dmgMult: 0.6, mpCost: 24, element: '光', rarity: 'エピック',   desc: '部屋全体を 2 ターン気絶させる',       status: { kind: 'stun', turns: 2 } },
+  { id: 'silence',   name: '沈黙呪',     pattern: 'D', dmgMult: 0.7, mpCost: 20, element: '闇', rarity: 'エピック',   desc: '周囲 2 マスを 4 ターン攻撃封印',     status: { kind: 'seal', turns: 4 } },
 ];
 
 export function findSkillById(id) {
