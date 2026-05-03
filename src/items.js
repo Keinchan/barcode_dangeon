@@ -449,6 +449,8 @@ export const PATTERN_DESC = {
   B: 'B型: 周囲 8 マス（王将）',
   C: 'C型: 4 方向 2 マス先まで（直線飛び道具）',
   D: 'D型: 周囲 2 マス全範囲',
+  E: 'E型: 正面に最大 6 マスの長距離ビーム',
+  F: 'F型: 部屋内の敵全員',
 };
 
 export const PATTERN_OFFSETS = {
@@ -465,21 +467,31 @@ export const PATTERN_OFFSETS = {
     }
     return out;
   })(),
+  // E: 正面方向に 6 マスのビーム。基準は「下向き [0,1]」なので
+  //    _facingRotatedOffsets が向きで回転させると常に正面方向になる。
+  E: [[0,1],[0,2],[0,3],[0,4],[0,5],[0,6]],
+  // F: 「部屋全体」は座標オフセットでは表現できないので _executeSkill 側で
+  //    pattern==='F' を特別扱いし、PATTERN_OFFSETS は空配列にしておく。
+  F: [],
 };
 
 export const SKILLS_LIBRARY = [
   // コモン
   { id: 'sweep',     name: '薙ぎ払い',   pattern: 'A', dmgMult: 1.0, mpCost: 6,  element: '火', rarity: 'コモン',     desc: '十字隣接 4 マスを薙ぐ' },
   { id: 'jab',       name: '小突き',     pattern: 'C', dmgMult: 0.8, mpCost: 5,  element: '火', rarity: 'コモン',     desc: '直線 2 マスを軽く突く' },
+  { id: 'volley',    name: '軽矢',       pattern: 'E', dmgMult: 0.9, mpCost: 7,  element: '雷', rarity: 'コモン',     desc: '正面に 6 マスの矢を放つ' },
   // レア
-  { id: 'whirl',     name: '水流斬',     pattern: 'B', dmgMult: 1.2, mpCost: 10, element: '水', rarity: 'レア',       desc: '周囲 8 マスを攻撃' },
+  { id: 'whirl',     name: '水流斬',     pattern: 'B', dmgMult: 1.2, mpCost: 10, element: '水', rarity: 'レア',       desc: '周囲 8 マスを攻撃 + 1 マス突き飛ばし', knockback: 1 },
   { id: 'pierce',    name: '貫通弾',     pattern: 'C', dmgMult: 1.5, mpCost: 12, element: '雷', rarity: 'レア',       desc: '直線 2 マス先まで貫く' },
+  { id: 'cannon',    name: '大砲',       pattern: 'E', dmgMult: 1.6, mpCost: 14, element: '火', rarity: 'レア',       desc: '正面 6 マスを貫き 1 マス吹き飛ばす', knockback: 1 },
   // エピック
   { id: 'snipe',     name: '影狙撃',     pattern: 'C', dmgMult: 2.5, mpCost: 14, element: '闇', rarity: 'エピック',   desc: '4方向 2 マス先（高威力）' },
   { id: 'storm',     name: '光の嵐',     pattern: 'D', dmgMult: 1.4, mpCost: 18, element: '光', rarity: 'エピック',   desc: '周囲 2 マス全範囲' },
+  { id: 'tempest',   name: '部屋風嵐',   pattern: 'F', dmgMult: 1.3, mpCost: 22, element: '草', rarity: 'エピック',   desc: '部屋内の敵全員に 1 マス突風', knockback: 1 },
   // レジェンド
   { id: 'doom',      name: '草薙ぎ',     pattern: 'D', dmgMult: 2.5, mpCost: 28, element: '草', rarity: 'レジェンド', desc: '広範囲・高威力' },
-  { id: 'overdrive', name: '神無双',     pattern: 'B', dmgMult: 3.0, mpCost: 22, element: '火', rarity: 'レジェンド', desc: '周囲 8 マスを必殺' },
+  { id: 'overdrive', name: '神無双',     pattern: 'B', dmgMult: 3.0, mpCost: 22, element: '火', rarity: 'レジェンド', desc: '周囲 8 マスを必殺 + 2 マス吹き飛ばし', knockback: 2 },
+  { id: 'meteor',    name: '隕石落とし', pattern: 'F', dmgMult: 2.0, mpCost: 32, element: '火', rarity: 'レジェンド', desc: '部屋全体に大隕石、敵を 2 マス吹き飛ばす', knockback: 2 },
 ];
 
 export function findSkillById(id) {

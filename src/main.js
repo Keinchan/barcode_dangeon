@@ -1151,28 +1151,75 @@ function _executeSkill(skill) {
   player.mp = Math.max(0, (player.mp ?? 0) - skill.mpCost);
 
   const facing = dungeon.playerPos.facing ?? [0, 1];
-  const offsets = _facingRotatedOffsets(skill.pattern, facing);
   const px = dungeon.playerPos.x;
   const py = dungeon.playerPos.y;
   const hits   = [];
   const misses = [];   // すかした敵: { m, dx, dy }
   const whiffP = _WHIFF_CHANCE[skill.rarity] ?? 0.20;
 
-  for (const [dx, dy] of offsets) {
-    const m = dungeon.monsterAt(px + dx, py + dy);
-    if (!m) continue;
+  // 対象敵の決定:
+  //   F 型は座標オフセットでは表現できないので、プレイヤーがいる部屋の敵を全列挙。
+  //   それ以外は通常通り PATTERN_OFFSETS（向き回転済み）を順に走査。
+  let targets;   // { m, dx, dy } の配列
+  if (skill.pattern === 'F') {
+    const room = dungeon.roomAt?.(px, py);
+    targets = [];
+    if (room) {
+      for (const m of dungeon.monsters) {
+        if (m.hp <= 0) continue;
+        if (m.isShopkeeper) continue;   // 商人は技で巻き込まない
+        if (m.x >= room.x && m.x < room.x + room.w &&
+            m.y >= room.y && m.y < room.y + room.h) {
+          targets.push({ m, dx: m.x - px, dy: m.y - py });
+        }
+      }
+    }
+  } else {
+    const offsets = _facingRotatedOffsets(skill.pattern, facing);
+    targets = [];
+    for (const [dx, dy] of offsets) {
+      const m = dungeon.monsterAt(px + dx, py + dy);
+      if (m) targets.push({ m, dx, dy });
+    }
+  }
+
+  for (const t of targets) {
     if (Math.random() < whiffP) {
       // すかし: ダメージは入らないが、技自体は発動済み（MP は消費したまま）。
-      // 演出用に座標を持って後で MISS をフロート。
-      misses.push({ m, dx, dy });
+      misses.push(t);
       continue;
     }
-    const matchup = elementMatchup(skill.element, m.element);
-    const base = Math.max(1, Math.floor(player.atk * skill.dmgMult) - m.def);
+    const matchup = elementMatchup(skill.element, t.m.element);
+    const base = Math.max(1, Math.floor(player.atk * skill.dmgMult) - t.m.def);
     const dmg  = Math.max(1, Math.floor((base + Math.floor(Math.random() * Math.max(1, base * 0.4)))
       * matchup));
-    m.hp = Math.max(0, m.hp - dmg);
-    hits.push({ m, dmg, matchup });
+    t.m.hp = Math.max(0, t.m.hp - dmg);
+    hits.push({ m: t.m, dmg, matchup, dx: t.dx, dy: t.dy });
+  }
+
+  // 吹き飛ばし（knockback）: 命中した（生存中の）敵を、プレイヤーから見て外側に
+  // skill.knockback マス押し出す。壁・他の敵・盤外で詰まったらそこで止まる。
+  // 死んだ敵は処理しない（死亡演出は元位置で出した方が分かりやすい）。
+  if (skill.knockback && skill.knockback > 0) {
+    for (const h of hits) {
+      if (h.m.hp <= 0) continue;
+      const sgn = (v) => (v > 0 ? 1 : v < 0 ? -1 : 0);
+      const kx = sgn(h.dx);
+      const ky = sgn(h.dy);
+      if (kx === 0 && ky === 0) continue;   // 真上重なりは押し出し不能
+      let nx = h.m.x;
+      let ny = h.m.y;
+      for (let step = 0; step < skill.knockback; step++) {
+        const tx = nx + kx;
+        const ty = ny + ky;
+        if (!dungeon.canWalk(tx, ty)) break;
+        if (dungeon.monsterAt(tx, ty)) break;
+        nx = tx;
+        ny = ty;
+      }
+      h.m.x = nx;
+      h.m.y = ny;
+    }
   }
 
   // ログは「命中数 / すかし数」を併記。0 命中 0 すかしなら「敵がいなかった」表示。
@@ -1208,16 +1255,17 @@ function _executeSkill(skill) {
     y: cRect.top  + (half * ts + ts / 2),
   };
   // パターン形状に応じた特殊演出（円・十字・ビーム・AoE リング）
-  showSkillPatternVfx(skill.pattern, playerScreen, ts, elColor);
+  showSkillPatternVfx(skill.pattern, playerScreen, ts, elColor, { facing });
 
   hits.forEach((h, i) => {
     setTimeout(() => {
-      const tx = h.m.x - (px - half);
-      const ty = h.m.y - (py - half);
+      // 爆発・ダメ表示は「命中時点の座標」で出す。knockback で m.x が動いた後に
+      // h.m.x を使うと吹き飛ばし先で爆発する不自然演出になるため、保存した dx/dy を使う
+      const tx = h.dx + half;
+      const ty = h.dy + half;
       const sx = cRect.left + tx * ts + ts / 2;
       const sy = cRect.top  + ty * ts + ts / 2;
       const anchor = { left: sx - 18, top: sy - 18, width: 36, height: 36 };
-      // 命中マスごとに爆発 + ダメージ数値（属性相性に応じた kind で色変え）
       explosion(anchor, { color: elColor });
       const kind = h.matchup >= 1.5 ? 'crit' : h.matchup <= 0.7 ? 'weak' : 'effective';
       showDamageAt({ left: sx, top: sy - 18, width: 0, height: 0 }, h.dmg, { kind });
@@ -1228,8 +1276,8 @@ function _executeSkill(skill) {
   // すかしマスにも MISS をフロート（命中演出と同じタイミング系列上に並べる）
   misses.forEach((mi, i) => {
     setTimeout(() => {
-      const tx = mi.m.x - (px - half);
-      const ty = mi.m.y - (py - half);
+      const tx = mi.dx + half;
+      const ty = mi.dy + half;
       const sx = cRect.left + tx * ts + ts / 2;
       const sy = cRect.top  + ty * ts + ts / 2;
       showMissAt({ left: sx, top: sy - 14, width: 0, height: 0 });
