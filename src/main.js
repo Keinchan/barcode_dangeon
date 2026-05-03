@@ -273,11 +273,11 @@ function showPreDungeonModal(d) {
   const w = player.weapon;
   const a = player.armor;
   const wLine = w
-    ? `<div class="pre-dungeon-info-line">${w.emoji} <span style="color:${w.rarityColor}">${w.name}</span> ATK+${w.atkBonus}` +
+    ? `<div class="pre-dungeon-info-line">${iconImg(w, 22)} <span style="color:${w.rarityColor}">${w.name}</span> ATK+${w.atkBonus}` +
       (w.skill?.name ? ` <span style="color:#888">(${w.skill.name})</span>` : '') + `</div>`
     : '<div class="pre-dungeon-info-line" style="color:#888">⚔️ 武器なし</div>';
   const aLine = a
-    ? `<div class="pre-dungeon-info-line">${a.emoji} <span style="color:${a.rarityColor}">${a.name}</span> DEF+${a.defBonus}` +
+    ? `<div class="pre-dungeon-info-line">${iconImg(a, 22)} <span style="color:${a.rarityColor}">${a.name}</span> DEF+${a.defBonus}` +
       (a.skill?.name ? ` <span style="color:#888">(${a.skill.name})</span>` : '') + `</div>`
     : '<div class="pre-dungeon-info-line" style="color:#888">🛡️ 防具なし</div>';
 
@@ -1436,7 +1436,7 @@ function _openShopModal(shopkeeper) {
       const cantAfford = (player.gold ?? 0) < entry.price;
       return `
         <div class="item-row${cantAfford ? ' disabled' : ''}" data-idx="${i}">
-          <span class="item-emoji">${it.emoji ?? '🎁'}</span>
+          <span class="item-emoji">${iconImg(it, 32)}</span>
           <div class="item-info">
             <div class="item-name" style="color:${it.rarityColor}">${it.name}</div>
             <div class="item-desc">${_shopItemDescription(it)}</div>
@@ -1868,9 +1868,9 @@ function refreshHUD() {
   document.getElementById('player-hp').textContent = `HP: ${player.hp}/${player.maxHp}`;
   const mpEl = document.getElementById('player-mp');
   if (mpEl) mpEl.textContent = `MP: ${player.mp ?? 0}/${player.maxMp ?? 0}`;
-  const wName = player.weapon ? `${player.weapon.emoji} +${player.weapon.atkBonus}` : '⚔️ ー';
-  const aName = player.armor  ? `${player.armor.emoji} +${player.armor.defBonus}`  : '🛡️ ー';
-  document.getElementById('equip-display').textContent = `${wName}　${aName}`;
+  const wHtml = player.weapon ? `${iconImg(player.weapon, 18)} +${player.weapon.atkBonus}` : '⚔️ ー';
+  const aHtml = player.armor  ? `${iconImg(player.armor, 18)} +${player.armor.defBonus}`  : '🛡️ ー';
+  document.getElementById('equip-display').innerHTML = `${wHtml}　${aHtml}`;
 
   // ゴールド表示はマップ HUD と ダンジョンヘッダの両方にある（無ければスキップ）
   const goldStr = `🪙 ${player.gold ?? 0}`;

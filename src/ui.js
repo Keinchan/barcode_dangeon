@@ -1,3 +1,13 @@
+import { getItemIconUrl } from './icons.js';
+
+// アイテムバナー類は元々 emoji を直接表示していたが、ドロップ時のアイコン
+// （icons.js の手続きアイコン）と見た目が分岐していたため、こちらでも同じ
+// 画像を <img> で表示するためのヘルパ。サイズはバナーごとの CSS に合わせる。
+function _bannerIconHtml(item, size) {
+  if (!item) return '';
+  return `<img class="item-icon" width="${size}" height="${size}" src="${getItemIconUrl(item, 64)}" alt="${item.name ?? ''}" />`;
+}
+
 // プレイヤー頭上にダメージをフロート表示（canvas中央＝プレイヤーアイコン、赤）。
 // opts.kind: 'normal' | 'crit' | 'effective' | 'weak' でスケールと色を変える
 export function showFloatingDamage(amount, opts = {}) {
@@ -124,7 +134,8 @@ export function showItemBanner(item, opts = {}) {
 
   const action = opts.action ?? '入手';   // "入手" / "ドロップ" など
   const cls    = `item-banner rarity-${rarityKey(rarity)}`;
-  const icon   = item.emoji ?? '🎁';
+  const iconSize = rarity === 'レジェンド' ? 48 : 36;
+  const iconHtml = _bannerIconHtml(item, iconSize);
   const tag    =
     rarity === 'レジェンド' ? '🏆 LEGENDARY' :
     rarity === 'エピック'   ? '💎 EPIC'      :
@@ -136,7 +147,7 @@ export function showItemBanner(item, opts = {}) {
   div.innerHTML = `
     <div class="item-banner-tag">${tag}</div>
     <div class="item-banner-row">
-      <span class="item-banner-icon">${icon}</span>
+      <span class="item-banner-icon">${iconHtml}</span>
       <div class="item-banner-text">
         <div class="item-banner-name">${item.name}</div>
         <div class="item-banner-meta">${action} ${lvHtml}</div>
@@ -189,7 +200,7 @@ export function showEnhanceCelebration(item, beforeAtk, afterAtk) {
   const tag    = item.isMythic ? '🌟 MYTHIC FUSE' : '🛠 ENHANCED';
   const subTag = item.isMythic ? '神話級に到達！' : '強化成功！';
   const cls    = `enhance-banner rarity-${rarityKey(item.rarity)}` + (item.isMythic ? ' mythic' : '');
-  const icon   = item.emoji ?? '⚔️';
+  const iconHtml = _bannerIconHtml(item, 48);
 
   const div = document.createElement('div');
   div.className = cls;
@@ -197,7 +208,7 @@ export function showEnhanceCelebration(item, beforeAtk, afterAtk) {
     <div class="enhance-banner-tag">${tag}</div>
     <div class="enhance-banner-sub">${subTag}</div>
     <div class="enhance-banner-row">
-      <span class="enhance-banner-icon">${icon}</span>
+      <span class="enhance-banner-icon">${iconHtml}</span>
       <div class="enhance-banner-text">
         <div class="enhance-banner-name">${item.name}</div>
         <div class="enhance-banner-stats">
