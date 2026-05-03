@@ -28,7 +28,7 @@ import { Dungeon } from './dungeon.js';
 import {
   showFloatingDamage, showItemBanner, shockwave, magicCircle, playerVfxAnchor,
   hitFlash, screenShake, deathBurst, sparkSpray, explosion,
-  showEnhanceCelebration, showDamageAt, showSkillPatternVfx,
+  showEnhanceCelebration, showDamageAt, showMissAt, showSkillPatternVfx,
   attackTrail,
 } from './ui.js';
 import {
@@ -1128,6 +1128,16 @@ function _facingRotatedOffsets(pattern, facing) {
   return out;
 }
 
+// 技ごとの「すかし（whiff）」確率。レアリティが上がるほど安定して当たる。
+// 技は MP コストさえあればいつでも撃てる仕様にしたので、命中率の揺らぎで
+// バランスを取る（コモン技は手数で稼ぎ、レジェンド技は確実な大火力）。
+const _WHIFF_CHANCE = {
+  'コモン':     0.28,
+  'レア':       0.20,
+  'エピック':   0.12,
+  'レジェンド': 0.06,
+};
+
 // 技を発動（ダンジョン探索中。向きに合わせてパターンを回転して発射）
 function _executeSkill(skill) {
   if (!dungeon || screen !== 'dungeon') {
@@ -1144,11 +1154,19 @@ function _executeSkill(skill) {
   const offsets = _facingRotatedOffsets(skill.pattern, facing);
   const px = dungeon.playerPos.x;
   const py = dungeon.playerPos.y;
-  const hits = [];
+  const hits   = [];
+  const misses = [];   // すかした敵: { m, dx, dy }
+  const whiffP = _WHIFF_CHANCE[skill.rarity] ?? 0.20;
 
   for (const [dx, dy] of offsets) {
     const m = dungeon.monsterAt(px + dx, py + dy);
     if (!m) continue;
+    if (Math.random() < whiffP) {
+      // すかし: ダメージは入らないが、技自体は発動済み（MP は消費したまま）。
+      // 演出用に座標を持って後で MISS をフロート。
+      misses.push({ m, dx, dy });
+      continue;
+    }
     const matchup = elementMatchup(skill.element, m.element);
     const base = Math.max(1, Math.floor(player.atk * skill.dmgMult) - m.def);
     const dmg  = Math.max(1, Math.floor((base + Math.floor(Math.random() * Math.max(1, base * 0.4)))
@@ -1157,7 +1175,18 @@ function _executeSkill(skill) {
     hits.push({ m, dmg, matchup });
   }
 
-  dungeonLog(`${SKILL_ELEMENT_EMOJI[skill.element] ?? '✨'} 技「${skill.name}」発動！ ${hits.length} 体に命中（MP -${skill.mpCost}）`);
+  // ログは「命中数 / すかし数」を併記。0 命中 0 すかしなら「敵がいなかった」表示。
+  let logMsg;
+  if (hits.length === 0 && misses.length === 0) {
+    logMsg = `${SKILL_ELEMENT_EMOJI[skill.element] ?? '✨'} 技「${skill.name}」を放ったが範囲に敵はいなかった（MP -${skill.mpCost}）`;
+  } else if (hits.length === 0 && misses.length > 0) {
+    logMsg = `${SKILL_ELEMENT_EMOJI[skill.element] ?? '✨'} 技「${skill.name}」全弾すかし！${misses.length} 体に当たり損ね（MP -${skill.mpCost}）`;
+  } else if (misses.length > 0) {
+    logMsg = `${SKILL_ELEMENT_EMOJI[skill.element] ?? '✨'} 技「${skill.name}」発動！ ${hits.length} 体命中 / ${misses.length} 体すかし（MP -${skill.mpCost}）`;
+  } else {
+    logMsg = `${SKILL_ELEMENT_EMOJI[skill.element] ?? '✨'} 技「${skill.name}」発動！ ${hits.length} 体に命中（MP -${skill.mpCost}）`;
+  }
+  dungeonLog(logMsg);
   playSfx('crit');
 
   // 範囲技 VFX: 技の属性カラー + 技パターン別の特殊エフェクト
@@ -1194,6 +1223,17 @@ function _executeSkill(skill) {
       showDamageAt({ left: sx, top: sy - 18, width: 0, height: 0 }, h.dmg, { kind });
       if (h.m.hp <= 0) deathBurst(anchor, { color: h.m.rarityColor ?? '#ff7043' });
     }, 60 + i * 70);
+  });
+
+  // すかしマスにも MISS をフロート（命中演出と同じタイミング系列上に並べる）
+  misses.forEach((mi, i) => {
+    setTimeout(() => {
+      const tx = mi.m.x - (px - half);
+      const ty = mi.m.y - (py - half);
+      const sx = cRect.left + tx * ts + ts / 2;
+      const sy = cRect.top  + ty * ts + ts / 2;
+      showMissAt({ left: sx, top: sy - 14, width: 0, height: 0 });
+    }, 60 + (hits.length + i) * 70);
   });
 
   // 死亡した敵を一括処理（XP・ゴールド・ドロップ）
