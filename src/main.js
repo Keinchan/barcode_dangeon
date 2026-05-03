@@ -1317,6 +1317,7 @@ function _executeSkill(skill) {
   // 死亡した敵を一括処理（XP・ゴールド・ドロップ）
   const dead = dungeon.monsters.filter(m => m.hp <= 0);
   for (const m of dead) {
+    _maybeRecruitMinion(m);
     dungeon.removeMonster(m);
     gainXp(_xpFromMonster(m));
     const gold = rollGoldDropFromMonster(m);
@@ -2197,6 +2198,7 @@ function _runEnemyTurn() {
     dungeonLog(`${ev.minion.emoji} ${ev.minion.name} の攻撃！ ${ev.mob.name} に ${ev.dmg} ダメージ`);
     if (ev.killed) {
       dungeonLog(`${ev.minion.emoji} ${ev.minion.name} が ${ev.mob.name} を倒した！`);
+      _maybeRecruitMinion(ev.mob);
       dungeon.removeMonster(ev.mob);
     }
   }
@@ -2423,8 +2425,56 @@ canvas.addEventListener('touchend', e => {
 //   ・技:             方向キーで向きを決め、技ボタンで向きに合わせて発射
 // ─────────────────────────────────────────────
 
+// 撃破した mob が試練ダンジョンの「ミニオン王」（recruitMinionId 持ち）なら、
+// そのミニオンを仲間として player.minions に追加する。
+//   - 重複はスキップ（同じミニオンは何度も生成しない）
+//   - 仲間化レベル: ボスのレベル ÷ 2（最低 1）にして、初期では弱めに合流
+//   - ダンジョン中なら現フロアの dungeon.minions にも即追加し、その場で共闘開始
+function _maybeRecruitMinion(mob) {
+  if (!mob || !mob.recruitMinionId) return;
+  if (!Array.isArray(player.minions)) player.minions = [];
+  if (player.minions.some(m => m.id === mob.recruitMinionId)) {
+    dungeonLog(`✨ ${mob.name} は既に仲間にいる（重複追加なし）`);
+    return;
+  }
+  const startLv  = Math.max(1, Math.floor((mob.level ?? 1) / 2));
+  const recruit  = makeMinion(mob.recruitMinionId, startLv);
+  if (!recruit) return;
+  player.minions.push(recruit);
+
+  // ダンジョン中ならその場で実体化（プレイヤーの隣に空きマス探して配置）
+  if (dungeon && Array.isArray(dungeon.minions)) {
+    const px = dungeon.playerPos.x;
+    const py = dungeon.playerPos.y;
+    const dirs = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,1],[1,-1],[-1,-1]];
+    let placed = null;
+    for (const [dx, dy] of dirs) {
+      const x = px + dx, y = py + dy;
+      if (!dungeon.canWalk(x, y)) continue;
+      if (dungeon.monsterAt(x, y)) continue;
+      if (dungeon.minions.some(m => m.x === x && m.y === y)) continue;
+      placed = { x, y };
+      break;
+    }
+    if (placed) {
+      dungeon.minions.push({ ...recruit, x: placed.x, y: placed.y });
+    }
+  }
+
+  dungeonLog(`🌸 ${recruit.emoji} ${recruit.name} が仲間になった！`, { rarity: 'レジェンド' });
+  showItemBanner({
+    name:        `${recruit.name} が仲間に！`,
+    rarity:      'レジェンド',
+    rarityColor: '#ffc107',
+    emoji:       recruit.emoji,
+    level:       recruit.level,
+  }, { action: '仲間化' });
+  playSfx('levelup');
+}
+
 // 共通：撃破処理（XP・ドロップ・ボスならクリア）。Battle.onEnd の win 分岐の流用
 function _handleMonsterDefeated(mob) {
+  _maybeRecruitMinion(mob);
   dungeon.removeMonster(mob);
 
   // 商人撃破: 在庫を全て床にぶちまける + 大量ゴールド
@@ -2973,6 +3023,7 @@ if (DEBUG) {
       return;
     }
     for (const mob of adj) {
+      _maybeRecruitMinion(mob);
       dungeon.removeMonster(mob);
       gainXp(_xpFromMonster(mob));
       const gold = rollGoldDropFromMonster(mob);
