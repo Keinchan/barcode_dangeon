@@ -225,6 +225,18 @@ export class Dungeon {
     const reserved = new Set();
 
     for (const { m } of actors) {
+      // 状態異常: stun は移動も攻撃も不可、seal は移動だけ可・攻撃不可。
+      // 1 ターン分カウントを消費するため continue 前に turns-- する。
+      if (m.status && m.status.turns > 0) {
+        if (m.status.kind === 'stun') {
+          reserved.add(`${m.x},${m.y}`);
+          m.status.turns -= 1;
+          if (m.status.turns <= 0) m.status = null;
+          continue;
+        }
+        // seal: 移動は通常通り、攻撃判定の所だけ後ろで握りつぶす
+      }
+
       const adx = Math.abs(m.x - this.playerPos.x);
       const ady = Math.abs(m.y - this.playerPos.y);
       const inMagicRange = adx <= 1 && ady <= 1 && !(adx === 0 && ady === 0);
@@ -232,6 +244,12 @@ export class Dungeon {
       if (inMagicRange) {
         // 既に隣接：その場で魔法攻撃。座標もスロット予約に入れて他敵と衝突回避
         reserved.add(`${m.x},${m.y}`);
+        // seal 中は攻撃ができない。turn カウントだけ消費して終了
+        if (m.status && m.status.kind === 'seal' && m.status.turns > 0) {
+          m.status.turns -= 1;
+          if (m.status.turns <= 0) m.status = null;
+          continue;
+        }
         const base = Math.max(1, m.atk - player.def);
         const roll = 1 + Math.floor(Math.random() * Math.ceil(base * 0.4));
         const dmg  = base + roll;
@@ -274,6 +292,12 @@ export class Dungeon {
       }
       // 動いた後の座標も予約に追加（他敵が同マスに来ないように）
       if (moved) reserved.add(`${m.x},${m.y}`);
+
+      // seal は移動を消費して残り turn を減らす（stun は冒頭で continue 済み）
+      if (m.status && m.status.kind === 'seal' && m.status.turns > 0) {
+        m.status.turns -= 1;
+        if (m.status.turns <= 0) m.status = null;
+      }
     }
 
     // 万一同一マスに複数 mob が乗っている状態が発生したら最終ガードで解消
@@ -525,6 +549,19 @@ export class Dungeon {
         ctx.beginPath();
         ctx.arc(dx * ts + 6, dy * ts + 6, 4, 0, Math.PI * 2);
         ctx.fill();
+      }
+
+      // 状態異常マーカー: 右上に絵文字を 1 つ重ねて、行動不能か封じか一目で分かる。
+      // stun=💫 / seal=🔒。残ターン数を小さく付記。
+      if (m.status && m.status.turns > 0) {
+        const glyph = m.status.kind === 'stun' ? '💫' : '🔒';
+        ctx.font = `${Math.floor(ts * 0.40)}px serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(glyph, dx * ts + ts - 9, dy * ts + 9);
+        ctx.fillStyle = '#fff';
+        ctx.font = `bold ${Math.floor(ts * 0.22)}px sans-serif`;
+        ctx.fillText(String(m.status.turns), dx * ts + ts - 4, dy * ts + ts - 6);
       }
       ctx.globalAlpha = 1;
     }
