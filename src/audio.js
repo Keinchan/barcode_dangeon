@@ -73,6 +73,41 @@ function ensureRunning() {
   return c;
 }
 
+// iOS 画面ロック → 解除など、AudioContext が一度 suspended/interrupted を経由した
+// あとで「ctx は running に戻ったのに音が出ない」状態を直すための強制再構築。
+//
+// 失敗モード:
+//   1. 画面ロック中は ctx.currentTime が進まない（または進んだ後に再開する）。
+//   2. setTimeout スケジューラは throttled でも生きていて、ロック中にも発火する
+//      ことがある。発火した時点で currentBgm.scheduleOne が track.schedule(nextStart)
+//      を呼び、nextStart は止まっていた ctx.currentTime を基準に計算済みなので
+//      解除後には「過去の絶対時刻」になっている。過去時刻に start した
+//      OscillatorNode は鳴らない。
+//   3. 結果として currentBgm は形上は動いているが完全無音になる。
+//
+// 直し方:
+//   - currentBgm（または pendingBgm）の name だけ覚える
+//   - 既存の voice/timer は完全破棄
+//   - ctx.resume を呼んでから startBgm(name) を新規にやり直し、
+//     nextStart を最新の ctx.currentTime ベースで作り直す
+//
+// visibility/pageshow/focus/suspended-click の全てから呼ぶ（どのイベントが
+// 上がるかは iOS バージョンと操作の組み合わせで変わるため）。
+function _rearmBgm() {
+  if (!ctx) return;
+  if (ctx.state === 'suspended') {
+    ctx.resume().catch(() => {});
+  }
+  const name = currentBgm?.name ?? pendingBgm;
+  if (!name) return;
+  if (currentBgm) {
+    currentBgm.stop();
+    currentBgm = null;
+  }
+  pendingBgm = null;
+  startBgm(name);
+}
+
 // 初回ユーザー操作で起動。iOS Safari 対策:
 //   - **AudioContext はこのジェスチャ内で初めて生成する**。gesture 外で生成すると
 //     その ctx は後から resume しても完全にロック解除されないケースがある。
@@ -125,35 +160,21 @@ function unlockOnGesture() {
   document.addEventListener('touchstart',  fire, true);
   document.addEventListener('click',       fire, true);
 
-  // 常時アクティブな保険: クリックの度に suspended なら resume を試す。
-  // alert/confirm 等のネイティブダイアログで suspended に落ちた場合、
-  // ダイアログ閉幕後の最初のクリックで自動復帰させる。
+  // 常時アクティブな保険: クリックの度に suspended なら resume + BGM 再構築。
+  // alert/confirm 等のネイティブダイアログや、iOS 画面ロック後のクリックで
+  // 自動復帰させる。単純 resume だけだと「ctx は running なのに無音」状態が
+  // 残るので、_rearmBgm でスケジューラを作り直す。
   document.addEventListener('click', () => {
     if (ctx && ctx.state === 'suspended') {
-      ctx.resume().catch(() => {});
+      _rearmBgm();
     }
   }, true);
 
-  // タブ復帰系イベントでも resume を試す（iOS は焦点系で発火しないこともあるが
-  // PC ブラウザでは効く）
-  const tryResume = () => {
-    if (ctx && ctx.state === 'suspended') {
-      ctx.resume().catch(() => {});
-    }
-  };
-  document.addEventListener('focus', tryResume);
-  window.addEventListener('focus', tryResume);
-  window.addEventListener('pageshow', tryResume);
-
   // ─── タブ非表示 → 表示 の BGM 復帰 ───
-  // ブラウザは visibilitychange で AudioContext を必ずしも suspend しない（特に PC Chrome）。
-  // その場合 statechange ハンドラが発火せず、setTimeout ベースのスケジューラだけが
-  // background throttle で停止する → ループ最後のオシレータが鳴り終わったら無音になる。
-  //
-  // 対策: visibilitychange を見て自前で stop / 再開する（ctx の suspend を待たない）。
+  // 非表示中は scheduler を破棄して name だけ pending に退避。
+  // 表示復帰時は _rearmBgm で完全に作り直す（ctx.currentTime のジャンプ対策）。
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
-      // 非表示: 鳴っているなら名前だけ覚えて即停止（throttle で迷子にならないように）
       if (currentBgm) {
         const name = currentBgm.name;
         currentBgm.stop();
@@ -161,17 +182,16 @@ function unlockOnGesture() {
         pendingBgm = name;
       }
     } else {
-      // 表示復帰: ctx を resume してから pendingBgm を再投入
-      if (ctx && ctx.state === 'suspended') {
-        ctx.resume().catch(() => {});
-      }
-      if (pendingBgm && (!ctx || ctx.state === 'running')) {
-        const name = pendingBgm;
-        pendingBgm = null;
-        startBgm(name);
-      }
+      _rearmBgm();
     }
   });
+
+  // iOS 画面ロック解除では visibilitychange が発火しないこともあるため、
+  // pageshow / focus でも rearm を試す。複数経路から発火しても _rearmBgm 自体は
+  // 冪等（name が無ければ何もしない、現存 BGM は stop してから作り直す）。
+  window.addEventListener('pageshow', _rearmBgm);
+  window.addEventListener('focus',    _rearmBgm);
+  document.addEventListener('focus',  _rearmBgm);
 }
 unlockOnGesture();
 
