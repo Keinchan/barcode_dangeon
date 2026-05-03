@@ -1,7 +1,8 @@
 import { createRNG, hashString } from './rng.js';
-import { generateMonster, generateFloorItems, generateShopkeeperFor, generateShopStock } from './generator.js';
+import { generateMonster, generateFloorItems, generateShopkeeperFor, generateShopStock, generateMinionBoss } from './generator.js';
 import { getDebugState } from './debug.js';
 import { getItemIconCanvas } from './icons.js';
+import { findMinionTemplate } from './minions.js';
 
 const W = 21;
 const H = 19;
@@ -57,7 +58,16 @@ export class Dungeon {
 
       if (isLast && isFinal) {
         const bc   = this._center(room);
-        const boss = generateMonster(this.data, this.floor, true);
+        // 特殊ダンジョン（ミニオンの試練）の場合は通常ボスを置き換えて
+        // ミニオン王を配置する。撃破時の仲間化判定に使う recruitMinionId を持つ。
+        let boss;
+        if (this.data.isSpecial && this.data.bossMinionId) {
+          const tpl = findMinionTemplate(this.data.bossMinionId);
+          if (tpl) {
+            boss = generateMinionBoss(this.data, this.floor, tpl);
+          }
+        }
+        if (!boss) boss = generateMonster(this.data, this.floor, true);
         boss.x = bc.x; boss.y = bc.y;
         this.monsters.push(boss);
       } else {

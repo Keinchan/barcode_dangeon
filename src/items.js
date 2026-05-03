@@ -525,6 +525,28 @@ export function makeSkillBook(skillId) {
   };
 }
 
+// 伝説の書（特殊ダンジョン入場アイテム）。
+//   バーコードスキャン時に低確率で出現し、使用すると特定ミニオンの試練ダンジョンへ
+//   通じる。試練ダンジョン最上階のボスを倒すとそのミニオンが仲間化される（Task #8）。
+//
+// minionId はミニオンテンプレート（minions.js）の id を指定。
+//   表示名・属性などはこのファイルでは持たず、main.js 側で minions.js を引いて補う。
+//   …が、UI 側で「何の試練か」を一目で分からせたいので、name に最低限の文字列を埋める。
+export function makeLegendaryTome(minionId, fullName, element) {
+  return {
+    type:        'legendaryTome',
+    minionId,
+    name:        `${fullName} の伝説の書`,
+    emoji:       '📖',
+    rarity:      'レジェンド',
+    rarityColor: '#ffc107',
+    element,
+    level:       1,
+    desc:        `読むと「${fullName} の試練」へ通じる`,
+    count:       1,
+  };
+}
+
 // レアリティに応じた技の書をランダムに選ぶ
 export function randomSkillBook(rng = Math.random, mobRarity = null) {
   const r = typeof rng === 'function' ? rng() : Math.random();
