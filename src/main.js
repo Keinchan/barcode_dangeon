@@ -24,6 +24,10 @@ import {
   shopPriceFor,
   ENHANCE_RECIPES, applyEnhanceRecipe, fuseLegendaries,
   makeLegendaryTome,
+  PLAYER_TYPES, findPlayerType,
+  aptitudeElementsForPlayer, aptitudeElementsForMinion,
+  canLearnSkillForPlayer, canLearnSkillForMinion,
+  skillLevelReq, SKILLS_LIBRARY,
 } from './items.js';
 import { hashString } from './rng.js';
 import { Dungeon } from './dungeon.js';
@@ -70,7 +74,7 @@ import {
 } from './audio.js';
 import { getItemIconUrl } from './icons.js';
 import { showAlert, showConfirm } from './dialog.js';
-import { MINION_LIBRARY, makeMinion, findMinionTemplate } from './minions.js';
+import { MINION_LIBRARY, makeMinion, findMinionTemplate, rehydrateMinion } from './minions.js';
 import {
   ensureScanBudget,
   getScanStatus,
@@ -415,6 +419,7 @@ const MENU_STAGE_TITLES = {
   storage:   'ストレージ',
   materials: '素材ボックス',
   synth:     '合成・強化',
+  skills:    '技・タイプ',
   element:   '属性相性',
   currency:  '通貨・スキャン',
   sound:     'サウンド',
@@ -428,6 +433,7 @@ function _setMenuStage(stage) {
   if (title) title.textContent = MENU_STAGE_TITLES[stage] ?? 'メニュー';
   // ストレージ画面に入った時は持ち物ミニ一覧を再描画
   if (stage === 'storage') _refreshInventoryMini();
+  if (stage === 'skills')  _refreshSkillConfig();
 }
 
 // タイル → ステージ切替
@@ -536,9 +542,265 @@ function refreshMenu() {
   _refreshSynthesisUI();
   // 属性相性チャート
   _refreshElementChart();
+  // 技・タイプ設定
+  _refreshSkillConfig();
   // 技を学ぶ/忘れるとスロット内容が変わるのでクイックバーも再描画
   _refreshWazaBar();
 }
+
+// ─────────────────────────────────────────────
+// 技・タイプ設定 UI
+//   - プレイヤーのタイプ表示 + 「タイプを選ぶ」ボタン
+//   - プレイヤーの技スロット 4 個（タップで習得済みから選ぶ）
+//   - 各ミニオンの技スロット 4 個（同様）
+//   - 習得済み技の一覧（ロック中の技には鍵マーク）
+// ─────────────────────────────────────────────
+function _ensurePlayerSkillFields() {
+  if (!Array.isArray(player.learnedSkills)) player.learnedSkills = [];
+  if (!Array.isArray(player.skillSlots) || player.skillSlots.length !== 4) {
+    player.skillSlots = [null, null, null, null];
+  }
+}
+function _ensureMinionSkillFields(mi) {
+  if (!Array.isArray(mi.learnedSkills)) mi.learnedSkills = [];
+  if (!Array.isArray(mi.skillSlots) || mi.skillSlots.length !== 4) {
+    mi.skillSlots = [null, null, null, null];
+  }
+}
+
+function _refreshSkillConfig() {
+  _ensurePlayerSkillFields();
+  // タイプ表示
+  const typeEl = document.getElementById('player-type-display');
+  if (typeEl) {
+    const t = findPlayerType(player.type);
+    if (t) {
+      typeEl.innerHTML = `
+        <span class="pt-emoji">${t.emoji}</span>
+        <div>
+          <div class="pt-name">${t.name}</div>
+          <div class="pt-desc">${t.desc}</div>
+          <div class="pt-apt">適性: ${t.primary}・${t.secondary}</div>
+        </div>`;
+    } else {
+      typeEl.innerHTML = `
+        <span class="pt-emoji">❔</span>
+        <div>
+          <div class="pt-name">未設定</div>
+          <div class="pt-desc">タイプを設定すると属性に合った技が覚えられます。</div>
+          <div class="pt-apt">未設定: コモン技のみ習得可（救済）</div>
+        </div>`;
+    }
+  }
+  // プレイヤースロット
+  const pSlot = document.getElementById('player-skill-config');
+  if (pSlot) {
+    pSlot.innerHTML = _renderSkillConfigRow({
+      ownerLabel: '自分', ownerEmoji: findPlayerType(player.type)?.emoji ?? '🧙',
+      ownerLevel: player.level,
+      slots: player.skillSlots,
+      onSlotClick: i => _openSkillPicker({ owner: 'player', slotIdx: i }),
+    });
+    _bindSkillConfigRow(pSlot, player.skillSlots,
+      i => _openSkillPicker({ owner: 'player', slotIdx: i }));
+  }
+  // ミニオン群
+  const miBox = document.getElementById('minion-skill-config');
+  if (miBox) {
+    if (!Array.isArray(player.minions) || player.minions.length === 0) {
+      miBox.innerHTML = '<div class="menu-empty">仲間はまだいません</div>';
+    } else {
+      miBox.innerHTML = '';
+      player.minions.forEach((mi, mi_i) => {
+        _ensureMinionSkillFields(mi);
+        const wrap = document.createElement('div');
+        wrap.innerHTML = _renderSkillConfigRow({
+          ownerLabel: mi.name, ownerEmoji: mi.emoji ?? '🌸',
+          ownerLevel: mi.level,
+          slots: mi.skillSlots,
+        });
+        const row = wrap.firstElementChild;
+        miBox.appendChild(row);
+        _bindSkillConfigRow(row, mi.skillSlots,
+          i => _openSkillPicker({ owner: 'minion', minionIdx: mi_i, slotIdx: i }));
+      });
+    }
+  }
+  // プレイヤー習得済み技
+  const learnedEl = document.getElementById('player-learned-skills');
+  const cnt = document.getElementById('player-learned-count');
+  if (cnt) cnt.textContent = `(${player.learnedSkills.length})`;
+  if (learnedEl) {
+    if (player.learnedSkills.length === 0) {
+      learnedEl.innerHTML = '<div class="menu-empty">習得済みの技はまだありません</div>';
+    } else {
+      learnedEl.innerHTML = player.learnedSkills.map(s => {
+        const lvReq = skillLevelReq(s);
+        const locked = player.level < lvReq;
+        const emoji = SKILL_ELEMENT_EMOJI[s.element] ?? '✨';
+        return `
+          <div class="learned-skill-row${locked ? ' locked' : ''}">
+            <span class="lr-emoji">${emoji}</span>
+            <div>
+              <div class="lr-name" style="color:${SKILL_ELEMENT_COLOR[s.element] ?? '#ddd'}">
+                ${s.name}${locked ? `🔒Lv${lvReq}` : ''}
+              </div>
+              <div class="lr-meta">${s.element} / ${s.pattern}型 / 威力×${s.dmgMult} / MP-${s.mpCost} / ${s.rarity}</div>
+            </div>
+          </div>`;
+      }).join('');
+    }
+  }
+}
+
+function _renderSkillConfigRow({ ownerLabel, ownerEmoji, ownerLevel, slots }) {
+  const slotHtml = (slots ?? [null,null,null,null]).map((sk, i) => {
+    if (!sk) {
+      return `<button class="skill-config-slot empty" data-slot="${i}">
+        <span class="slot-emoji">＋</span><span class="slot-name">空き</span></button>`;
+    }
+    const emoji = SKILL_ELEMENT_EMOJI[sk.element] ?? '✨';
+    const lvReq = skillLevelReq(sk);
+    const locked = (ownerLevel ?? 1) < lvReq;
+    const color = SKILL_ELEMENT_COLOR[sk.element] ?? '#c5c5d4';
+    return `<button class="skill-config-slot${locked ? ' locked' : ''}" data-slot="${i}"
+      style="border-color:${color};color:${color};background:linear-gradient(180deg,${color}33 0%,${color}11 100%)">
+      <span class="slot-emoji">${emoji}</span>
+      <span class="slot-name">${sk.name}${locked ? '🔒' : ''}</span>
+      <span class="slot-mp">MP-${sk.mpCost}</span>
+    </button>`;
+  }).join('');
+  return `
+    <div class="skill-config-row">
+      <div class="skill-config-icon">${ownerEmoji}</div>
+      <div class="skill-config-info">
+        <div class="name">${ownerLabel}</div>
+        <div class="meta">Lv${ownerLevel ?? 1}</div>
+      </div>
+      <div class="skill-config-slots">${slotHtml}</div>
+    </div>`;
+}
+
+function _bindSkillConfigRow(rowEl, slots, onClickSlot) {
+  if (!rowEl) return;
+  rowEl.querySelectorAll('.skill-config-slot').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const i = parseInt(btn.dataset.slot, 10);
+      if (Number.isNaN(i)) return;
+      onClickSlot(i);
+    });
+  });
+}
+
+// ── タイプ選択モーダル ──
+document.getElementById('btn-open-type-select')?.addEventListener('click', () => {
+  const list = document.getElementById('type-select-list');
+  if (!list) return;
+  list.innerHTML = PLAYER_TYPES.map(t => {
+    const active = t.id === player.type ? ' active' : '';
+    return `<button class="type-select-cell${active}" data-id="${t.id}">
+      <div class="ts-name">${t.emoji} ${t.name}</div>
+      <div class="ts-desc">${t.desc}</div>
+      <div class="ts-apt">適性: ${t.primary}・${t.secondary}</div>
+    </button>`;
+  }).join('');
+  list.querySelectorAll('.type-select-cell').forEach(btn => {
+    btn.addEventListener('click', () => {
+      player.type = btn.dataset.id;
+      playSfx('confirm');
+      document.getElementById('type-select-modal').classList.add('hidden');
+      _refreshSkillConfig();
+      autoSave();
+    });
+  });
+  document.getElementById('type-select-modal').classList.remove('hidden');
+});
+document.getElementById('btn-type-select-cancel')?.addEventListener('click', () => {
+  document.getElementById('type-select-modal').classList.add('hidden');
+});
+
+// ── 技選択（スロットへ割り当て）モーダル ──
+let _skillPickContext = null;
+function _openSkillPicker(ctx) {
+  _skillPickContext = ctx;
+  const modal = document.getElementById('skill-pick-modal');
+  const title = document.getElementById('skill-pick-title');
+  const meta  = document.getElementById('skill-pick-meta');
+  const list  = document.getElementById('skill-pick-list');
+  if (!modal || !list) return;
+
+  let pool = [];
+  let ownerLevel = 1;
+  let labelMeta = '';
+  if (ctx.owner === 'player') {
+    _ensurePlayerSkillFields();
+    pool = player.learnedSkills;
+    ownerLevel = player.level;
+    const t = findPlayerType(player.type);
+    labelMeta = `自分のスロット ${ctx.slotIdx + 1} 番に技を割り当てます。タイプ: ${t ? t.name : '未設定'}`;
+  } else {
+    const mi = player.minions[ctx.minionIdx];
+    if (!mi) return;
+    _ensureMinionSkillFields(mi);
+    pool = mi.learnedSkills;
+    ownerLevel = mi.level;
+    labelMeta = `${mi.name} のスロット ${ctx.slotIdx + 1} 番に割り当てます。属性: ${mi.element}`;
+  }
+
+  title.textContent = `スロット ${ctx.slotIdx + 1} の技を選ぶ`;
+  meta.textContent  = labelMeta;
+  if (!pool || pool.length === 0) {
+    list.innerHTML = '<div class="menu-empty">習得済みの技がありません</div>';
+  } else {
+    list.innerHTML = pool.map((sk, i) => {
+      const lvReq = skillLevelReq(sk);
+      const locked = ownerLevel < lvReq;
+      const emoji = SKILL_ELEMENT_EMOJI[sk.element] ?? '✨';
+      const color = SKILL_ELEMENT_COLOR[sk.element] ?? '#c5c5d4';
+      return `<div class="skill-pick-row${locked ? ' locked' : ''}" data-idx="${i}">
+        <span class="sp-emoji">${emoji}</span>
+        <div>
+          <div class="sp-name" style="color:${color}">${sk.name}</div>
+          <div class="sp-meta">${sk.element} / ${sk.pattern}型 / 威力×${sk.dmgMult} / MP-${sk.mpCost} / ${sk.rarity}</div>
+        </div>
+        ${locked ? `<span class="sp-lock">🔒 Lv${lvReq}</span>` : ''}
+      </div>`;
+    }).join('');
+    list.querySelectorAll('.skill-pick-row:not(.locked)').forEach(row => {
+      row.addEventListener('click', () => {
+        const i = parseInt(row.dataset.idx, 10);
+        const sk = pool[i];
+        if (!sk) return;
+        _assignSkillToSlot(_skillPickContext, sk);
+        modal.classList.add('hidden');
+      });
+    });
+  }
+  modal.classList.remove('hidden');
+}
+function _assignSkillToSlot(ctx, skill) {
+  if (!ctx) return;
+  if (ctx.owner === 'player') {
+    _ensurePlayerSkillFields();
+    player.skillSlots[ctx.slotIdx] = skill ? { ...skill } : null;
+  } else {
+    const mi = player.minions[ctx.minionIdx];
+    if (!mi) return;
+    _ensureMinionSkillFields(mi);
+    mi.skillSlots[ctx.slotIdx] = skill ? { ...skill } : null;
+  }
+  playSfx('equip');
+  _refreshSkillConfig();
+  _refreshWazaBar();
+  autoSave();
+}
+document.getElementById('btn-skill-pick-clear')?.addEventListener('click', () => {
+  if (_skillPickContext) _assignSkillToSlot(_skillPickContext, null);
+  document.getElementById('skill-pick-modal').classList.add('hidden');
+});
+document.getElementById('btn-skill-pick-cancel')?.addEventListener('click', () => {
+  document.getElementById('skill-pick-modal').classList.add('hidden');
+});
 
 // 素材ボックスの一覧表示。アイコンと個数だけのシンプルなグリッド。
 function _refreshMaterialsUI() {
@@ -1057,51 +1319,111 @@ document.getElementById('btn-confirm-cancel').addEventListener('click', () => {
 function _learnSkillFromBook(idx) {
   const item = player.inventory[idx];
   if (!item || item.type !== 'skillBook') return;
-  if (!Array.isArray(player.skills)) player.skills = [];
-
-  // 既に同じ技を習得済み？ → 上書き不要、消費だけしてアラート
-  if (player.skills.find(s => s.id === item.skillId)) {
-    showAlert(`${item.skillName} は既に習得済みです`);
-    return;
-  }
+  _ensurePlayerSkillFields();
 
   const skillSpec = findSkillById(item.skillId);
   if (!skillSpec) { showAlert('技データが見つかりませんでした'); return; }
 
-  // スロットが空いていれば即習得。満杯なら忘れる技を選ばせる
-  if (player.skills.length < SKILL_SLOTS_MAX) {
-    player.skills.push({ ...skillSpec });
-    takeOneFromInventory(idx);
-    playSfx('levelup');
-    showAlert(`✨ ${skillSpec.name} を習得した！`);
-    refreshMenu();
-    autoSave();
+  // 学習可能な対象を列挙（プレイヤー / 各ミニオン）
+  const eligible = [];
+  if (canLearnSkillForPlayer(skillSpec, player)) {
+    const already = player.learnedSkills.find(s => s.id === skillSpec.id);
+    eligible.push({
+      kind: 'player',
+      label: '自分（' + (findPlayerType(player.type)?.name ?? '未設定') + '）',
+      emoji: findPlayerType(player.type)?.emoji ?? '🧙',
+      already, level: player.level,
+    });
+  }
+  for (const mi of (player.minions ?? [])) {
+    _ensureMinionSkillFields(mi);
+    if (!canLearnSkillForMinion(skillSpec, mi)) continue;
+    const already = mi.learnedSkills.find(s => s.id === skillSpec.id);
+    eligible.push({
+      kind: 'minion', minion: mi,
+      label: `${mi.name}（${mi.element}属性）`,
+      emoji: mi.emoji,
+      already, level: mi.level,
+    });
+  }
+
+  if (eligible.length === 0) {
+    const t = findPlayerType(player.type);
+    const apt = t ? `${t.name}（${t.primary}・${t.secondary}）` : '未設定';
+    showAlert(
+      `この技（${skillSpec.element}属性）を覚えられる仲間がいません。\n\n` +
+      `自分のタイプ: ${apt}\n` +
+      `仲間: ${(player.minions ?? []).map(m => `${m.name}(${m.element})`).join(' / ') || 'なし'}\n\n` +
+      `適性に合う属性のタイプ／仲間が必要です。`,
+    );
     return;
   }
 
-  // 満杯：簡易的に「忘れる技を選ぶ」リストを表示
-  _openForgetSkillModal(skillSpec, idx);
+  // 候補を選ばせる（学習済みは disabled）
+  _openLearnerPicker(skillSpec, idx, eligible);
 }
 
-function _openForgetSkillModal(newSkill, bookIdx) {
-  const list = player.skills.map((s, i) =>
-    `${i + 1}. ${s.name}（${s.pattern}型 / MP-${s.mpCost}）`,
-  ).join('\n');
-  showConfirm(
-    `技スロットが満杯（${SKILL_SLOTS_MAX}/${SKILL_SLOTS_MAX}）。\n\n` +
-    `習得したい技: ${newSkill.name}（${newSkill.pattern}型 / MP-${newSkill.mpCost}）\n\n` +
-    `現在の技:\n${list}\n\n` +
-    `1 番目の技を忘れて新しい技を覚えますか？\n（順番指定の UI は今後追加予定）`,
-    { okLabel: '1 番を忘れる', cancelLabel: 'やめる' },
-  ).then(ok => {
-    if (!ok) return;
-    player.skills[0] = { ...newSkill };
+function _openLearnerPicker(skillSpec, bookIdx, eligible) {
+  const title = `📕 ${skillSpec.name} を誰に覚えさせる？`;
+  const meta  = `${skillSpec.element} / ${skillSpec.pattern}型 / 威力×${skillSpec.dmgMult} / MP-${skillSpec.mpCost} / ${skillSpec.rarity}`;
+  const list = eligible.map((e, i) => {
+    const lvReq = skillLevelReq(skillSpec);
+    const lvOk  = e.level >= lvReq;
+    const dis = e.already ? ' locked' : '';
+    return `<div class="skill-pick-row${dis}" data-idx="${i}">
+      <span class="sp-emoji">${e.emoji}</span>
+      <div>
+        <div class="sp-name">${e.label}</div>
+        <div class="sp-meta">${e.already ? '既に習得済み' : (lvOk ? '習得可能' : `習得は可・装備は Lv${lvReq} で解放`)}</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  // skill-pick-modal を流用
+  const modal = document.getElementById('skill-pick-modal');
+  document.getElementById('skill-pick-title').textContent = title;
+  document.getElementById('skill-pick-meta').textContent  = meta;
+  const listEl = document.getElementById('skill-pick-list');
+  listEl.innerHTML = list;
+  listEl.querySelectorAll('.skill-pick-row:not(.locked)').forEach(row => {
+    row.addEventListener('click', () => {
+      const i = parseInt(row.dataset.idx, 10);
+      const e = eligible[i];
+      modal.classList.add('hidden');
+      _commitLearn(skillSpec, bookIdx, e);
+    });
+  });
+  modal.classList.remove('hidden');
+}
+
+function _commitLearn(skillSpec, bookIdx, target) {
+  const lvReq = skillLevelReq(skillSpec);
+  if (target.kind === 'player') {
+    _ensurePlayerSkillFields();
+    player.learnedSkills.push({ ...skillSpec });
+    const emptyIdx = player.skillSlots.findIndex(s => !s);
+    if (emptyIdx >= 0 && player.level >= lvReq) {
+      player.skillSlots[emptyIdx] = { ...skillSpec };
+    }
     takeOneFromInventory(bookIdx);
     playSfx('levelup');
-    showAlert(`📕 1 番目の技を忘れ、${newSkill.name} を習得しました`);
-    refreshMenu();
-    autoSave();
-  });
+    showAlert(`✨ あなたは ${skillSpec.name} を習得した！${emptyIdx >= 0 && player.level >= lvReq
+      ? '\n\nスロットに自動セットしました' : ''}`);
+  } else {
+    const mi = target.minion;
+    _ensureMinionSkillFields(mi);
+    mi.learnedSkills.push({ ...skillSpec });
+    const emptyIdx = mi.skillSlots.findIndex(s => !s);
+    if (emptyIdx >= 0 && mi.level >= lvReq) {
+      mi.skillSlots[emptyIdx] = { ...skillSpec };
+    }
+    takeOneFromInventory(bookIdx);
+    playSfx('levelup');
+    showAlert(`🌸 ${mi.name} は ${skillSpec.name} を習得した！${emptyIdx >= 0 && mi.level >= lvReq
+      ? '\n\nスロットに自動セットしました' : ''}`);
+  }
+  refreshMenu();
+  autoSave();
 }
 
 // 向き [fx, fy] に応じてオフセット [dx, dy] を回転。45° 単位（8 方向）。
@@ -1655,8 +1977,11 @@ function _alphaize(hex, a) {
 function _refreshWazaBar() {
   const bar = document.getElementById('waza-bar');
   if (!bar) return;
+  if (!Array.isArray(player.skillSlots) || player.skillSlots.length !== 4) {
+    player.skillSlots = [null, null, null, null];
+  }
   const slots = bar.querySelectorAll('.waza-slot');
-  const skills = Array.isArray(player.skills) ? player.skills : [];
+  const skills = player.skillSlots;
   for (let i = 0; i < slots.length; i++) {
     const btn = slots[i];
     const sk  = skills[i];
@@ -1668,25 +1993,32 @@ function _refreshWazaBar() {
       btn.style.borderColor   = '';
       btn.style.background    = '';
       btn.style.color         = '';
-      btn.title    = '空きスロット';
+      btn.title    = '空きスロット（メニューの技・タイプから割り当て）';
       btn.innerHTML = '—';
       continue;
     }
     btn.classList.remove('empty');
     const color = SKILL_ELEMENT_COLOR[sk.element] ?? '#c5c5d4';
     const emoji = SKILL_ELEMENT_EMOJI[sk.element] ?? '✨';
-    const lowMp = (player.mp ?? 0) < sk.mpCost;
-    btn.classList.toggle('lowmp', lowMp);
-    btn.disabled = lowMp || screen !== 'dungeon';
+    const lvLocked = player.level < skillLevelReq(sk);
+    const lowMp    = (player.mp ?? 0) < sk.mpCost;
+    btn.classList.toggle('lowmp', lowMp || lvLocked);
+    btn.disabled = lvLocked || lowMp || screen !== 'dungeon';
     btn.style.borderColor = color;
     btn.style.background  = `linear-gradient(180deg, ${color}33 0%, ${color}11 100%)`;
     btn.style.color       = color;
-    btn.title = `${sk.name}（${sk.element} / ${sk.pattern}型 / MP-${sk.mpCost}）${lowMp ? ' MP不足' : ''}`;
+    btn.title = lvLocked
+      ? `${sk.name}（Lv${skillLevelReq(sk)} で解放）`
+      : `${sk.name}（${sk.element} / ${sk.pattern}型 / MP-${sk.mpCost}）${lowMp ? ' MP不足' : ''}`;
     btn.innerHTML =
       `<span class="waza-slot-emoji">${emoji}</span>` +
-      `<span class="waza-slot-name">${sk.name}</span>` +
+      `<span class="waza-slot-name">${sk.name}${lvLocked ? '🔒' : ''}</span>` +
       `<span class="waza-slot-mp">MP-${sk.mpCost}</span>`;
     btn.onclick = () => {
+      if (lvLocked) {
+        showAlert(`${sk.name} は Lv${skillLevelReq(sk)} で解放されます`);
+        return;
+      }
       playSfx('click');
       _executeSkill(sk);
     };
@@ -1700,7 +2032,7 @@ function _openWazaModal() {
   if (!dungeon || screen !== 'dungeon') {
     showAlert('技はダンジョン探索中にだけ使えます'); return;
   }
-  const skills = Array.isArray(player.skills) ? player.skills : [];
+  const skills = (Array.isArray(player.skillSlots) ? player.skillSlots : []).filter(Boolean);
   const list   = document.getElementById('waza-list');
   document.getElementById('waza-mp-status').textContent =
     `(MP ${player.mp ?? 0}/${player.maxMp ?? 0})`;
@@ -2163,6 +2495,18 @@ function move(dx, dy) {
     return;
   }
 
+  // ミニオンマスへの侵入 → 位置交換（同マスに重ならない）
+  const minion = dungeon.minionAt ? dungeon.minionAt(nx, ny) : null;
+  if (minion) {
+    minion.x = px;
+    minion.y = py;
+    dungeon.playerPos.x = nx;
+    dungeon.playerPos.y = ny;
+    dungeon.render(document.getElementById('dungeon-canvas'));
+    _runEnemyTurn();
+    return;
+  }
+
   dungeon.playerPos.x = nx;
   dungeon.playerPos.y = ny;
 
@@ -2184,55 +2528,137 @@ function move(dx, dy) {
 }
 
 // 敵ターン共通処理
-//   各敵の魔法攻撃を 1 件ずつ時間差で表示する（合算しない）。
-//   1 体撃破でも複数体に囲まれていると連続でダメージ表示・SFX・ログが重なる演出。
+//   ミニオン行動 → 敵行動を 1 件ずつ時間差で演出する（プレイヤーが目で追える速さ）。
+//   各攻撃にはアタックトレイル + ダメージ表示 + 1 呼吸の間（STEP_MS）を入れる。
 function _runEnemyTurn() {
-  // ミニオン行動を敵ターンの直前に入れる: プレイヤー → ミニオン → 敵 の順。
-  // ミニオンが敵を倒した場合は XP/ゴールド/ドロップは現状ノーリワード（v1。
-  // 後でプレイヤーに恩恵を分配する設計に変える可能性あり）。
+  // 1) ミニオンのターン: 攻撃と位置交換イベントを同期処理
   const minionRes = dungeon.tickMinions(player);
-  for (const ev of (minionRes?.events ?? [])) {
-    if (ev.type !== 'minion-attack') continue;
-    dungeonLog(`${ev.minion.emoji} ${ev.minion.name} の攻撃！ ${ev.mob.name} に ${ev.dmg} ダメージ`);
-    if (ev.killed) {
-      dungeonLog(`${ev.minion.emoji} ${ev.minion.name} が ${ev.mob.name} を倒した！`);
-      _maybeRecruitMinion(ev.mob);
-      dungeon.removeMonster(ev.mob);
-    }
-  }
+  const minionAttacks = (minionRes?.events ?? []).filter(e => e.type === 'minion-attack');
 
-  const result = dungeon.tickEnemies(player);
-  const magics = result.events.filter(e => e.type === 'magic');
-
-  // 描画はとりあえず移動結果だけ先に反映
+  // 描画はミニオン移動結果（swap 含む）を先に反映
   dungeon.render(document.getElementById('dungeon-canvas'));
 
-  if (magics.length === 0) return;
+  const STEP_MS = 280;
 
-  let i = 0;
-  const STEP_MS = 320;
-  const apply = () => {
-    if (player.hp <= 0) return;
-    const ev = magics[i++];
-    if (!ev) return;
-    player.hp = Math.max(0, player.hp - ev.dmg);
-    showFloatingDamage(ev.dmg);
-    playSfx('damage');
-    // 「誰が」プレイヤーを攻撃しているかを攻撃方向ストリークで明示
-    const mobScreen = _mobScreenAnchor(ev.mob);
-    if (mobScreen) attackTrail(mobScreen, playerVfxAnchor(), { element: ev.mob.element });
-    // 壁越し魔法は属性魔法陣＋衝撃波
-    magicCircle(playerVfxAnchor(), ev.mob.element);
-    shockwave(playerVfxAnchor(), { color: 'rgba(255,82,82,0.6)' });
-    dungeonLog(`✨ ${ev.mob.name} の魔法攻撃！ ${ev.dmg} ダメージ`);
-    refreshHUD();
-    if (player.hp <= 0) {
-      setTimeout(() => showResult(false), 350);
-      return;
-    }
-    if (i < magics.length) setTimeout(apply, STEP_MS);
+  const playMinionAttacks = (cb) => {
+    if (minionAttacks.length === 0) { cb(); return; }
+    let i = 0;
+    const step = () => {
+      const ev = minionAttacks[i++];
+      if (!ev) { cb(); return; }
+      _animateMinionAttack(ev);
+      // ミニオン攻撃で死んだ敵をフロアから除去 + ドロップ判定（最低限）
+      if (ev.killed) {
+        _maybeRecruitMinion(ev.mob);
+        dungeon.removeMonster(ev.mob);
+        // 敵を倒した報酬：XP のみ（ゴールドや装備はプレイヤー貢献度が低いので簡略）
+        gainXp(_xpFromMonster(ev.mob));
+      }
+      setTimeout(() => {
+        dungeon.render(document.getElementById('dungeon-canvas'));
+        if (i < minionAttacks.length) setTimeout(step, STEP_MS);
+        else cb();
+      }, STEP_MS);
+    };
+    step();
   };
-  apply();
+
+  const playEnemyTurn = () => {
+    const result = dungeon.tickEnemies(player);
+    const magics = result.events.filter(e => e.type === 'magic');
+    dungeon.render(document.getElementById('dungeon-canvas'));
+    if (magics.length === 0) return;
+
+    let i = 0;
+    const apply = () => {
+      if (player.hp <= 0) return;
+      const ev = magics[i++];
+      if (!ev) return;
+      player.hp = Math.max(0, player.hp - ev.dmg);
+      showFloatingDamage(ev.dmg);
+      playSfx('damage');
+      const mobScreen = _mobScreenAnchor(ev.mob);
+      if (mobScreen) attackTrail(mobScreen, playerVfxAnchor(), { element: ev.mob.element });
+      magicCircle(playerVfxAnchor(), ev.mob.element);
+      shockwave(playerVfxAnchor(), { color: 'rgba(255,82,82,0.6)' });
+      // プレイヤーへの一撃が「弱点突き」かどうか（敵 element vs プレイヤー防具属性）
+      const matchup = elementMatchup(ev.mob.element, player.armor?.element);
+      if (matchup >= 1.5) _showWeaknessBanner('弱点ヒット!!');
+      dungeonLog(`✨ ${ev.mob.name} の魔法攻撃！ ${ev.dmg} ダメージ${matchup >= 1.5 ? '　弱点!!' : ''}`);
+      refreshHUD();
+      if (player.hp <= 0) {
+        setTimeout(() => showResult(false), 350);
+        return;
+      }
+      if (i < magics.length) setTimeout(apply, STEP_MS);
+    };
+    apply();
+  };
+
+  playMinionAttacks(playEnemyTurn);
+}
+
+// ミニオン位置のスクリーン中心アンカー（VFX 用）
+function _minionScreenAnchor(mi) {
+  if (!dungeon || !mi) return null;
+  const canvas = document.getElementById('dungeon-canvas');
+  if (!canvas) return null;
+  const r = canvas.getBoundingClientRect();
+  const VIEW = 11, half = 5;
+  const px = dungeon.playerPos.x;
+  const py = dungeon.playerPos.y;
+  const tx = mi.x - (px - half);
+  const ty = mi.y - (py - half);
+  if (tx < 0 || tx >= VIEW || ty < 0 || ty >= VIEW) return null;
+  const ts = canvas.width / VIEW;
+  return {
+    left: r.left + tx * ts + ts / 2 - 16,
+    top:  r.top  + ty * ts + ts / 2 - 16,
+    width: 32, height: 32,
+  };
+}
+
+// ミニオンの攻撃 1 件を画面に演出する（プレイヤー側演出 _bumpMeleeAttack の簡略版）
+function _animateMinionAttack(ev) {
+  const fromAnchor = _minionScreenAnchor(ev.minion);
+  const toAnchor   = _mobScreenAnchor(ev.mob);
+  const elColor = SKILL_ELEMENT_COLOR[ev.minion.element] ?? '#66bb6a';
+  if (fromAnchor && toAnchor) {
+    attackTrail(fromAnchor, toAnchor, { color: elColor });
+  }
+  if (toAnchor) {
+    sparkSpray(toAnchor, { color: elColor, count: 10 });
+    const kind = ev.matchup >= 1.5 ? 'effective' : ev.matchup <= 0.7 ? 'weak' : 'normal';
+    showDamageAt(toAnchor, ev.dmg, { kind });
+    if (ev.matchup >= 1.5) {
+      explosion(toAnchor, { color: elColor });
+      _showWeaknessBanner(`WEAKNESS!`);
+      screenShake(8, 220);
+    }
+    if (ev.killed) deathBurst(toAnchor, { color: ev.mob.rarityColor ?? '#ff7043' });
+  }
+  playSfx('hit');
+  const mtxt = matchupLabel(ev.matchup);
+  dungeonLog(`${ev.minion.emoji} ${ev.minion.name} の攻撃！ ${ev.mob.name} に ${ev.dmg} ダメージ${mtxt ? '　' + mtxt : ''}`);
+  if (ev.killed) {
+    dungeonLog(`${ev.minion.emoji} ${ev.minion.name} が ${ev.mob.name} を倒した！`);
+  }
+}
+
+// 弱点ヒット時のフルスクリーンバナー（800ms で自動消去）
+let _weaknessBannerTimer = null;
+function _showWeaknessBanner(text = 'WEAKNESS!') {
+  const el = document.getElementById('weakness-banner');
+  if (!el) return;
+  el.innerHTML = `<div class="wb-text">${text}</div>`;
+  el.classList.remove('hidden');
+  hitFlash({ color: 'rgba(255,213,79,0.45)' });
+  if (_weaknessBannerTimer) clearTimeout(_weaknessBannerTimer);
+  _weaknessBannerTimer = setTimeout(() => {
+    el.classList.add('hidden');
+    el.innerHTML = '';
+    _weaknessBannerTimer = null;
+  }, 800);
 }
 
 // ダンジョン上のモンスターのスクリーン中心座標を取り出す（攻撃方向矢印用）。
@@ -2372,7 +2798,7 @@ document.addEventListener('keydown', e => {
   // 1〜4 で技スロットを発動（PC からのデバッグ動作確認用）
   if (e.key === '1' || e.key === '2' || e.key === '3' || e.key === '4') {
     const idx = parseInt(e.key, 10) - 1;
-    const sk  = (player.skills ?? [])[idx];
+    const sk  = (player.skillSlots ?? [])[idx];
     if (sk) { e.preventDefault(); _executeSkill(sk); }
     return;
   }
@@ -2541,7 +2967,7 @@ function _enemyAnchor(mob) {
   return _mobScreenAnchor(mob);
 }
 
-// 物理バンプ近接攻撃。単発打撃 → 命中 VFX → 死亡判定 → 敵ターン
+// 物理バンプ近接攻撃。単発打撃 → 命中 VFX → 1 呼吸の間 → 死亡判定 → 敵ターン
 function _bumpMeleeAttack(mob) {
   const matchup = elementMatchup(player.weapon?.element, mob.element);
   const base = Math.max(1, player.atk - mob.def);
@@ -2567,8 +2993,10 @@ function _bumpMeleeAttack(mob) {
     if (enemyAt) explosion(enemyAt, { color: elColor ?? '#ff7043' });
     if (enemyAt) sparkSpray(enemyAt, { count: 18, color: '#fff' });
   } else if (isEffective) {
-    screenShake(5, 200);
-    if (enemyAt) sparkSpray(enemyAt, { color: elColor ?? '#ffd54f', count: 14 });
+    screenShake(8, 260);
+    if (enemyAt) explosion(enemyAt, { color: elColor ?? '#ffd54f' });
+    if (enemyAt) sparkSpray(enemyAt, { color: elColor ?? '#ffd54f', count: 18 });
+    _showWeaknessBanner('WEAKNESS!');
   } else if (enemyAt) {
     sparkSpray(enemyAt, { color: elColor ?? '#ffd54f', count: 10 });
   }
@@ -2583,7 +3011,8 @@ function _bumpMeleeAttack(mob) {
 
   refreshHUD();
   dungeon.render(document.getElementById('dungeon-canvas'));
-  _runEnemyTurn();
+  // 1 呼吸の間（演出が見える時間を確保）→ 敵ターン
+  setTimeout(() => _runEnemyTurn(), 220);
 }
 
 // 壁角越しの斜めバンプ → 弱体魔法（無 MP）。プレイヤーは移動しない
@@ -2740,7 +3169,11 @@ function autoSave() {
       gold:       player.gold       ?? 0,
       platinum:   player.platinum   ?? 0,
       scanBudget: player.scanBudget ?? null,
-      skills:     player.skills     ?? [],
+      type:          player.type ?? null,
+      learnedSkills: player.learnedSkills ?? [],
+      skillSlots:    player.skillSlots    ?? [null, null, null, null],
+      // 旧セーブ互換のため skills も併記（読み込み側でマイグレートする）
+      skills:        player.learnedSkills ?? [],
       // ミニオンは座標 x,y を持つ場合があるが永続データには不要なので落とす
       minions:    (player.minions ?? []).map(({ x, y, ...rest }) => rest),
     },
@@ -2772,12 +3205,41 @@ function _applySave(data) {
   _migrateItemElements(player);
   // 旧セーブのスタック未対応データを集約（count 付与 + 同種重複統合）
   _consolidateStacks(player);
-  if (!Array.isArray(player.skills)) player.skills = [];
+  // 旧セーブ互換: player.skills のみ存在 → learnedSkills + skillSlots へ展開
+  _migrateSkillFields(player);
+  // ミニオンも learnedSkills / skillSlots を持つようリハイドレート
+  player.minions = (player.minions ?? [])
+    .map(m => rehydrateMinion(m))
+    .filter(Boolean);
   clearedSet.clear();
   if (Array.isArray(data.clearedSeeds)) {
     for (const s of data.clearedSeeds) clearedSet.add(s);
   }
   refreshHUD();
+}
+
+// 旧セーブ互換: player.skills（4 個までの装備中技配列）→
+// learnedSkills + skillSlots（4 スロット）へ展開する。
+function _migrateSkillFields(p) {
+  if (!Array.isArray(p.skillSlots) || p.skillSlots.length !== 4) {
+    p.skillSlots = [null, null, null, null];
+  }
+  if (!Array.isArray(p.learnedSkills)) p.learnedSkills = [];
+  if (Array.isArray(p.skills) && p.skills.length > 0) {
+    for (const sk of p.skills) {
+      if (!sk?.id) continue;
+      if (!p.learnedSkills.find(x => x.id === sk.id)) {
+        p.learnedSkills.push({ ...sk });
+      }
+    }
+    // 旧セーブの skills の並びをそのままスロットに反映（先頭 4 個）
+    for (let i = 0; i < 4; i++) {
+      const src = p.skills[i];
+      if (src && !p.skillSlots[i]) p.skillSlots[i] = { ...src };
+    }
+  }
+  // 旧 skills フィールドを削除（保存時の冗長を防ぐ）
+  delete p.skills;
 }
 
 // 旧セーブの素材を持ち物・ストレージから取り出して、新しい素材ボックスへ移動する。

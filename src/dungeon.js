@@ -3,6 +3,7 @@ import { generateMonster, generateFloorItems, generateShopkeeperFor, generateSho
 import { getDebugState } from './debug.js';
 import { getItemIconCanvas } from './icons.js';
 import { findMinionTemplate } from './minions.js';
+import { elementMatchup } from './items.js';
 
 const W = 21;
 const H = 19;
@@ -189,8 +190,10 @@ export class Dungeon {
 
   // ミニオン AI: プレイヤーの行動後に 1 ティック動かす。
   //   1. 隣接 8 マスに敵がいたら最寄り 1 体を攻撃（whiff なし、固定で当たる）
-  //   2. なければプレイヤーに 1 マス近づく（壁・敵・他ミニオンで詰まれば待機）
-  // 戻り値: events = [{ type:'minion-attack', minion, mob, dmg, killed }]
+  //      ダメージは ATK と DEF に加え属性相性（elementMatchup）を適用する。
+  //   2. なければプレイヤーに 1 マス近づく。プレイヤーマスへ進む際は「位置交換」、
+  //      他ミニオン・敵で詰まれば待機。
+  // 戻り値: events = [{ type:'minion-attack', minion, mob, dmg, killed, matchup }]
   tickMinions(player) {
     const events = [];
     if (!Array.isArray(this.minions) || this.minions.length === 0) return { events };
@@ -212,10 +215,16 @@ export class Dungeon {
       }
 
       if (target) {
+        // 属性相性込みのダメージ計算（ミニオンの主属性 vs 敵属性）
+        const matchup = elementMatchup(mi.element, target.element);
         const base = Math.max(1, mi.atk - target.def);
-        const dmg  = base + Math.floor(Math.random() * Math.max(1, base * 0.4));
+        const roll = Math.floor(Math.random() * Math.max(1, base * 0.4));
+        const dmg  = Math.max(1, Math.floor((base + roll) * matchup));
         target.hp = Math.max(0, target.hp - dmg);
-        events.push({ type: 'minion-attack', minion: mi, mob: target, dmg, killed: target.hp <= 0 });
+        events.push({
+          type: 'minion-attack', minion: mi, mob: target,
+          dmg, killed: target.hp <= 0, matchup,
+        });
         continue;
       }
 
@@ -227,17 +236,31 @@ export class Dungeon {
       if (adx <= 1 && ady <= 1) continue;
       const sx = Math.sign(px - mi.x);
       const sy = Math.sign(py - mi.y);
+      // tryStep: プレイヤーマスは「位置交換」で許可。他ミニオン・敵は不許可
       const tryStep = (dx, dy) => {
         if (dx === 0 && dy === 0) return false;
         const tx = mi.x + dx;
         const ty = mi.y + dy;
         if (!this.canWalk(tx, ty)) return false;
-        if (px === tx && py === ty) return false;
         if (this._monsterAt(tx, ty)) return false;
         if (this.minions.some(o => o !== mi && o.x === tx && o.y === ty)) return false;
         return true;
       };
-      if      (tryStep(sx, sy)) { mi.x += sx; mi.y += sy; }
+      const swapWithPlayer = (dx, dy) => {
+        const oldX = mi.x, oldY = mi.y;
+        mi.x = px; mi.y = py;
+        this.playerPos.x = oldX; this.playerPos.y = oldY;
+        events.push({ type: 'swap', minion: mi });
+      };
+      const trySwap = (dx, dy) => {
+        const tx = mi.x + dx;
+        const ty = mi.y + dy;
+        return tx === px && ty === py;
+      };
+      if      (trySwap(sx, sy)) swapWithPlayer(sx, sy);
+      else if (trySwap(sx, 0))  swapWithPlayer(sx, 0);
+      else if (trySwap(0, sy))  swapWithPlayer(0, sy);
+      else if (tryStep(sx, sy)) { mi.x += sx; mi.y += sy; }
       else if (tryStep(sx, 0))  { mi.x += sx; }
       else if (tryStep(0, sy))  { mi.y += sy; }
       // どこにも進めなければ待機

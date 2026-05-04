@@ -1590,6 +1590,7 @@ html, body {
 .menu-section.stage-storage,
 .menu-section.stage-materials,
 .menu-section.stage-synth,
+.menu-section.stage-skills,
 .menu-section.stage-element,
 .menu-section.stage-currency,
 .menu-section.stage-sound,
@@ -1601,6 +1602,7 @@ html, body {
 .menu-modal[data-stage="storage"]   .menu-section.stage-storage,
 .menu-modal[data-stage="materials"] .menu-section.stage-materials,
 .menu-modal[data-stage="synth"]     .menu-section.stage-synth,
+.menu-modal[data-stage="skills"]    .menu-section.stage-skills,
 .menu-modal[data-stage="element"]   .menu-section.stage-element,
 .menu-modal[data-stage="currency"]  .menu-section.stage-currency,
 .menu-modal[data-stage="sound"]     .menu-section.stage-sound,
@@ -2138,4 +2140,193 @@ html, body {
 .dungeon-map-icon.cleared {
   background: #555;
   box-shadow: none;
+}
+
+/* ─────────────────────────────────────────────
+   技 / タイプ設定 UI
+   ───────────────────────────────────────────── */
+.skill-config-help {
+  font-size: 11px;
+  color: #aaa;
+  margin: 4px 0 8px;
+}
+.player-type-display {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 10px;
+  padding: 10px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.player-type-display .pt-emoji { font-size: 28px; }
+.player-type-display .pt-name  { font-weight: bold; font-size: 14px; }
+.player-type-display .pt-desc  { font-size: 11px; color: #aaa; margin-top: 2px; }
+.player-type-display .pt-apt   { font-size: 11px; color: #ffd54f; margin-top: 4px; }
+
+.skill-config-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px;
+  padding: 8px;
+  margin-bottom: 6px;
+}
+.skill-config-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.06);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 28px;
+  flex-shrink: 0;
+}
+.skill-config-info {
+  font-size: 11px;
+  min-width: 0;
+  flex: 0 0 auto;
+}
+.skill-config-info .name { font-weight: bold; font-size: 12px; }
+.skill-config-info .meta { color: #aaa; font-size: 10px; }
+.skill-config-slots {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+.skill-config-slot {
+  width: 60px;
+  min-height: 56px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.18);
+  color: #ddd;
+  font-size: 9px;
+  padding: 4px 3px;
+  text-align: center;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+.skill-config-slot:active { transform: scale(0.96); }
+.skill-config-slot.empty {
+  color: #888;
+  border-style: dashed;
+}
+.skill-config-slot .slot-emoji { font-size: 18px; line-height: 1; }
+.skill-config-slot .slot-name {
+  font-size: 9px; font-weight: bold;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.skill-config-slot .slot-mp { font-size: 9px; opacity: 0.75; }
+
+.learned-skills-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+}
+.learned-skill-row {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.learned-skill-row .lr-emoji { font-size: 18px; }
+.learned-skill-row .lr-name  { font-weight: bold; }
+.learned-skill-row .lr-meta  { color: #aaa; font-size: 10px; }
+.learned-skill-row.locked    { opacity: 0.55; }
+
+/* タイプ選択リスト */
+.type-select-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 8px 0;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.type-select-cell {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 10px;
+  padding: 8px;
+  cursor: pointer;
+  text-align: left;
+  color: #ddd;
+}
+.type-select-cell.active {
+  border-color: #ffd54f;
+  background: rgba(255,213,79,0.1);
+}
+.type-select-cell .ts-name  { font-weight: bold; font-size: 13px; }
+.type-select-cell .ts-desc  { font-size: 10px; color: #aaa; margin-top: 2px; }
+.type-select-cell .ts-apt   { font-size: 10px; color: #ffd54f; margin-top: 4px; }
+
+/* 技選択（スロットへ割り当て）リスト */
+.skill-pick-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 8px 0;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.skill-pick-row {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 8px;
+  padding: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #ddd;
+}
+.skill-pick-row.locked { opacity: 0.45; cursor: not-allowed; }
+.skill-pick-row.active { border-color: #ffd54f; background: rgba(255,213,79,0.1); }
+.skill-pick-row .sp-emoji { font-size: 22px; }
+.skill-pick-row .sp-name  { font-weight: bold; font-size: 13px; }
+.skill-pick-row .sp-meta  { font-size: 10px; color: #aaa; }
+.skill-pick-row .sp-lock  { color: #ff8a65; font-size: 10px; margin-left: auto; }
+
+/* 弱点ヒット時の派手なバナー：中央でフラッシュして縮退 */
+.weakness-banner {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 4000;
+}
+.weakness-banner.hidden { display: none; }
+.weakness-banner .wb-text {
+  font-size: 64px;
+  font-weight: 900;
+  letter-spacing: 4px;
+  background: linear-gradient(180deg, #fff 0%, #ffd54f 50%, #ff7043 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 0 20px rgba(255,213,79,0.85), 0 0 40px rgba(255,112,67,0.7);
+  animation: wbPop 800ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  transform-origin: center center;
+}
+@keyframes wbPop {
+  0%   { opacity: 0; transform: scale(0.4) rotate(-8deg); }
+  20%  { opacity: 1; transform: scale(1.25) rotate(2deg); }
+  60%  { opacity: 1; transform: scale(1.0) rotate(0deg); }
+  100% { opacity: 0; transform: scale(1.4) rotate(0deg); }
+}
+@media (max-width: 480px) {
+  .weakness-banner .wb-text { font-size: 44px; letter-spacing: 2px; }
 }
