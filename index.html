@@ -241,6 +241,10 @@
             <span class="menu-tile-emoji">🛠</span>
             <span class="menu-tile-label">合成・強化</span>
           </button>
+          <button class="menu-tile" data-go="skills">
+            <span class="menu-tile-emoji">📕</span>
+            <span class="menu-tile-label">技・タイプ</span>
+          </button>
           <button class="menu-tile" data-go="element">
             <span class="menu-tile-emoji">⚖️</span>
             <span class="menu-tile-label">属性相性</span>
@@ -312,6 +316,27 @@
         <div class="menu-section-title">⚖️ 属性相性</div>
         <div class="element-chart-help">攻撃側の属性が相手の弱点なら 1.5 倍、逆に弱点なら 0.7 倍。下の輪を覚えれば OK。</div>
         <div id="element-chart" class="element-chart"></div>
+      </section>
+
+      <!-- 技・タイプ設定 -->
+      <section class="menu-section stage-skills">
+        <div class="menu-section-title">🧙 タイプ設定</div>
+        <div class="skill-config-help">タイプを設定すると、対応属性の技だけ覚えられます。</div>
+        <div id="player-type-display" class="player-type-display"></div>
+        <button id="btn-open-type-select" class="menu-action-btn" style="margin-top:6px">タイプを選ぶ</button>
+      </section>
+      <section class="menu-section stage-skills">
+        <div class="menu-section-title">📕 自分の技スロット <span class="menu-section-meta">（最大 4）</span></div>
+        <div id="player-skill-config" class="skill-config-row"></div>
+        <div class="skill-config-help">スロットをタップで習得済みの技から選べます。レベル不足の技はロック中。</div>
+      </section>
+      <section class="menu-section stage-skills">
+        <div class="menu-section-title">🌸 ミニオンの技スロット</div>
+        <div id="minion-skill-config"></div>
+      </section>
+      <section class="menu-section stage-skills">
+        <div class="menu-section-title">📚 習得済み技（自分） <span id="player-learned-count" class="menu-section-meta"></span></div>
+        <div id="player-learned-skills" class="learned-skills-grid"></div>
       </section>
 
       <section class="menu-section stage-currency">
@@ -527,6 +552,36 @@
       </fieldset>
     </div>
   </div>
+
+  <!-- タイプ選択モーダル -->
+  <div id="type-select-modal" class="confirm-modal hidden">
+    <div class="confirm-modal-box">
+      <div class="confirm-modal-title">🧙 タイプを選ぶ</div>
+      <div class="confirm-modal-detail" style="font-size:13px;color:#aaa">
+        タイプを変更すると、覚えられる技の属性が切り替わります。すでに習得した技は失われません。
+      </div>
+      <div id="type-select-list" class="type-select-list"></div>
+      <div class="confirm-modal-actions">
+        <button id="btn-type-select-cancel" class="btn-back">キャンセル</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 技選択（スロットへ割り当て）モーダル -->
+  <div id="skill-pick-modal" class="confirm-modal hidden">
+    <div class="confirm-modal-box">
+      <div id="skill-pick-title" class="confirm-modal-title">技をスロットに割り当て</div>
+      <div class="confirm-modal-detail" id="skill-pick-meta" style="font-size:13px;color:#aaa"></div>
+      <div id="skill-pick-list" class="skill-pick-list"></div>
+      <div class="confirm-modal-actions">
+        <button id="btn-skill-pick-clear"  class="btn-back">スロットを空にする</button>
+        <button id="btn-skill-pick-cancel" class="btn-back">キャンセル</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 弱点ヒット時の派手バナー -->
+  <div id="weakness-banner" class="weakness-banner hidden"></div>
 
   <!-- アイコンギャラリーモーダル（デバッグ用） -->
   <div id="icon-gallery-modal" class="confirm-modal hidden">

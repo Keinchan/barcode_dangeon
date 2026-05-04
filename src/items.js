@@ -504,6 +504,75 @@ export function findSkillById(id) {
   return SKILLS_LIBRARY.find(s => s.id === id) ?? null;
 }
 
+// 技解放レベル（レア度ごと）。プレイヤー / ミニオンの level がこの値以上の時だけ
+// スロットにセットして発動できる。学習自体は level 不問（巻物を読めば覚える）。
+export const SKILL_LEVEL_REQ = {
+  'コモン':     1,
+  'レア':       5,
+  'エピック':   15,
+  'レジェンド': 30,
+};
+export function skillLevelReq(skill) {
+  return SKILL_LEVEL_REQ[skill?.rarity] ?? 1;
+}
+
+// ─────────────────────────────────────────────
+// プレイヤータイプ（自分のクラス）と適性
+//   タイプは 6 属性とそれぞれリンクし、覚えられる技の属性が決まる。
+//   primary（主属性） + secondary（副属性）の 2 種類が「適性あり」。
+//   未設定の場合は冒険者扱いで全属性 1.0 倍に対応。
+// ─────────────────────────────────────────────
+export const PLAYER_TYPES = [
+  { id: 'flame',   name: '炎舞士',     emoji: '🔥', primary: '火', secondary: '雷',
+    desc: '火と雷の技に適性。攻めの型。' },
+  { id: 'tide',    name: '水霊術士',   emoji: '💧', primary: '水', secondary: '草',
+    desc: '水と草の技に適性。守りと回復寄り。' },
+  { id: 'leaf',    name: '森の狩人',   emoji: '🌿', primary: '草', secondary: '闇',
+    desc: '草と闇の技に適性。状態異常が得意。' },
+  { id: 'spark',   name: '雷光剣士',   emoji: '⚡', primary: '雷', secondary: '光',
+    desc: '雷と光の技に適性。手数で攻める。' },
+  { id: 'radiant', name: '神聖騎士',   emoji: '✨', primary: '光', secondary: '火',
+    desc: '光と火の技に適性。聖騎士の型。' },
+  { id: 'umbra',   name: '冥府使い',   emoji: '🌑', primary: '闇', secondary: '水',
+    desc: '闇と水の技に適性。封じが得意。' },
+];
+
+export function findPlayerType(id) {
+  return PLAYER_TYPES.find(t => t.id === id) ?? null;
+}
+
+// プレイヤーの適性属性のリストを返す。タイプ未設定時は空配列（＝何も覚えられない）
+// ではなく、コモン技だけは覚えられるよう「すべての属性」を返す簡易救済を入れる。
+export function aptitudeElementsForPlayer(player) {
+  const t = findPlayerType(player?.type);
+  if (!t) return ELEMENTS.slice();   // 未設定: コモン技のみ覚えられる救済（後段で rarity 制限）
+  return [t.primary, t.secondary];
+}
+
+// ミニオンの適性属性: 自身の element + テンプレ定義の aptitudeElements
+export function aptitudeElementsForMinion(minion) {
+  const out = new Set();
+  if (minion?.element) out.add(minion.element);
+  if (Array.isArray(minion?.aptitudeElements)) {
+    for (const e of minion.aptitudeElements) out.add(e);
+  }
+  return [...out];
+}
+
+// 適性チェック。タイプ未設定のプレイヤーはコモン技に限り学習可（救済）
+export function canLearnSkillForPlayer(skill, player) {
+  if (!skill) return false;
+  if (!player?.type && skill.rarity !== 'コモン') return false;
+  const aps = aptitudeElementsForPlayer(player);
+  return aps.includes(skill.element);
+}
+
+export function canLearnSkillForMinion(skill, minion) {
+  if (!skill || !minion) return false;
+  const aps = aptitudeElementsForMinion(minion);
+  return aps.includes(skill.element);
+}
+
 // 技の書アイテム（読むと技を習得）
 export function makeSkillBook(skillId) {
   const skill = findSkillById(skillId);
