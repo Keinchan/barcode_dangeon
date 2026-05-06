@@ -19,7 +19,8 @@ import {
 import {
   generateItemFromBarcode, rarityFromDigit, bumpRarity, RARITIES, migrateElement,
   isStackable, stackKey, materialForRarity,
-  PATTERN_OFFSETS, PATTERN_DESC, findSkillById, elementMatchup, matchupLabel,
+  PATTERN_OFFSETS, PATTERN_DESC, RANGE_TYPES, normalizeRangeType,
+  findSkillById, elementMatchup, matchupLabel,
   elementMatchupTable, ELEMENTS,
   shopPriceFor,
   ENHANCE_RECIPES, applyEnhanceRecipe, fuseLegendaries,
@@ -1444,22 +1445,45 @@ function _rotateOffsetByFacing([dx, dy], [fx, fy]) {
   return [Math.round(rx), Math.round(ry)];
 }
 
-function _facingRotatedOffsets(pattern, facing) {
-  const base = PATTERN_OFFSETS[pattern] ?? [];
-  // B / D は元から放射状なので回転しても見た目同じ
-  if (pattern === 'B' || pattern === 'D') return base;
+// 範囲タイプの offsets を向きに合わせて回転する。RANGE_TYPES[id].rotatable が
+// false（ADJ / CROSS / DIAG / TERRAIN_5X5 等の放射状）の場合は回転しない。
+function _facingRotatedOffsets(rangeId, facing) {
+  const r = RANGE_TYPES[rangeId];
+  if (!r || r.kind !== 'offsets') return [];
+  const base = r.offsets ?? [];
+  if (!r.rotatable) return base;
   if (!facing || (facing[0] === 0 && facing[1] === 0)) return base;
   // 重複除去
   const seen = new Set();
   const out  = [];
   for (const off of base) {
-    const r = _rotateOffsetByFacing(off, facing);
-    const k = `${r[0]},${r[1]}`;
+    const rot = _rotateOffsetByFacing(off, facing);
+    const k = `${rot[0]},${rot[1]}`;
     if (seen.has(k)) continue;
     seen.add(k);
-    out.push(r);
+    out.push(rot);
   }
   return out;
+}
+
+// 直線系（LINE_INF / PIERCE）のターゲット解決。向き方向に最大 maxRange マスまで
+// 走査し、壁で止まる。PIERCE は敵を貫通するが LINE_INF は敵には止まらず通過する
+// （ただし「壁で停止」は両方共通）。
+function _resolveLineSkillCells(rangeId, facing, px, py) {
+  const r = RANGE_TYPES[rangeId];
+  if (!r) return [];
+  const max = r.maxRange ?? 12;
+  // 基準下向き [0,1] を facing 方向に回す
+  const [fx, fy] = _rotateOffsetByFacing([0, 1], facing);
+  if (fx === 0 && fy === 0) return [];
+  const cells = [];
+  for (let i = 1; i <= max; i++) {
+    const dx = fx * i;
+    const dy = fy * i;
+    if (!dungeon.canWalk(px + dx, py + dy)) break;
+    cells.push([dx, dy]);
+  }
+  return cells;
 }
 
 // 技ごとの「すかし（whiff）」確率。レアリティが上がるほど安定して当たる。
@@ -1491,29 +1515,124 @@ function _executeSkill(skill) {
   const misses = [];   // すかした敵: { m, dx, dy }
   const whiffP = _WHIFF_CHANCE[skill.rarity] ?? 0.20;
 
-  // 対象敵の決定:
-  //   F 型は座標オフセットでは表現できないので、プレイヤーがいる部屋の敵を全列挙。
-  //   それ以外は通常通り PATTERN_OFFSETS（向き回転済み）を順に走査。
-  let targets;   // { m, dx, dy } の配列
-  if (skill.pattern === 'F') {
-    const room = dungeon.roomAt?.(px, py);
-    targets = [];
-    if (room) {
-      for (const m of dungeon.monsters) {
-        if (m.hp <= 0) continue;
-        if (m.isShopkeeper) continue;   // 商人は技で巻き込まない
-        if (m.x >= room.x && m.x < room.x + room.w &&
-            m.y >= room.y && m.y < room.y + room.h) {
-          targets.push({ m, dx: m.x - px, dy: m.y - py });
+  // 範囲タイプを正規化（旧 A〜F のセーブからもこの段で新名称になる）
+  const rangeId = normalizeRangeType(skill.pattern);
+  const r       = RANGE_TYPES[rangeId];
+
+  // 対象敵を {m, dx, dy} の形で集める（dx, dy はプレイヤー基準のオフセット）。
+  // 範囲タイプの kind ごとに走査方法を変える:
+  //   self           - 自分自身（バフ系。命中対象は無し。VFX のみ）
+  //   offsets        - 静的オフセット（ADJ / CROSS / DIAG / LINE3 等）
+  //   line_inf       - 向き方向に壁まで（LINE_INF）
+  //   pierce         - 向き方向に壁まで（敵貫通。LINE_INF と同じ走査だが効果が違う）
+  //   ranged         - 向き方向 distance マス先の 1 点
+  //   room           - 同じ部屋の敵全員
+  //   room_all       - 同じ部屋（味方含む）。Phase 2 では敵だけ選ぶ実装
+  //   floor          - フロア全敵
+  //   floor_all      - フロア全員（味方含む）。Phase 2 では敵だけ選ぶ実装
+  //   around_target  - 正面方向最寄り敵 + 周囲 8 マス
+  //   trap           - 足元に罠設置（Phase 2 では未実装メッセージ）
+  let targets = [];   // { m, dx, dy } の配列
+  switch (r?.kind) {
+    case 'self': {
+      // バフ系: 命中対象は自分のみ。Phase 2 では効果未実装なのでログだけ。
+      break;
+    }
+    case 'offsets': {
+      const offsets = _facingRotatedOffsets(rangeId, facing);
+      for (const [dx, dy] of offsets) {
+        const mob = dungeon.monsterAt(px + dx, py + dy);
+        if (mob) targets.push({ m: mob, dx, dy });
+      }
+      break;
+    }
+    case 'line_inf':
+    case 'pierce': {
+      const cells = _resolveLineSkillCells(rangeId, facing, px, py);
+      for (const [dx, dy] of cells) {
+        const mob = dungeon.monsterAt(px + dx, py + dy);
+        if (!mob) continue;
+        targets.push({ m: mob, dx, dy });
+        // LINE_INF は敵を通過、PIERCE は敵で止まる仕様にしてもよいが、
+        // 設計書の意図は「LINE_INF=壁まで貫通、PIERCE=敵貫通（壁で停止）」で
+        // どちらも複数体当たる。差は VFX とフレーバーで表現するに留める。
+      }
+      break;
+    }
+    case 'ranged': {
+      const dist = r.distance ?? 3;
+      const [fx, fy] = _rotateOffsetByFacing([0, 1], facing);
+      const dx = fx * dist;
+      const dy = fy * dist;
+      const mob = dungeon.monsterAt(px + dx, py + dy);
+      if (mob) targets.push({ m: mob, dx, dy });
+      break;
+    }
+    case 'room':
+    case 'room_all': {
+      const room = dungeon.roomAt?.(px, py);
+      if (room) {
+        for (const m of dungeon.monsters) {
+          if (m.hp <= 0) continue;
+          if (m.isShopkeeper) continue;
+          if (m.x >= room.x && m.x < room.x + room.w &&
+              m.y >= room.y && m.y < room.y + room.h) {
+            targets.push({ m, dx: m.x - px, dy: m.y - py });
+          }
         }
       }
+      break;
     }
-  } else {
-    const offsets = _facingRotatedOffsets(skill.pattern, facing);
-    targets = [];
-    for (const [dx, dy] of offsets) {
-      const m = dungeon.monsterAt(px + dx, py + dy);
-      if (m) targets.push({ m, dx, dy });
+    case 'floor':
+    case 'floor_all': {
+      for (const m of dungeon.monsters) {
+        if (m.hp <= 0) continue;
+        if (m.isShopkeeper) continue;
+        targets.push({ m, dx: m.x - px, dy: m.y - py });
+      }
+      break;
+    }
+    case 'around_target': {
+      // 正面方向に maxRange マス走査して最寄り敵を起点に。見つからなければ空振り。
+      const max = r.maxRange ?? 5;
+      const [fx, fy] = _rotateOffsetByFacing([0, 1], facing);
+      let anchor = null;
+      for (let i = 1; i <= max; i++) {
+        const ax = px + fx * i;
+        const ay = py + fy * i;
+        if (!dungeon.canWalk(ax, ay)) break;
+        const mob = dungeon.monsterAt(ax, ay);
+        if (mob) { anchor = { x: ax, y: ay, mob }; break; }
+      }
+      if (anchor) {
+        // anchor とその 8 近傍を対象に
+        for (let dy0 = -1; dy0 <= 1; dy0++) {
+          for (let dx0 = -1; dx0 <= 1; dx0++) {
+            const tx = anchor.x + dx0;
+            const ty = anchor.y + dy0;
+            const mob = dungeon.monsterAt(tx, ty);
+            if (!mob) continue;
+            targets.push({ m: mob, dx: tx - px, dy: ty - py });
+          }
+        }
+      }
+      break;
+    }
+    case 'trap': {
+      // Phase 2 では未実装。MP は消費しているのでログだけ出す。
+      dungeonLog(`🪤 ${skill.name}: 罠設置はまだ実装されていません（MP -${skill.mpCost}）`);
+      refreshHUD();
+      _runEnemyTurn();
+      autoSave();
+      return;
+    }
+    default: {
+      // 想定外: ログだけ出す
+      dungeonLog(`⚠ 未対応の範囲タイプ: ${rangeId}（MP -${skill.mpCost}）`);
+      refreshHUD();
+      _runEnemyTurn();
+      autoSave();
+      return;
     }
   }
 
@@ -1607,8 +1726,8 @@ function _executeSkill(skill) {
     x: cRect.left + (half * ts + ts / 2),
     y: cRect.top  + (half * ts + ts / 2),
   };
-  // パターン形状に応じた特殊演出（円・十字・ビーム・AoE リング）
-  showSkillPatternVfx(skill.pattern, playerScreen, ts, elColor, { facing });
+  // 範囲タイプに応じた特殊演出（円・十字・ビーム・AoE リング）
+  showSkillPatternVfx(rangeId, playerScreen, ts, elColor, { facing });
 
   hits.forEach((h, i) => {
     setTimeout(() => {
@@ -3220,6 +3339,8 @@ function _applySave(data) {
 
 // 旧セーブ互換: player.skills（4 個までの装備中技配列）→
 // learnedSkills + skillSlots（4 スロット）へ展開する。
+//   さらに旧 pattern: 'A'..'F' を新範囲タイプ ID（CROSS / ADJ / LINE3 / TERRAIN_5X5 /
+//   LINE_INF / ROOM）に正規化する。
 function _migrateSkillFields(p) {
   if (!Array.isArray(p.skillSlots) || p.skillSlots.length !== 4) {
     p.skillSlots = [null, null, null, null];
@@ -3237,6 +3358,18 @@ function _migrateSkillFields(p) {
       const src = p.skills[i];
       if (src && !p.skillSlots[i]) p.skillSlots[i] = { ...src };
     }
+  }
+  // 旧 pattern を新範囲タイプ ID に置換
+  const fixPattern = (sk) => {
+    if (!sk) return;
+    sk.pattern = normalizeRangeType(sk.pattern);
+  };
+  for (const s of p.learnedSkills) fixPattern(s);
+  for (const s of p.skillSlots)    fixPattern(s);
+  // ミニオン側も同様に migrate
+  for (const mi of (p.minions ?? [])) {
+    for (const s of (mi.learnedSkills ?? [])) fixPattern(s);
+    for (const s of (mi.skillSlots    ?? [])) fixPattern(s);
   }
   // 旧 skills フィールドを削除（保存時の冗長を防ぐ）
   delete p.skills;
