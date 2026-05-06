@@ -1282,7 +1282,8 @@ function _renderInventoryRow(item, idx) {
     ? `<div class="menu-row-skill">✨ ${item.skill.name}</div>` : '';
   const isEquippable = item.type === 'weapon' || item.type === 'armor';
   const isUsableHere =
-    (item.type === 'potion' || item.type === 'mpPotion' || item.type === 'mysteryScroll')
+    (item.type === 'potion' || item.type === 'mpPotion'
+      || item.type === 'mysteryScroll' || item.type === 'scroll')
     && screen === 'dungeon';
   const isLearnable = item.type === 'skillBook';   // 場所問わず学べる
   // 伝説の書はダンジョン外でだけ使える（読むと特殊ダンジョンへ突入するため、
@@ -1294,6 +1295,7 @@ function _renderInventoryRow(item, idx) {
     isLearnable                   ? 'learn'   :
     isTomeUsable                  ? 'tome'    :
     item.type === 'mysteryScroll' ? 'mystery' :
+    item.type === 'scroll'        ? 'scroll'  :
     isUsableHere                  ? 'use'     : 'none';
 
   const lvHtml    = item.level ? `<span class="menu-row-lv">Lv${item.level}</span>` : '';
@@ -1334,6 +1336,12 @@ function _renderInventoryRow(item, idx) {
         showActionConfirm(`${item.name} を読みますか？\n${item.desc}`, item, '読む', () => {
           _useMysteryScrollFromInventory(idx);
         });
+      } else if (action === 'scroll') {
+        showActionConfirm(
+          `${item.name} を読みますか？\n正面方向の最初に当たる敵に ${item.dmg} ダメージ`,
+          item, '読む',
+          () => { _useScrollFromInventory(idx); },
+        );
       } else if (action === 'learn') {
         showActionConfirm(`${item.name} を読んで「${item.skillName}」を習得しますか？\n${item.skillDesc}`, item, '習得する', () => {
           _learnSkillFromBook(idx);
@@ -2311,6 +2319,78 @@ function _useLegendaryTomeFromInventory(idx) {
   playSfx('confirm');
   dungeonLog(`📖 ${item.name} を読んだ！${tpl.fullName} の試練に挑む`);
   enterDungeon(data);
+}
+
+// 攻撃巻物（炎/水/草/雷/光/闇 の属性ダメージ）の使用。
+//   旧戦闘パネル時代は単一敵に当てる仕様だったが、現行のダンジョン探索では
+//   「現在のターゲット」が無いので、プレイヤーの向きから正面方向 6 マスを走査して
+//   最初に見つかった敵に着弾させる。要するに RANGED 系の使い切り技として機能。
+//   - 命中時: 属性相性込みダメージ + 撃破時はドロップ処理 + 敵ターン進行
+//   - 正面に敵がいない: 「向きを変えて」アラート。巻物は消費しない
+function _useScrollFromInventory(idx) {
+  const item = player.inventory[idx];
+  if (!item || item.type !== 'scroll') return;
+  if (!dungeon || screen !== 'dungeon') {
+    showAlert('巻物はダンジョン探索中にしか使えません');
+    return;
+  }
+  const facing = dungeon.playerPos.facing ?? [0, 1];
+  const px = dungeon.playerPos.x;
+  const py = dungeon.playerPos.y;
+  const [fx, fy] = _rotateOffsetByFacing([0, 1], facing);
+  // 正面方向を 6 マスまで走査して最寄り敵を取得（壁で停止）
+  let target = null;
+  let tDx = 0, tDy = 0;
+  for (let i = 1; i <= 6; i++) {
+    const tx = px + fx * i;
+    const ty = py + fy * i;
+    if (!dungeon.canWalk(tx, ty)) break;
+    const mob = dungeon.monsterAt(tx, ty);
+    if (mob) { target = mob; tDx = fx * i; tDy = fy * i; break; }
+  }
+  if (!target) {
+    showAlert('正面方向に敵がいません。\n向き（最後に動いた方向）を変えてから読んでください');
+    return;
+  }
+
+  // 属性相性込みのダメージ（巻物属性 vs 敵属性）。基礎威力は item.dmg
+  const matchup = elementMatchup(item.element, target.element);
+  const dmg     = Math.max(1, Math.floor(item.dmg * matchup));
+  target.hp     = Math.max(0, target.hp - dmg);
+  takeOneFromInventory(idx);
+
+  // 演出: プレイヤー → 着弾点へのトレイル + 敵側の爆発 + 属性魔法陣
+  const playerAt = playerVfxAnchor();
+  const enemyAt  = _mobScreenAnchor(target);
+  const elColor  = SKILL_ELEMENT_COLOR[item.element] ?? '#b070dd';
+  if (playerAt && enemyAt) attackTrail(playerAt, enemyAt, { color: elColor });
+  magicCircle(playerAt, item.element);
+  if (enemyAt) {
+    explosion(enemyAt, { color: elColor });
+    const kind = matchup >= 1.5 ? 'crit' : matchup <= 0.7 ? 'weak' : 'effective';
+    showDamageAt(enemyAt, dmg, { kind });
+  }
+  hitFlash({ color: _alphaize(elColor, 0.35) });
+  playSfx('crit');
+
+  const matchLbl = matchupLabel(matchup);
+  dungeonLog(
+    `${item.emoji ?? '📜'} ${item.name} を読んだ！ ${target.name} に ${dmg} ダメージ${matchLbl ? '　' + matchLbl : ''}`,
+    { rarity: item.rarity },
+  );
+
+  if (target.hp <= 0) {
+    if (enemyAt) deathBurst(enemyAt, { color: target.rarityColor ?? '#ff7043' });
+    _handleMonsterDefeated(target);
+  }
+
+  // メニューが開いた状態だと VFX が見えにくいので、巻物使用に限り閉じる
+  document.getElementById('menu-modal')?.classList.add('hidden');
+  refreshHUD();
+  dungeon.render(document.getElementById('dungeon-canvas'));
+  // 巻物使用は 1 ターン消費
+  _runEnemyTurn();
+  autoSave();
 }
 
 // 不思議系巻物の使用：効果フラグを dungeon に書き込み再描画。フロアでのみ使える
