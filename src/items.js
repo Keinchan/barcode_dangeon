@@ -397,19 +397,66 @@ export function materialForRarity(rarityName) {
   return makeMaterial(m);
 }
 
-// ── 不思議のダンジョン系巻物 ──
-// バトルでは使わず、ダンジョン探索中にメニューから使うフロア限定巻物。
-// 効果は現フロア（dungeon インスタンス）の visibility フラグを書き換えるだけで、
-// 階段やアイテム位置の表示・全マップ可視化など。新フロアで自動リセット。
+// ─────────────────────────────────────────────
+// 不思議のダンジョン系巻物（5 カテゴリ／1 回使い切り）
+// ─────────────────────────────────────────────
+//   設計書 scroll_skill_system.md 準拠で巻物を 5 カテゴリに拡張。
+//   実効果は main.js の _useMysteryScrollFromInventory のディスパッチで実装。
+//
+//   category:
+//     scout    - 索敵系（フロア構造・敵・アイテムの可視化）
+//     move     - 移動系（瞬間移動・部屋ワープ・階段直行）
+//     status   - HP/MP 全回復・状態異常解除・経験値ブースト・所持金倍化
+//     terrain  - 壁破壊・通路生成・フロアの地形操作
+//     combat   - 部屋全敵 / フロア全敵への直接ダメージ
+//     forbidden- 諸刃の剣。圧倒的な効果と引き換えにデメリット
+//
+//   rarity は既存 4 段階（コモン / レア / エピック / レジェンド）を流用。
+//   設計書の C/B/A/S/SS は コモン / レア / エピック / レジェンド / レジェンド+isCursed に対応。
 export const MYSTERY_SCROLLS = [
-  { effect: 'reveal-stairs',  name: '階段感知の巻物',     emoji: '🔍', rarity: 'コモン',
+  // ── 索敵系（既存） ──
+  { effect: 'reveal-stairs',  name: '階段感知の巻物',     emoji: '🔍', rarity: 'コモン',     category: 'scout',
     desc: '今のフロアの階段位置がわかる' },
-  { effect: 'reveal-enemies', name: '敵感知の巻物',       emoji: '👁',  rarity: 'レア',
+  { effect: 'reveal-enemies', name: '敵感知の巻物',       emoji: '👁',  rarity: 'レア',       category: 'scout',
     desc: '今のフロアの敵位置を表示' },
-  { effect: 'reveal-items',   name: 'アイテム感知の巻物', emoji: '🎁', rarity: 'レア',
+  { effect: 'reveal-items',   name: 'アイテム感知の巻物', emoji: '🎁', rarity: 'レア',       category: 'scout',
     desc: '今のフロアのアイテム位置を表示' },
-  { effect: 'reveal-all',     name: '視界の巻物',         emoji: '🗺',  rarity: 'エピック',
+  { effect: 'reveal-all',     name: '視界の巻物',         emoji: '🗺',  rarity: 'エピック',   category: 'scout',
     desc: '今のフロア全マップを照らす' },
+
+  // ── 移動系 ──
+  { effect: 'blink',          name: 'ブリンクの巻物',     emoji: '✨', rarity: 'レア',       category: 'move',
+    desc: '同じ部屋内のランダム位置に瞬間移動する' },
+  { effect: 'warp',           name: 'ワープの巻物',       emoji: '🌀', rarity: 'エピック',   category: 'move',
+    desc: 'フロア内のランダムな部屋に移動する' },
+  { effect: 'stairway',       name: 'ステアウェイの巻物', emoji: '⤵',  rarity: 'レジェンド', category: 'move',
+    desc: '階段の位置に瞬間移動する' },
+
+  // ── 状態回復・支援系 ──
+  { effect: 'cure-all',       name: 'キュアオールの巻物', emoji: '💖', rarity: 'レア',       category: 'status',
+    desc: 'HP / MP を完全回復、状態異常も解除' },
+  { effect: 'power-up',       name: 'パワーアップの巻物', emoji: '⬆',  rarity: 'エピック',   category: 'status',
+    desc: '次のレベルアップに必要な経験値を即時獲得' },
+  { effect: 'silver-jewel',   name: 'シルバージュエルの巻物', emoji: '💎', rarity: 'レジェンド', category: 'status',
+    desc: '所持金を 1.5 倍にする' },
+
+  // ── 地形操作系 ──
+  { effect: 'wall-crush',     name: 'ウォールクラッシュの巻物', emoji: '🪨', rarity: 'レア',     category: 'terrain',
+    desc: '隣接 4 方向の壁を破壊する' },
+  { effect: 'passage',        name: 'パッセージの巻物',   emoji: '🛤', rarity: 'エピック',   category: 'terrain',
+    desc: '自分から階段まで通路を生成する' },
+
+  // ── 戦闘 AoE ──
+  { effect: 'room-damage',    name: '室内雷撃の巻物',     emoji: '⚡', rarity: 'エピック',   category: 'combat',
+    desc: '部屋内の全敵に大ダメージ' },
+  { effect: 'floor-damage',   name: '裁きの巻物',         emoji: '🔥', rarity: 'レジェンド', category: 'combat',
+    desc: 'フロア内の全敵にダメージ' },
+
+  // ── 禁忌系（諸刃の剣） ──
+  { effect: 'apocalypse',     name: 'アポカリプスの巻物', emoji: '☠',  rarity: 'レジェンド', category: 'forbidden', isCursed: true,
+    desc: 'フロア全敵を消し炭に。代償として自分の HP も 50% 失う' },
+  { effect: 'berserk',        name: 'ベルセルクの巻物',   emoji: '😈', rarity: 'レジェンド', category: 'forbidden', isCursed: true,
+    desc: '自分の HP を半分削って ATK +30%（フロア中持続）の必殺気力を解放' },
 ];
 
 export function makeMysteryScroll(spec) {
@@ -421,19 +468,35 @@ export function makeMysteryScroll(spec) {
     emoji:       spec.emoji,
     rarity:      rarity.name,
     rarityColor: rarity.color,
+    category:    spec.category ?? 'scout',
+    isCursed:    !!spec.isCursed,
     element:     null, level: 1,
     desc:        spec.desc,
     count:       1,
   };
 }
 
-// 重み付きランダム抽選: コモン 50%, 感知系（レア）40%, 視界（エピック）10%
+// レアリティ別ドロップ重み（高レアほど稀）。同一レアリティ内では均等抽選する。
+const _SCROLL_RARITY_WEIGHT = { 'コモン': 55, 'レア': 28, 'エピック': 13, 'レジェンド': 4 };
+
+// 重み付きランダム抽選。レアリティで大きく分けてから、同レア内で均等に選ぶ。
+// 旧仕様（4 種固定の累積確率）から拡張: 巻物種類が増えても自動で適切な分布になる。
 export function randomMysteryScroll(rng = Math.random) {
-  const r = typeof rng === 'function' ? rng() : Math.random();
-  if (r < 0.50) return makeMysteryScroll(MYSTERY_SCROLLS[0]);
-  if (r < 0.70) return makeMysteryScroll(MYSTERY_SCROLLS[1]);
-  if (r < 0.90) return makeMysteryScroll(MYSTERY_SCROLLS[2]);
-  return                makeMysteryScroll(MYSTERY_SCROLLS[3]);
+  const rand = typeof rng === 'function' ? rng : Math.random;
+  // レアリティ抽選
+  const total = Object.values(_SCROLL_RARITY_WEIGHT).reduce((a, b) => a + b, 0);
+  let pick = rand() * total;
+  let chosenRarity = 'コモン';
+  for (const [r, w] of Object.entries(_SCROLL_RARITY_WEIGHT)) {
+    pick -= w;
+    if (pick <= 0) { chosenRarity = r; break; }
+  }
+  // 同レア内で均等抽選
+  const pool = MYSTERY_SCROLLS.filter(s => s.rarity === chosenRarity);
+  const target = pool.length > 0
+    ? pool[Math.floor(rand() * pool.length)]
+    : MYSTERY_SCROLLS[0];
+  return makeMysteryScroll(target);
 }
 
 // ─────────────────────────────────────────────
