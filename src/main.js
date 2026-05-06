@@ -37,8 +37,13 @@ import {
   showFloatingDamage, showItemBanner, shockwave, magicCircle, playerVfxAnchor,
   hitFlash, screenShake, deathBurst, sparkSpray, explosion,
   showEnhanceCelebration, showDamageAt, showMissAt, showSkillPatternVfx,
-  attackTrail,
+  attackTrail, showAttackTelegraph,
 } from './ui.js';
+import {
+  getCombatSpeed, setCombatSpeed,
+  combatStepMs, combatPreFlashMs, shouldShowTelegraph,
+  COMBAT_SPEED_NAMES, combatSpeedLabel, combatSpeedDesc,
+} from './combat-speed.js';
 import {
   isFirebaseConfigured,
   subscribeAuth,
@@ -1095,6 +1100,9 @@ function _refreshAudioMenu() {
   bgmVol.value   = s.bgmVolume;
   sfxVol.value   = s.sfxVolume;
 
+  // 戦闘速度セグメント描画（毎回 active を更新する必要があるので毎回再描画）
+  _refreshCombatSpeedUI();
+
   if (_audioMenuBound) return;
   _audioMenuBound = true;
   bgmChk.addEventListener('change', e => {
@@ -1108,6 +1116,27 @@ function _refreshAudioMenu() {
   bgmVol.addEventListener('input', e => setBgmVolume(parseFloat(e.target.value)));
   sfxVol.addEventListener('input', e => setSfxVolume(parseFloat(e.target.value)));
   sfxVol.addEventListener('change', () => playSfx('click'));
+}
+
+// 戦闘速度セグメント（高速 / 低速）。クリックで即時切替・active 表示更新。
+function _refreshCombatSpeedUI() {
+  const wrap = document.getElementById('menu-combat-speed');
+  if (!wrap) return;
+  const cur = getCombatSpeed();
+  wrap.innerHTML = COMBAT_SPEED_NAMES.map(name => {
+    const active = (name === cur) ? ' active' : '';
+    return `<button class="combat-speed-btn${active}" data-speed="${name}">
+      <span class="combat-speed-btn-label">${combatSpeedLabel(name)}</span>
+      <span class="combat-speed-btn-desc">${combatSpeedDesc(name)}</span>
+    </button>`;
+  }).join('');
+  wrap.querySelectorAll('.combat-speed-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      setCombatSpeed(btn.dataset.speed);
+      playSfx('click');
+      _refreshCombatSpeedUI();
+    });
+  });
 }
 
 function _statLine(item) {
@@ -2733,7 +2762,11 @@ function _runEnemyTurn() {
   // 描画はミニオン移動結果（swap 含む）を先に反映
   dungeon.render(document.getElementById('dungeon-canvas'));
 
-  const STEP_MS = 280;
+  // 低速モード時はステップを長く取り、攻撃前にテレグラフ（攻撃者をフラッシュ）。
+  // 高速モードは旧仕様のまま 280ms ステップ・テレグラフ無し。
+  const STEP_MS  = combatStepMs();
+  const PRE_FLASH = combatPreFlashMs();
+  const TELEGRAPH = shouldShowTelegraph();
 
   const playMinionAttacks = (cb) => {
     if (minionAttacks.length === 0) { cb(); return; }
@@ -2741,19 +2774,35 @@ function _runEnemyTurn() {
     const step = () => {
       const ev = minionAttacks[i++];
       if (!ev) { cb(); return; }
-      _animateMinionAttack(ev);
-      // ミニオン攻撃で死んだ敵をフロアから除去 + ドロップ判定（最低限）
-      if (ev.killed) {
-        _maybeRecruitMinion(ev.mob);
-        dungeon.removeMonster(ev.mob);
-        // 敵を倒した報酬：XP のみ（ゴールドや装備はプレイヤー貢献度が低いので簡略）
-        gainXp(_xpFromMonster(ev.mob));
-      }
-      setTimeout(() => {
+      const next = () => setTimeout(() => {
         dungeon.render(document.getElementById('dungeon-canvas'));
         if (i < minionAttacks.length) setTimeout(step, STEP_MS);
         else cb();
       }, STEP_MS);
+      // 低速モード: ミニオンのマスを緑系でフラッシュ → 短い間 → 攻撃発動
+      if (TELEGRAPH) {
+        const fromAnchor = _minionScreenAnchor(ev.minion);
+        const elColor = SKILL_ELEMENT_COLOR[ev.minion.element] ?? '#66bb6a';
+        if (fromAnchor) showAttackTelegraph(fromAnchor, elColor, PRE_FLASH);
+        dungeonLog(`${ev.minion.emoji} ${ev.minion.name} が攻撃の構え…`);
+        setTimeout(() => {
+          _animateMinionAttack(ev);
+          if (ev.killed) {
+            _maybeRecruitMinion(ev.mob);
+            dungeon.removeMonster(ev.mob);
+            gainXp(_xpFromMonster(ev.mob));
+          }
+          next();
+        }, PRE_FLASH);
+      } else {
+        _animateMinionAttack(ev);
+        if (ev.killed) {
+          _maybeRecruitMinion(ev.mob);
+          dungeon.removeMonster(ev.mob);
+          gainXp(_xpFromMonster(ev.mob));
+        }
+        next();
+      }
     };
     step();
   };
@@ -2769,23 +2818,44 @@ function _runEnemyTurn() {
       if (player.hp <= 0) return;
       const ev = magics[i++];
       if (!ev) return;
-      player.hp = Math.max(0, player.hp - ev.dmg);
-      showFloatingDamage(ev.dmg);
-      playSfx('damage');
-      const mobScreen = _mobScreenAnchor(ev.mob);
-      if (mobScreen) attackTrail(mobScreen, playerVfxAnchor(), { element: ev.mob.element });
-      magicCircle(playerVfxAnchor(), ev.mob.element);
-      shockwave(playerVfxAnchor(), { color: 'rgba(255,82,82,0.6)' });
-      // プレイヤーへの一撃が「弱点突き」かどうか（敵 element vs プレイヤー防具属性）
-      const matchup = elementMatchup(ev.mob.element, player.armor?.element);
-      if (matchup >= 1.5) _showWeaknessBanner('弱点ヒット!!');
-      dungeonLog(`✨ ${ev.mob.name} の魔法攻撃！ ${ev.dmg} ダメージ${matchup >= 1.5 ? '　弱点!!' : ''}`);
-      refreshHUD();
-      if (player.hp <= 0) {
-        setTimeout(() => showResult(false), 350);
-        return;
+
+      const fire = () => {
+        // hit=false（外れ）の場合はダメージ無し + MISS フロート + 専用ログ
+        if (ev.hit === false) {
+          dungeonLog(`💨 ${ev.mob.name} の魔法攻撃が外れた！`);
+          const playerAt = playerVfxAnchor();
+          if (playerAt) showMissAt({ left: playerAt.left + 18, top: playerAt.top + 8, width: 0, height: 0 });
+          if (i < magics.length) setTimeout(apply, STEP_MS);
+          return;
+        }
+        player.hp = Math.max(0, player.hp - ev.dmg);
+        showFloatingDamage(ev.dmg);
+        playSfx('damage');
+        const mobScreen = _mobScreenAnchor(ev.mob);
+        if (mobScreen) attackTrail(mobScreen, playerVfxAnchor(), { element: ev.mob.element });
+        magicCircle(playerVfxAnchor(), ev.mob.element);
+        shockwave(playerVfxAnchor(), { color: 'rgba(255,82,82,0.6)' });
+        const matchup = elementMatchup(ev.mob.element, player.armor?.element);
+        if (matchup >= 1.5) _showWeaknessBanner('弱点ヒット!!');
+        dungeonLog(`✨ ${ev.mob.name} の魔法攻撃！ ${ev.dmg} ダメージ${matchup >= 1.5 ? '　弱点!!' : ''}`);
+        refreshHUD();
+        if (player.hp <= 0) {
+          setTimeout(() => showResult(false), 350);
+          return;
+        }
+        if (i < magics.length) setTimeout(apply, STEP_MS);
+      };
+
+      // 低速モードでは攻撃前にテレグラフ + 詳細ログ → PRE_FLASH 後に発動
+      if (TELEGRAPH) {
+        const mobScreen = _mobScreenAnchor(ev.mob);
+        const elColor = SKILL_ELEMENT_COLOR[ev.mob.element] ?? '#ff7043';
+        if (mobScreen) showAttackTelegraph(mobScreen, elColor, PRE_FLASH);
+        dungeonLog(`📢 ${ev.mob.name} が魔法を構えた…（${ev.mob.element}属性）`);
+        setTimeout(fire, PRE_FLASH);
+      } else {
+        fire();
       }
-      if (i < magics.length) setTimeout(apply, STEP_MS);
     };
     apply();
   };
@@ -2818,6 +2888,17 @@ function _animateMinionAttack(ev) {
   const fromAnchor = _minionScreenAnchor(ev.minion);
   const toAnchor   = _mobScreenAnchor(ev.mob);
   const elColor = SKILL_ELEMENT_COLOR[ev.minion.element] ?? '#66bb6a';
+
+  // 外し: 攻撃トレイルだけ出して MISS フロート + ログ
+  if (ev.hit === false) {
+    if (fromAnchor && toAnchor) {
+      attackTrail(fromAnchor, toAnchor, { color: elColor });
+    }
+    if (toAnchor) showMissAt({ left: toAnchor.left + 18, top: toAnchor.top + 8, width: 0, height: 0 });
+    dungeonLog(`💨 ${ev.minion.emoji} ${ev.minion.name} の攻撃が外れた…`);
+    return;
+  }
+
   if (fromAnchor && toAnchor) {
     attackTrail(fromAnchor, toAnchor, { color: elColor });
   }
