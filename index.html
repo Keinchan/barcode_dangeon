@@ -104,16 +104,19 @@
     <!-- ミニマップ（既踏マスを縮小表示） -->
     <canvas id="minimap" width="84" height="76"></canvas>
 
-    <!-- 探索中フッター：[技クイックバー(左) | 探索ログ(中) | D-pad(右)] の 3 カラム。
-         CSS Grid で物理的にカラム分離するため、waza-bar と dpad は決して重ならない。 -->
+    <!-- 探索中フッター：3 段縦積み
+           [探索ログ]
+           [技クイックバー]
+           [十字キー]
+         PC/スマホ共通で改行配置。横方向の混雑を一切起こさないので overlap が物理的に発生しない。 -->
     <div class="dungeon-footer" id="dungeon-footer">
+      <div id="dungeon-log"></div>
       <div id="waza-bar" class="waza-bar" aria-label="技クイックバー（最大4個）">
         <button class="waza-slot empty" data-slot="0" disabled>—</button>
         <button class="waza-slot empty" data-slot="1" disabled>—</button>
         <button class="waza-slot empty" data-slot="2" disabled>—</button>
         <button class="waza-slot empty" data-slot="3" disabled>—</button>
       </div>
-      <div id="dungeon-log"></div>
       <div class="dpad">
         <div class="dpad-row">
           <button class="dpad-btn dpad-diag" data-dir="up-left">↖</button>
