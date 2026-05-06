@@ -412,6 +412,50 @@ btnDungeonMenu.addEventListener('click', () => {
   openMenu();
 });
 
+// ── フィールド拡大率（ユーザー操作で +/-）──
+//   localStorage に永続化。0.5（50%）〜 2.0（200%）の範囲、ステップ 0.1。
+//   dungeon.js の render() が window.__fieldZoom を見て canvas サイズに反映。
+const ZOOM_STEP = 0.1;
+const ZOOM_MIN  = 0.5;
+const ZOOM_MAX  = 2.0;
+
+function _loadFieldZoom() {
+  const raw = parseFloat(localStorage.getItem('fieldZoom') ?? '1');
+  if (!Number.isFinite(raw)) return 1;
+  return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, raw));
+}
+function _saveFieldZoom(z) {
+  localStorage.setItem('fieldZoom', String(z));
+}
+function _applyFieldZoom(z) {
+  window.__fieldZoom = z;
+  const lvl = document.getElementById('zoom-level');
+  if (lvl) lvl.textContent = `${Math.round(z * 100)}%`;
+  const inBtn  = document.getElementById('btn-zoom-in');
+  const outBtn = document.getElementById('btn-zoom-out');
+  if (inBtn)  inBtn.disabled  = z >= ZOOM_MAX - 1e-6;
+  if (outBtn) outBtn.disabled = z <= ZOOM_MIN + 1e-6;
+  // ダンジョン画面に居る時は即時再描画。居ない時は次回 enterDungeon で反映。
+  const canvas = document.getElementById('dungeon-canvas');
+  if (canvas && typeof dungeon !== 'undefined' && dungeon) {
+    dungeon.render(canvas);
+  }
+}
+function _bumpFieldZoom(delta) {
+  const next = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX,
+    Math.round((( window.__fieldZoom ?? 1 ) + delta) * 10) / 10));
+  if (next === window.__fieldZoom) return;
+  _saveFieldZoom(next);
+  _applyFieldZoom(next);
+  playSfx('click');
+}
+
+// 初期化（localStorage から復元 → window.__fieldZoom にセット → 表示更新）
+_applyFieldZoom(_loadFieldZoom());
+
+document.getElementById('btn-zoom-in') ?.addEventListener('click', () => _bumpFieldZoom(+ZOOM_STEP));
+document.getElementById('btn-zoom-out')?.addEventListener('click', () => _bumpFieldZoom(-ZOOM_STEP));
+
 function openMenu() {
   // メニューを開いた直後は必ずホームに戻す（前回開いた stage は保持しない）
   _setMenuStage('home');
