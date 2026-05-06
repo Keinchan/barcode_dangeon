@@ -1,5 +1,6 @@
 node_modules/
 dist/
+documents/
 .env
 .env.local
 *.log
