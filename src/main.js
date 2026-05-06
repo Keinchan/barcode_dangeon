@@ -2830,6 +2830,14 @@ function loadFloor(floor) {
   }
   refreshHUD();
   dungeonLog(`B${floor}F に入った（MP 全回復）`);
+  // 入場時に「このダンジョンの主」を 1 度だけログで紹介（職業×属性の体験導入）。
+  // B1F だけに絞ってフロア毎の鬱陶しさを避ける。特殊ダンジョン（試練）は除外。
+  if (floor === 1 && !dungeonData.isSpecial) {
+    const sample = (dungeon.monsters ?? []).find(m => m && m.job && !m.isShopkeeper);
+    if (sample?.job?.label) {
+      dungeonLog(`👁️ このダンジョンには ${dungeonData.element}属性の${sample.job.label}が棲みついている…`);
+    }
+  }
   dungeon.render(document.getElementById('dungeon-canvas'));
 }
 
