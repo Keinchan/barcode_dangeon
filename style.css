@@ -478,14 +478,30 @@ html, body {
 .waza-slot-name  { font-size: 10px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .waza-slot-mp    { font-size: 9px; opacity: 0.75; }
 
-/* 狭い画面ではログを 2 列幅で確保しつつクイックバーと D-pad が縦並びになるよう、
-   フッターを縦並びに切り替える。情報表示と被らない */
-@media (max-width: 420px) {
-  .dungeon-footer { flex-wrap: wrap; padding: 8px 10px 12px; }
-  #dungeon-log { flex: 1 1 100%; min-height: 40px; max-height: 56px; }
-  .waza-bar { width: 92px; }
-  .waza-slot { min-height: 40px; padding: 3px 4px; }
-  .waza-slot-name { font-size: 9px; }
+/* 狭い画面（スマホ）はフッターを完全に縦積みにする。
+   旧仕様だと waza-bar(92px) + dpad(140px) が横並びで端末によっては
+   重なって見えることがあったため、画面幅 ≤ 480 では:
+     [探索ログ：横幅いっぱい]
+     [技クイックバー：4 スロット 横一列・全幅]
+     [十字キー：中央寄せ]
+   と縦に積むレイアウトへ。
+*/
+@media (max-width: 480px) {
+  .dungeon-footer {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    padding: 6px 10px 10px;
+  }
+  #dungeon-log { flex: 0 0 auto; min-height: 36px; max-height: 56px; }
+  .waza-bar {
+    width: 100%;
+    grid-template-columns: repeat(4, 1fr);
+    grid-template-rows: 1fr;
+  }
+  .waza-slot { min-height: 42px; padding: 3px 4px; }
+  .waza-slot-name { font-size: 10px; }
+  .dpad { align-self: center; }
 }
 
 .modal-meta {
@@ -1823,6 +1839,23 @@ html, body {
   100% { transform: rotate(360deg) scale(1.6); opacity: 0; }
 }
 
+/* 攻撃予告テレグラフ。低速モードで攻撃発動前にこの枠を 1 周パルスさせて
+   「次に攻撃する敵はこれ」をプレイヤーに把握させる。 */
+.vfx-telegraph {
+  position: fixed;
+  margin-left: -50%; margin-top: -50%;
+  border: 3px solid;
+  border-radius: 8px;
+  pointer-events: none;
+  z-index: 4400;
+  animation: vfxTelegraph 0.36s ease-out 2;
+}
+@keyframes vfxTelegraph {
+  0%   { transform: translate(-50%, -50%) scale(0.85); opacity: 0; }
+  35%  { transform: translate(-50%, -50%) scale(1.10); opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(1.25); opacity: 0; }
+}
+
 /* ── ストレージ ── */
 .storage-tabs {
   display: flex;
@@ -2077,6 +2110,45 @@ html, body {
 .menu-audio-row input[type="checkbox"] { width: 18px; height: 18px; }
 .menu-audio-row .menu-audio-label { width: 60px; flex-shrink: 0; }
 .menu-audio-row input[type="range"] { flex: 1; }
+
+.menu-section-help {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 2px 0 8px;
+}
+
+/* 戦闘速度のセグメントボタン（高速 / 低速 を 2 ボタン横並びで切替） */
+.combat-speed-row {
+  display: flex;
+  gap: 6px;
+}
+.combat-speed-btn {
+  flex: 1;
+  background: rgba(255,255,255,0.05);
+  border: 1.5px solid rgba(255,255,255,0.18);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 10px 6px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  transition: background 0.15s, border-color 0.15s;
+}
+.combat-speed-btn:hover { background: rgba(255,255,255,0.10); }
+.combat-speed-btn.active {
+  border-color: var(--primary);
+  background: rgba(124,77,255,0.18);
+  color: #fff;
+  box-shadow: 0 0 12px rgba(124,77,255,0.4);
+}
+.combat-speed-btn-label { font-size: 14px; }
+.combat-speed-btn-desc  { font-size: 10px; color: var(--muted); }
 
 /* ── アイコンギャラリーモーダル ── */
 .icon-gallery-box {

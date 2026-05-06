@@ -9,6 +9,17 @@ const W = 21;
 const H = 19;
 const T = { WALL: 0, FLOOR: 1, STAIRS: 2 };
 
+// 敵魔法攻撃の外し率（レアリティが高いほど命中精度も高い）。プレイヤー側の
+// 技 whiff と対称的な仕組みを敵にも導入する。
+function _enemyWhiffChance(mob) {
+  switch (mob?.rarity) {
+    case 'レジェンド': return 0.05;
+    case 'エピック':   return 0.10;
+    case 'レア':       return 0.18;
+    default:           return 0.25;
+  }
+}
+
 export class Dungeon {
   constructor(dungeonData, floor) {
     this.data       = dungeonData;
@@ -215,6 +226,15 @@ export class Dungeon {
       }
 
       if (target) {
+        // ミニオンも 12% で外す（敵命中率と対称的に。レア度別ではなく一律）。
+        // 攻撃したかどうかは hit フラグで返し、UI 側で MISS フロートを出す。
+        if (Math.random() < 0.12) {
+          events.push({
+            type: 'minion-attack', minion: mi, mob: target,
+            dmg: 0, killed: false, matchup: 1, hit: false,
+          });
+          continue;
+        }
         // 属性相性込みのダメージ計算（ミニオンの主属性 vs 敵属性）
         const matchup = elementMatchup(mi.element, target.element);
         const base = Math.max(1, mi.atk - target.def);
@@ -223,7 +243,7 @@ export class Dungeon {
         target.hp = Math.max(0, target.hp - dmg);
         events.push({
           type: 'minion-attack', minion: mi, mob: target,
-          dmg, killed: target.hp <= 0, matchup,
+          dmg, killed: target.hp <= 0, matchup, hit: true,
         });
         continue;
       }
@@ -377,10 +397,18 @@ export class Dungeon {
           if (m.status.turns <= 0) m.status = null;
           continue;
         }
+        // 命中率: 敵レアリティが高いほど精度が上がる。プレイヤーの whiff と
+        // 同じ「外す」概念を敵側にも導入し、緊張感の偏りを減らす。
+        // レジェンド 5% / エピック 10% / レア 18% / コモン 25% で外す。
+        const whiff = _enemyWhiffChance(m);
+        if (Math.random() < whiff) {
+          events.push({ type: 'magic', mob: m, dmg: 0, hit: false });
+          continue;
+        }
         const base = Math.max(1, m.atk - player.def);
         const roll = 1 + Math.floor(Math.random() * Math.ceil(base * 0.4));
         const dmg  = base + roll;
-        events.push({ type: 'magic', mob: m, dmg });
+        events.push({ type: 'magic', mob: m, dmg, hit: true });
         totalDmg += dmg;
         continue;
       }

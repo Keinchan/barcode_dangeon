@@ -317,6 +317,13 @@ export class Battle {
         finish();
         return;
       }
+      // 外し: ダメージ無し + ログだけ
+      if (ev.hit === false) {
+        this.log(`💨 ${ev.mob.name} の魔法攻撃が外れた！`);
+        if (i < magics.length) setTimeout(step, STEP_MS);
+        else { this.updateUI(); finish(); }
+        return;
+      }
       this.player.hp = Math.max(0, this.player.hp - ev.dmg);
       this.log(`✨ ${ev.mob.name} の魔法攻撃！ ${ev.dmg} ダメージ`);
       showFloatingDamage(ev.dmg);

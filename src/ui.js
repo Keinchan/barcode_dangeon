@@ -369,6 +369,32 @@ function _elementColor(element) {
   }
 }
 
+// 攻撃予告テレグラフ。低速モードで「次に攻撃する敵」をプレイヤーに把握させるため、
+// 攻撃発動前にそのマスを派手に光らせる。発動時の attackTrail / explosion とは別の
+// クラスを使うことで、低速モードでも視覚的に「予告 → 発動」が区別できる。
+//   target は要素か矩形（{ left, top, width, height }）。
+//   color は枠の色（属性カラーを渡すのが推奨）。
+//   durationMs はフラッシュの持続時間（テレグラフ後に攻撃を発動するタイマーと
+//   合わせる）。
+export function showAttackTelegraph(target, color = '#ffd54f', durationMs = 360) {
+  const r = _rectOf(target);
+  if (!r) return;
+  const cx = r.left + (r.width  ?? 0) / 2;
+  const cy = r.top  + (r.height ?? 0) / 2;
+  const size = Math.max(36, Math.max(r.width ?? 0, r.height ?? 0) + 12);
+  const el = document.createElement('div');
+  el.className = 'vfx-telegraph';
+  el.style.left = cx + 'px';
+  el.style.top  = cy + 'px';
+  el.style.width  = size + 'px';
+  el.style.height = size + 'px';
+  el.style.borderColor = color;
+  el.style.boxShadow = `0 0 16px ${color}, 0 0 32px ${color}`;
+  el.style.animationDuration = (durationMs / 1000) + 's';
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), durationMs + 80);
+}
+
 // プレイヤーアイコン中心 / 戦闘パネル敵スプライト位置を取得するヘルパ
 export function playerVfxAnchor() {
   const canvas = document.getElementById('dungeon-canvas');
