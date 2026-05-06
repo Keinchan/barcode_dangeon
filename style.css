@@ -1609,7 +1609,10 @@ html, body {
 .menu-modal[data-stage="account"]   .menu-section.stage-account {
   display: block;
 }
-/* home 以外では「閉じる」を隠して「↑ メニュー」だけ出す */
+/* home 以外では「閉じる」を隠して「↑ メニュー」だけ出す。
+   home 時は逆に「↑ メニュー」を隠す（HTML の .hidden は別系統で
+   汎用の display:none ルールが無く効いていなかった）。 */
+.menu-modal[data-stage="home"]      #btn-menu-back  { display: none; }
 .menu-modal:not([data-stage="home"]) #btn-menu-close { display: none; }
 .menu-modal:not([data-stage="home"]) #btn-menu-back  { display: inline-block; }
 
