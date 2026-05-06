@@ -2639,12 +2639,47 @@ function _xpFromMonster(mob) {
   return mob.isBoss ? base * 3 : base;
 }
 
+// ダンジョンログを 1 行追加。新規行を最前列に挿入し、古い行から消していく。
+//   opts.rarity: レア度別の左カラーバー / グロウを付ける（アイテム入手系）
+//   _enhanceLogText: 数値（ダメージ・HP・MP・ゴールド・Lv）を色付き <span> にして
+//   重要な情報が一目で読めるようにする（XSS は内部呼び出しのみで未対策）。
+const _DUNGEON_LOG_MAX_LINES = 5;
 function dungeonLog(msg, opts = {}) {
   const el = document.getElementById('dungeon-log');
-  const cls = opts.rarity ? ` class="${_logClassFor(opts.rarity)}"` : '';
-  el.innerHTML = `<div${cls}>${msg}</div>` + el.innerHTML;
-  const lines = el.querySelectorAll('div');
-  if (lines.length > 4) lines[lines.length - 1].remove();
+  if (!el) return;
+  // 既存の "recent" を剥がして「古い行」扱いに
+  el.querySelectorAll('.log-line.recent').forEach(d => d.classList.remove('recent'));
+  const div = document.createElement('div');
+  const rarityCls = opts.rarity ? _logClassFor(opts.rarity) : '';
+  div.className = `log-line recent ${rarityCls}`.trim();
+  div.innerHTML = _enhanceLogText(msg);
+  el.prepend(div);
+  // 最大行数を超えたら一番古いものから削除
+  const lines = el.querySelectorAll('.log-line');
+  for (let i = lines.length - 1; i >= _DUNGEON_LOG_MAX_LINES; i--) {
+    lines[i].remove();
+  }
+}
+
+// ログメッセージの数値・キーワードを色付き <span> でラップ。
+// HTML 注入は無し（内部呼び出しのみ）の前提で正規表現による軽量装飾。
+function _enhanceLogText(msg) {
+  if (typeof msg !== 'string') return msg ?? '';
+  return msg
+    // 「N ダメージ」: ダメージ数を赤強調
+    .replace(/(\d+)(\s*)ダメージ/g, '<span class="log-dmg">$1</span>$2ダメージ')
+    // 「HPが N 回復」「N HP回復」など
+    .replace(/HPが(\d+)回復/g,  'HPが<span class="log-heal">$1</span>回復')
+    .replace(/MPが(\d+)回復/g,  'MPが<span class="log-mana">$1</span>回復')
+    // 「N ゴールド」: 金色強調
+    .replace(/(\d+)(\s*)ゴールド/g, '<span class="log-gold">$1</span>$2ゴールド')
+    // 「MP -N」: 青小さめ
+    .replace(/MP\s*-(\d+)/g, '<span class="log-mp">MP -$1</span>')
+    // 「Lv N」: 黄色
+    .replace(/Lv\s*(\d+)/g, '<span class="log-lv">Lv$1</span>')
+    // 弱点表示は派手に
+    .replace(/弱点!!/g, '<span class="log-weakness">弱点!!</span>')
+    .replace(/効果絶大[！!]/g, '<span class="log-weakness">効果絶大！</span>');
 }
 
 function _logClassFor(rarity) {

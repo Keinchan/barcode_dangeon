@@ -493,7 +493,16 @@ html, body {
     gap: 6px;
     padding: 6px 10px 10px;
   }
-  #dungeon-log { flex: 0 0 auto; min-height: 36px; max-height: 56px; }
+  /* ログは縦積み。最新行が読みやすいよう min-height をやや大きく + 5 行
+     まで自然に表示できるように max-height も拡大。 */
+  #dungeon-log {
+    flex: 0 0 auto;
+    min-height: 64px;
+    max-height: 120px;
+    font-size: 13px;
+  }
+  .log-line        { font-size: 12px; padding: 4px 7px; }
+  .log-line.recent { font-size: 14px; padding: 5px 8px; }
   .waza-bar {
     width: 100%;
     grid-template-columns: repeat(4, 1fr);
@@ -502,6 +511,8 @@ html, body {
   .waza-slot { min-height: 42px; padding: 3px 4px; }
   .waza-slot-name { font-size: 10px; }
   .dpad { align-self: center; }
+  /* 縦の余白を稼ぐため D-pad ボタンを若干コンパクトに */
+  .dpad-btn { width: 40px; height: 40px; font-size: 17px; }
 }
 
 .modal-meta {
@@ -550,11 +561,69 @@ html, body {
 
 #dungeon-log {
   flex: 1;
-  font-size: 12px;
-  color: var(--muted);
-  line-height: 1.7;
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.5;
   min-height: 54px;
-  overflow: hidden;
+  max-height: 110px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* スマホ Safari の慣性スクロール対応 */
+#dungeon-log { -webkit-overflow-scrolling: touch; }
+
+/* ログ 1 行。新規行は recent クラスが付き、強調 + スライドイン。
+   時間が経つと recent が剥がれて淡い行になる。 */
+.log-line {
+  display: block;
+  padding: 4px 8px;
+  border-left: 3px solid rgba(255,255,255,0.12);
+  border-radius: 4px;
+  background: rgba(255,255,255,0.025);
+  color: rgba(255,255,255,0.65);
+  font-size: 12px;
+  animation: log-slide-in 0.28s ease-out;
+}
+.log-line.recent {
+  background: rgba(255,255,255,0.08);
+  border-left-color: rgba(255,213,79,0.7);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: 0 1px 0 rgba(0,0,0,0.25), 0 0 0 1px rgba(255,213,79,0.15);
+}
+@keyframes log-slide-in {
+  from { transform: translateX(-12px); opacity: 0; }
+  to   { transform: translateX(0);     opacity: 1; }
+}
+
+/* レア度別の左カラーバー（アイテム入手・ドロップ・モンスター撃破の派手系） */
+.log-line.dungeon-log-rare      { border-left-color: #29b6f6; }
+.log-line.dungeon-log-epic      { border-left-color: #ab47bc; }
+.log-line.dungeon-log-legendary {
+  border-left-color: #ffc107;
+  background: linear-gradient(90deg, rgba(255,193,7,0.15) 0%, rgba(255,193,7,0.04) 100%);
+  box-shadow: 0 0 12px rgba(255,193,7,0.25);
+}
+.log-line.recent.dungeon-log-rare      { box-shadow: 0 0 0 1px rgba(41,182,246,0.4); }
+.log-line.recent.dungeon-log-epic      { box-shadow: 0 0 0 1px rgba(171,71,188,0.4); }
+.log-line.recent.dungeon-log-legendary { box-shadow: 0 0 16px rgba(255,193,7,0.5); }
+
+/* インラインの数値 / キーワード装飾。dungeonLog 側で <span class="..."> に
+   ラップする。dmg=赤、heal=緑、mana=水色、gold=金、mp=水色（小）、lv=黄、
+   weakness=赤強調 */
+.log-dmg      { color: #ff5252; font-weight: bold; }
+.log-heal     { color: #4caf50; font-weight: bold; }
+.log-mana     { color: #4dc4ff; font-weight: bold; }
+.log-gold     { color: #ffd54f; font-weight: bold; }
+.log-mp       { color: #4dc4ff; font-size: 0.92em; }
+.log-lv       { color: #ffc107; font-weight: bold; }
+.log-weakness {
+  color: #ff5252;
+  font-weight: bold;
+  text-shadow: 0 0 6px rgba(255,82,82,0.6);
 }
 
 .dpad {
