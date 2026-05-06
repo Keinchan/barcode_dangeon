@@ -3,8 +3,13 @@ import {
   RARITIES, ELEMENTS, rarityFromDigit, generateItemFromBarcode,
   randomMysteryScroll, randomSkillBook, materialForRarity, shopPriceFor,
 } from './items.js';
+import {
+  MONSTER_JOBS, jobForBarcode, findJob,
+  monsterDisplayName, monsterBossName, applyJobStats,
+} from './monster-jobs.js';
 
-// ── モンスタープール ──
+// ── モンスタープール（旧互換 / 一部の特殊ダンジョン用に残置）──
+//   通常のグリッドダンジョンの命名は monster-jobs.js の属性×職業に置換済み。
 const MONSTER_POOL = [
   { base: 'スライム',     emoji: '🟢' },
   { base: 'ゴブリン',     emoji: '👺' },
@@ -67,6 +72,10 @@ function _buildDungeonFromSeed(seed, lat, lng) {
   // generateMonster 側で digits.slice(2,5) 等を使うため数字13桁にする
   const fakeBarcode = String(seed).padStart(13, '0').slice(0, 13);
 
+  // バーコード 3 桁目 (index 2) で職業を決定論的に選ぶ。
+  // 同じダンジョンなら全モンスターは同職業（属性ボスのみ「王」格上げ）。
+  const job = jobForBarcode(fakeBarcode);
+
   return {
     seed, barcode: fakeBarcode, lat, lng,
     name: theme.name + 'ダンジョン',
@@ -75,6 +84,7 @@ function _buildDungeonFromSeed(seed, lat, lng) {
     elementIdx,
     element: ELEMENTS[elementIdx],
     rarityBase: RARITIES[rarityIdx],
+    jobId: job.id,
   };
 }
 
@@ -192,6 +202,8 @@ export function generateMinionBoss(dungeonData, floor, minionTemplate) {
     skillCharge: 0,
     hp, maxHp: hp, atk, def, floor,
     recruitMinionId: minionTemplate.id,   // 倒したら仲間化対象（Task #8）
+    // 試練ボスは素直な近接（rush）。tickEnemies からの参照に備えて空 job を持たせる。
+    job: { id: 'minionboss', label: 'ミニオン王', aiHint: 'rush', preferredRange: 'ADJ', chargeBonus: 0 },
   };
 }
 
@@ -202,22 +214,25 @@ export function generateMonster(dungeonData, floor, isBoss = false) {
   const key  = `${dungeonData.barcode}:${floor}:${isBoss}`;
   const rng  = createRNG(hashString(key));
 
-  const base    = MONSTER_POOL[dungeonData.monsterTypeIdx];
   const element = dungeonData.element;
   const skill   = SKILLS[element];
+
+  // 職業（旧セーブ等で jobId が無い場合はバーコードから決定論的に再導出）
+  const job = (dungeonData.jobId && findJob(dungeonData.jobId))
+    ?? jobForBarcode(dungeonData.barcode);
 
   // レベル算出 → プレイヤーと共通の statsForLevel を流用
   const lvl   = enemyLevel(dungeonData, floor, isBoss);
   const stats = statsForLevel(lvl);
 
-  // 個体差ランダム化（85〜115%）。RNGはバーコード+フロア+ボスでseed済みで決定論的
+  // 職業によるステータス補正（HP/ATK/DEF）を適用してから個体差を乗せる
+  const jobStats = applyJobStats(stats, job);
   const hpRoll  = 0.85 + rng() * 0.3;
   const atkRoll = 0.85 + rng() * 0.3;
   const defRoll = 0.85 + rng() * 0.3;
-
-  const hp  = Math.max(1, Math.floor(stats.maxHp   * hpRoll));
-  const atk = Math.max(1, Math.floor(stats.atkBase * atkRoll));
-  const def = Math.max(0, Math.floor(stats.defBase * defRoll));
+  const hp  = Math.max(1, Math.floor(jobStats.hp  * hpRoll));
+  const atk = Math.max(1, Math.floor(jobStats.atk * atkRoll));
+  const def = Math.max(0, Math.floor(jobStats.def * defRoll));
 
   const baseRarityIdx = RARITIES.indexOf(dungeonData.rarityBase);
   const rarityIdx     = isBoss
@@ -225,10 +240,13 @@ export function generateMonster(dungeonData, floor, isBoss = false) {
     : baseRarityIdx;
   const rarity        = RARITIES[rarityIdx];
 
-  const displayName = isBoss ? `👑 ${base.base}王` : base.base;
+  // 属性 × 職業の動的命名: 例) 火属性 + 獣王 → 「フレイムビースト」
+  const displayName = isBoss
+    ? monsterBossName(job, element)
+    : monsterDisplayName(job, element);
 
   return {
-    base: base.base, emoji: base.emoji,
+    base: job.baseName, emoji: job.emoji,
     isBoss,
     name: displayName,
     level: lvl,
@@ -236,6 +254,14 @@ export function generateMonster(dungeonData, floor, isBoss = false) {
     element, skill,
     skillCharge: 0,
     hp, maxHp: hp, atk, def, floor,
+    // 職業情報。tickEnemies が aiHint / preferredRange を見て行動を分岐
+    job: {
+      id: job.id,
+      label: job.label,
+      aiHint: job.aiHint,
+      preferredRange: job.preferredRange,
+      chargeBonus: job.chargeBonus ?? 0,
+    },
   };
 }
 
@@ -263,6 +289,7 @@ export function generateShopkeeperFor(dungeonData, floor) {
     isBoss: false,
     isShopkeeper: true,
     hp, maxHp: hp, atk, def, floor,
+    job: { id: 'shopkeeper', label: '商人', aiHint: 'rush', preferredRange: 'MELEE', chargeBonus: 0 },
   };
 }
 

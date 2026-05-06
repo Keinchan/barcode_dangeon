@@ -459,15 +459,34 @@ export class Dungeon {
         // seal: 移動は通常通り、攻撃判定の所だけ後ろで握りつぶす
       }
 
+      // 職業ターン頭の固有効果（ゾンビの自然回復など）
+      this._jobTurnStart(m);
+      // チャージは毎ターン進行（職業特殊技の発動に使う）
+      m.skillCharge = (m.skillCharge ?? 0) + 1;
+
       const adx = Math.abs(m.x - this.playerPos.x);
       const ady = Math.abs(m.y - this.playerPos.y);
       const inMagicRange = adx <= 1 && ady <= 1 && !(adx === 0 && ady === 0);
+
+      // 職業による遠距離・特殊行動を先に試す（成立すれば移動も隣接攻撃もスキップ）
+      const sealed = !!(m.status && m.status.kind === 'seal' && m.status.turns > 0);
+      if (!sealed && !inMagicRange) {
+        const ranged = this._tryJobRangedAttack(m, player);
+        if (ranged) {
+          reserved.add(`${m.x},${m.y}`);
+          for (const ev of ranged) {
+            events.push(ev);
+            if (ev.hit && ev.dmg) totalDmg += ev.dmg;
+          }
+          continue;
+        }
+      }
 
       if (inMagicRange) {
         // 既に隣接：その場で魔法攻撃。座標もスロット予約に入れて他敵と衝突回避
         reserved.add(`${m.x},${m.y}`);
         // seal 中は攻撃ができない。turn カウントだけ消費して終了
-        if (m.status && m.status.kind === 'seal' && m.status.turns > 0) {
+        if (sealed) {
           m.status.turns -= 1;
           if (m.status.turns <= 0) m.status = null;
           continue;
@@ -485,6 +504,18 @@ export class Dungeon {
         const dmg  = base + roll;
         events.push({ type: 'magic', mob: m, dmg, hit: true });
         totalDmg += dmg;
+
+        // 武道家: 隣接時の 2 連撃（chargeBonus + 2 でチャージ充填）
+        if (m.job?.aiHint === 'doublehit' && m.skillCharge >= 3) {
+          m.skillCharge = 0;
+          if (Math.random() >= whiff) {
+            const base2 = Math.max(1, Math.floor(m.atk * 0.7) - player.def);
+            const roll2 = 1 + Math.floor(Math.random() * Math.ceil(base2 * 0.4));
+            const dmg2  = base2 + roll2;
+            events.push({ type: 'magic', mob: m, dmg: dmg2, hit: true });
+            totalDmg += dmg2;
+          }
+        }
         continue;
       }
 
@@ -534,6 +565,110 @@ export class Dungeon {
     this._fixOverlaps();
 
     return { events, totalDmg };
+  }
+
+  // ── 職業システム（Phase 5）──
+  //   毎ターンの先頭で呼ぶ「ターン開始フック」。ゾンビの自然回復のような、
+  //   敵の位置や行動に依存しない継続的な効果を処理する。
+  _jobTurnStart(m) {
+    if (m.hp <= 0) return;
+    const hint = m.job?.aiHint;
+    if (hint === 'regen' && m.hp < m.maxHp) {
+      // ゾンビ: 毎ターン最大 HP の 4%（最低 1）回復。徐々にプレイヤーをすり減らす想定
+      const heal = Math.max(1, Math.floor(m.maxHp * 0.04));
+      m.hp = Math.min(m.maxHp, m.hp + heal);
+    }
+  }
+
+  // 職業の遠距離・特殊行動を試みる。成功時は 1 件以上の magic イベントを返し、
+  // 呼び出し側はそれを events に積み、移動と隣接攻撃をスキップする。
+  // 失敗時（条件未充足・チャージ不足・LOS が通らない 等）は null を返す。
+  _tryJobRangedAttack(m, player) {
+    const hint = m.job?.aiHint;
+    if (!hint) return null;
+
+    const px = this.playerPos.x;
+    const py = this.playerPos.y;
+    const dx = px - m.x;
+    const dy = py - m.y;
+    const adx = Math.abs(dx);
+    const ady = Math.abs(dy);
+
+    // 同行/同列/同斜め判定（dx==0 or dy==0 or |dx|==|dy|）
+    const onOrtho = (dx === 0) !== (dy === 0); // どちらか一方が 0
+    const onDiag  = adx === ady && adx > 0;
+
+    // 攻撃 1 発分のダメージ計算 + whiff
+    const fireOnce = (mult) => {
+      const whiff = _enemyWhiffChance(m);
+      if (Math.random() < whiff) {
+        return { type: 'magic', mob: m, dmg: 0, hit: false, ranged: true };
+      }
+      const base = Math.max(1, Math.floor(m.atk * mult) - player.def);
+      const roll = 1 + Math.floor(Math.random() * Math.ceil(base * 0.4));
+      return { type: 'magic', mob: m, dmg: base + roll, hit: true, ranged: true };
+    };
+
+    // breath（ドラゴン）: chargeBonus を加味して 5 ターンに 1 回、正面 5 マス・1.5x
+    if (hint === 'breath') {
+      if (!onOrtho || Math.max(adx, ady) > 5) return null;
+      const need = 5 + (m.job?.chargeBonus ?? 0);
+      if ((m.skillCharge ?? 0) < need) return null;
+      const sx = Math.sign(dx), sy = Math.sign(dy);
+      if (!this._jobLosClear(m.x, m.y, sx, sy, Math.max(adx, ady))) return null;
+      m.skillCharge = 0;
+      return [fireOnce(1.5)];
+    }
+
+    // line3（コウモリ）: 3 ターンに 1 回、正面 3 マス・1.0x
+    if (hint === 'line3') {
+      if (!onOrtho || Math.max(adx, ady) > 3) return null;
+      const need = 2 + (m.job?.chargeBonus ?? 0);
+      if ((m.skillCharge ?? 0) < need) return null;
+      const sx = Math.sign(dx), sy = Math.sign(dy);
+      if (!this._jobLosClear(m.x, m.y, sx, sy, Math.max(adx, ady))) return null;
+      m.skillCharge = 0;
+      return [fireOnce(1.0)];
+    }
+
+    // pierce（蛇族）: 3 ターンに 1 回、同行/同列に最大 6 マス、1.1x
+    if (hint === 'pierce') {
+      if (!onOrtho || Math.max(adx, ady) > 6) return null;
+      const need = 2 + (m.job?.chargeBonus ?? 0);
+      if ((m.skillCharge ?? 0) < need) return null;
+      const sx = Math.sign(dx), sy = Math.sign(dy);
+      if (!this._jobLosClear(m.x, m.y, sx, sy, Math.max(adx, ady))) return null;
+      m.skillCharge = 0;
+      return [fireOnce(1.1)];
+    }
+
+    // phasebolt（ホラーマン）: 3 ターンに 1 回、斜め 3 マス、0.95x
+    if (hint === 'phasebolt') {
+      if (!onDiag || adx > 3) return null;
+      const need = 2 + (m.job?.chargeBonus ?? 0);
+      if ((m.skillCharge ?? 0) < need) return null;
+      const sx = Math.sign(dx), sy = Math.sign(dy);
+      if (!this._jobLosClear(m.x, m.y, sx, sy, adx)) return null;
+      m.skillCharge = 0;
+      return [fireOnce(0.95)];
+    }
+
+    return null;
+  }
+
+  // (sx, sy) ステップで steps 歩進む線上に壁・他の敵が無いか確認。
+  // ゴール（プレイヤー位置）には到達するため、ループは steps-1 まで。
+  _jobLosClear(fromX, fromY, sx, sy, steps) {
+    let x = fromX, y = fromY;
+    for (let i = 1; i < steps; i++) {
+      x += sx; y += sy;
+      if (x < 0 || y < 0 || x >= W || y >= H) return false;
+      if (this.grid[y][x] === T.WALL) return false;
+      // 経路上に他の敵が居ると遮蔽（飛び道具が刺さる）
+      const other = this._monsterAt(x, y);
+      if (other) return false;
+    }
+    return true;
   }
 
   // 同一マスに 2 体以上の mob が居る場合、後から見つかった方を 8 近傍の空きマスへ
