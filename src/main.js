@@ -2247,6 +2247,119 @@ function _alphaize(hex, a) {
   const b = parseInt(m[3], 16);
   return `rgba(${r},${g},${b},${a})`;
 }
+// 技の効果範囲を将棋風グリッドで描画してモーダルに表示する。
+// 長押し（モバイル）or 右クリック（PC）で waza-slot から呼ばれる。
+function _showSkillRangePreview(skill) {
+  if (!skill) return;
+  const rangeId = normalizeRangeType(skill.pattern);
+  const r       = RANGE_TYPES[rangeId];
+  if (!r) return;
+  const color   = SKILL_ELEMENT_COLOR[skill.element] ?? '#ff5252';
+  const titleEl = document.getElementById('range-preview-title');
+  const bodyEl  = document.getElementById('range-preview-body');
+  if (!titleEl || !bodyEl) return;
+  titleEl.textContent = `${skill.name} の効果範囲`;
+
+  // ヘッダ情報（属性 / コスト / 説明）
+  const infoHtml = `
+    <div class="range-preview-info" style="--rp-color:${color}">
+      <div class="rp-name" style="color:${color}">${SKILL_ELEMENT_EMOJI[skill.element] ?? '✨'} ${skill.name}</div>
+      <div class="rp-meta">${skill.element}属性 / ${PATTERN_DESC[rangeId] ?? r.label} / 威力×${skill.dmgMult ?? 1} / MP-${skill.mpCost ?? 0}</div>
+      <div class="rp-desc">${skill.desc ?? ''}</div>
+    </div>
+  `;
+
+  // 範囲タイプを将棋風マス図にする。kind ごとに「7×7 グリッドで表現」
+  // できるものはマス図、できない（部屋全体・フロア全体等）ものは
+  // 説明テキストを大きく表示。プレイヤーは中心の 🧙 マスで固定表示。
+  let gridHtml = '';
+  const kind = r.kind;
+
+  // ヘルパ: N×N グリッドを生成。center=Math.floor(N/2)。
+  // hits は [[dx, dy], ...] のセットで、中心からの相対オフセット。
+  const buildGrid = (N, hits, opts = {}) => {
+    const half = Math.floor(N / 2);
+    const hitSet = new Set(hits.map(([dx, dy]) => `${dx},${dy}`));
+    const isPlayerCenter = !opts.includeSelf;
+    let h = `<div class="range-preview-grid" style="grid-template-columns:repeat(${N},auto);grid-template-rows:repeat(${N},auto);--rp-color:${color}55;--rp-border:${color};--rp-glow:${color}66">`;
+    for (let dy = -half; dy <= half; dy++) {
+      for (let dx = -half; dx <= half; dx++) {
+        const isCenter = dx === 0 && dy === 0;
+        const isHit    = hitSet.has(`${dx},${dy}`);
+        const cls = ['range-cell'];
+        if (isCenter && isPlayerCenter) cls.push('player');
+        else if (isHit) cls.push('hit');
+        const inner = (isCenter && isPlayerCenter) ? '🧙' : '';
+        h += `<div class="${cls.join(' ')}">${inner}</div>`;
+      }
+    }
+    h += '</div>';
+    return h;
+  };
+
+  // ヘルパ: 部屋全体・フロア全体など、グリッドで表現しにくい range の説明バナー
+  const buildSpecial = (icon, title, sub) => `
+    <div class="range-preview-special" style="--rp-color:${color}">
+      <div style="font-size:28px;line-height:1">${icon}</div>
+      <div style="margin-top:8px;font-size:14px">${title}</div>
+      <div style="margin-top:4px;font-size:11px;color:var(--muted);font-weight:normal">${sub ?? ''}</div>
+    </div>
+  `;
+
+  if (kind === 'self') {
+    // 自分中心。中心マスを hit 扱いにする。
+    gridHtml = buildGrid(3, [[0, 0]], { includeSelf: true });
+  } else if (kind === 'offsets') {
+    // 静的オフセット。下向き想定（プレイヤーが下を向いている）でそのまま表示。
+    const offsets = r.offsets ?? [];
+    // グリッドサイズはオフセットの最大絶対値で決定
+    let maxAbs = 1;
+    for (const [dx, dy] of offsets) maxAbs = Math.max(maxAbs, Math.abs(dx), Math.abs(dy));
+    const N = Math.min(11, maxAbs * 2 + 1);
+    gridHtml = buildGrid(N, offsets, { includeSelf: !!r.includeSelf });
+  } else if (kind === 'line_inf' || kind === 'pierce') {
+    // 直線貫通（壁まで）。下方向に最大 5 マスを描画（実ゲームは壁まで延びる）
+    const cells = [[0, 1], [0, 2], [0, 3], [0, 4], [0, 5]];
+    gridHtml = buildGrid(11, cells);
+  } else if (kind === 'ranged') {
+    const d = r.distance ?? 3;
+    gridHtml = buildGrid(Math.max(7, d * 2 + 1), [[0, d]]);
+  } else if (kind === 'around_target') {
+    // 正面方向最寄り敵 + 周囲 8 マス。距離 3 を仮定して中心(0,3)の周囲 8 マスを hit 扱い
+    const cx = 0, cy = 3;
+    const cells = [];
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) cells.push([cx + dx, cy + dy]);
+    gridHtml = buildGrid(11, cells);
+  } else if (kind === 'trap') {
+    // 足元設置: プレイヤーマスを hit 扱いに（self と区別するため hit カラー）
+    gridHtml = buildGrid(3, [[0, 0]], { includeSelf: false });
+  } else if (kind === 'room') {
+    gridHtml = buildSpecial('🏠', '同じ部屋の敵全員', '部屋に入っている全モンスターに着弾');
+  } else if (kind === 'room_all') {
+    gridHtml = buildSpecial('🏠', '同じ部屋の全員', 'プレイヤー・敵・味方を含む同部屋全員');
+  } else if (kind === 'floor') {
+    gridHtml = buildSpecial('🌐', 'フロアの敵全員', 'このフロアに居る全モンスターに着弾');
+  } else if (kind === 'floor_all') {
+    gridHtml = buildSpecial('🌐', 'フロア全員', 'プレイヤー・敵・味方を含むフロア全員');
+  } else {
+    gridHtml = buildSpecial('?', '範囲不明', '');
+  }
+
+  bodyEl.innerHTML = infoHtml + gridHtml;
+  document.getElementById('range-preview-modal').classList.remove('hidden');
+}
+
+// 範囲プレビューモーダルの閉じるボタン
+document.getElementById('btn-range-preview-close')?.addEventListener('click', () => {
+  document.getElementById('range-preview-modal').classList.add('hidden');
+});
+// 背景タップでも閉じる
+document.getElementById('range-preview-modal')?.addEventListener('click', (e) => {
+  if (e.target.id === 'range-preview-modal') {
+    e.target.classList.add('hidden');
+  }
+});
+
 function _refreshWazaBar() {
   const bar = document.getElementById('waza-bar');
   if (!bar) return;
@@ -2258,16 +2371,33 @@ function _refreshWazaBar() {
   for (let i = 0; i < slots.length; i++) {
     const btn = slots[i];
     const sk  = skills[i];
+    // 既存ハンドラを完全に剥がす（onclick と addEventListener 両方）。
+    // 同じスロットに別のスキルが再割り当てされた時の二重発火を防ぐ。
     btn.onclick = null;
+    if (btn._wazaHandler) {
+      btn.removeEventListener('click', btn._wazaHandler);
+      btn._wazaHandler = null;
+    }
+
     if (!sk) {
       btn.classList.add('empty');
       btn.classList.remove('lowmp');
-      btn.disabled = true;
+      // 空スロットは tap で技割り当てメニューへ誘導（disabled だと反応無しと
+      // 誤解されるので、ボタン自体は有効化してハンドラで処理する）
+      btn.disabled = false;
       btn.style.borderColor   = '';
       btn.style.background    = '';
       btn.style.color         = '';
-      btn.title    = '空きスロット（メニューの技・タイプから割り当て）';
+      btn.title    = '空きスロット（タップで技割り当てメニューを開く）';
       btn.innerHTML = '—';
+      const emptyHandler = () => {
+        playSfx('click');
+        // メニューを開いて技スロット設定タブを表示
+        if (typeof openMenu === 'function') openMenu();
+        if (typeof _setMenuStage === 'function') _setMenuStage('skills');
+      };
+      btn._wazaHandler = emptyHandler;
+      btn.addEventListener('click', emptyHandler);
       continue;
     }
     btn.classList.remove('empty');
@@ -2276,7 +2406,9 @@ function _refreshWazaBar() {
     const lvLocked = player.level < skillLevelReq(sk);
     const lowMp    = (player.mp ?? 0) < sk.mpCost;
     btn.classList.toggle('lowmp', lowMp || lvLocked);
-    btn.disabled = lvLocked || lowMp || screen !== 'dungeon';
+    // disabled にすると「押しても無反応」と誤解されるので、ボタンは常に有効化。
+    // ハンドラ側で MP 不足・Lv ロックを判定して案内ダイアログを出す方針。
+    btn.disabled = false;
     btn.style.borderColor = color;
     btn.style.background  = `linear-gradient(180deg, ${color}33 0%, ${color}11 100%)`;
     btn.style.color       = color;
@@ -2287,13 +2419,64 @@ function _refreshWazaBar() {
       `<span class="waza-slot-emoji">${emoji}</span>` +
       `<span class="waza-slot-name">${sk.name}${lvLocked ? '🔒' : ''}</span>` +
       `<span class="waza-slot-mp">MP-${sk.mpCost}</span>`;
-    btn.onclick = () => {
+    const filledHandler = () => {
+      // ダンジョン外では使えない（メニューや他画面でも誤発動しないように）
+      if (screen !== 'dungeon' || !dungeon) {
+        showAlert('技はダンジョン探索中にだけ使えます');
+        return;
+      }
       if (lvLocked) {
         showAlert(`${sk.name} は Lv${skillLevelReq(sk)} で解放されます`);
         return;
       }
+      if ((player.mp ?? 0) < sk.mpCost) {
+        showAlert(`MP が足りません（必要 ${sk.mpCost} / 現在 ${player.mp ?? 0}）`);
+        return;
+      }
       playSfx('click');
       _executeSkill(sk);
+    };
+    btn._wazaHandler = filledHandler;
+    btn.addEventListener('click', filledHandler);
+
+    // 長押し（モバイル）or 右クリック（PC）で範囲プレビューを開く。
+    // 既存の長押しハンドラがあれば剥がしてから付け直す（再描画時の二重バインド回避）。
+    if (btn._wazaLongHandler) {
+      btn.removeEventListener('contextmenu', btn._wazaLongHandler.context);
+      btn.removeEventListener('touchstart',  btn._wazaLongHandler.touchstart, { passive: true });
+      btn.removeEventListener('touchend',    btn._wazaLongHandler.touchend);
+      btn.removeEventListener('touchmove',   btn._wazaLongHandler.touchmove);
+      btn._wazaLongHandler = null;
+    }
+    let _holdTimer = null;
+    let _holdFired = false;
+    const _startHold = () => {
+      _holdFired = false;
+      _holdTimer = setTimeout(() => {
+        _holdFired = true;
+        _showSkillRangePreview(sk);
+      }, 500);
+    };
+    const _cancelHold = () => {
+      if (_holdTimer) { clearTimeout(_holdTimer); _holdTimer = null; }
+    };
+    const onContext = (e) => { e.preventDefault(); _showSkillRangePreview(sk); };
+    const onTouchStart = () => { _startHold(); };
+    const onTouchEnd   = (e) => {
+      _cancelHold();
+      // 長押しでプレビューを開いた後の release はクリックを抑止（技を発動させない）
+      if (_holdFired) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    const onTouchMove = () => { _cancelHold(); };
+    btn.addEventListener('contextmenu', onContext);
+    btn.addEventListener('touchstart',  onTouchStart, { passive: true });
+    btn.addEventListener('touchend',    onTouchEnd);
+    btn.addEventListener('touchmove',   onTouchMove);
+    btn._wazaLongHandler = {
+      context: onContext, touchstart: onTouchStart, touchend: onTouchEnd, touchmove: onTouchMove,
     };
   }
 }
