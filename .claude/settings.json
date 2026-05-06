@@ -5,7 +5,8 @@
       "Bash(npm run dev *)",
       "Bash(npx --no-install vite build *)",
       "Bash(npx --no-install vite --port *)",
-      "Bash(firebase deploy*)"
+      "Bash(firebase deploy*)",
+      "Bash(git push*)"
     ]
   }
 }
