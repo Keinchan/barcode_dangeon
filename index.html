@@ -100,27 +100,29 @@
     <!-- 探索中フッター：技クイックバー（4スロット）+ D-pad（8方向）+ 探索ログ -->
     <div class="dungeon-footer" id="dungeon-footer">
       <div id="dungeon-log"></div>
-      <div id="waza-bar" class="waza-bar" aria-label="技クイックバー（最大4個）">
-        <button class="waza-slot empty" data-slot="0" disabled>—</button>
-        <button class="waza-slot empty" data-slot="1" disabled>—</button>
-        <button class="waza-slot empty" data-slot="2" disabled>—</button>
-        <button class="waza-slot empty" data-slot="3" disabled>—</button>
-      </div>
-      <div class="dpad">
-        <div class="dpad-row">
-          <button class="dpad-btn dpad-diag" data-dir="up-left">↖</button>
-          <button class="dpad-btn" data-dir="up">↑</button>
-          <button class="dpad-btn dpad-diag" data-dir="up-right">↗</button>
+      <div class="dungeon-controls">
+        <div id="waza-bar" class="waza-bar" aria-label="技クイックバー（最大4個）">
+          <button class="waza-slot empty" data-slot="0" disabled>—</button>
+          <button class="waza-slot empty" data-slot="1" disabled>—</button>
+          <button class="waza-slot empty" data-slot="2" disabled>—</button>
+          <button class="waza-slot empty" data-slot="3" disabled>—</button>
         </div>
-        <div class="dpad-row">
-          <button class="dpad-btn" data-dir="left">←</button>
-          <button class="dpad-btn dpad-wait" data-dir="wait">待</button>
-          <button class="dpad-btn" data-dir="right">→</button>
-        </div>
-        <div class="dpad-row">
-          <button class="dpad-btn dpad-diag" data-dir="down-left">↙</button>
-          <button class="dpad-btn" data-dir="down">↓</button>
-          <button class="dpad-btn dpad-diag" data-dir="down-right">↘</button>
+        <div class="dpad">
+          <div class="dpad-row">
+            <button class="dpad-btn dpad-diag" data-dir="up-left">↖</button>
+            <button class="dpad-btn" data-dir="up">↑</button>
+            <button class="dpad-btn dpad-diag" data-dir="up-right">↗</button>
+          </div>
+          <div class="dpad-row">
+            <button class="dpad-btn" data-dir="left">←</button>
+            <button class="dpad-btn dpad-wait" data-dir="wait">待</button>
+            <button class="dpad-btn" data-dir="right">→</button>
+          </div>
+          <div class="dpad-row">
+            <button class="dpad-btn dpad-diag" data-dir="down-left">↙</button>
+            <button class="dpad-btn" data-dir="down">↓</button>
+            <button class="dpad-btn dpad-diag" data-dir="down-right">↘</button>
+          </div>
         </div>
       </div>
     </div>

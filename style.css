@@ -478,41 +478,60 @@ html, body {
 .waza-slot-name  { font-size: 10px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .waza-slot-mp    { font-size: 9px; opacity: 0.75; }
 
-/* 狭い画面（スマホ）はフッターを完全に縦積みにする。
-   旧仕様だと waza-bar(92px) + dpad(140px) が横並びで端末によっては
-   重なって見えることがあったため、画面幅 ≤ 480 では:
-     [探索ログ：横幅いっぱい]
-     [技クイックバー：4 スロット 横一列・全幅]
-     [十字キー：中央寄せ]
-   と縦に積むレイアウトへ。
-*/
+/* 操作キー（waza-bar + dpad）を 1 つのまとまりとして扱う。
+   PC ではフッター内で log と横並びに、スマホでは log の下で横並びに、
+   どちらの場合も waza-bar と dpad が同じ高さに揃う。 */
+.dungeon-controls {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+/* スマホ向けレイアウト。フィールドの canvas が広く取れるよう、フッターは
+     [探索ログ：横幅いっぱい・コンパクト・半透明]
+     [技クイックバー(4 スロット横一列) | 十字キー]   ← 横並びで縦消費を圧縮
+   の 2 段構成に。旧仕様（log/waza/dpad の 3 段縦積み 250px+）から
+   高さを ~140px まで削って canvas に回す。 */
 @media (max-width: 480px) {
   .dungeon-footer {
     flex-direction: column;
     align-items: stretch;
-    gap: 6px;
-    padding: 6px 10px 10px;
+    gap: 4px;
+    padding: 4px 8px 6px;
   }
-  /* ログは縦積み。最新行が読みやすいよう min-height をやや大きく + 5 行
-     まで自然に表示できるように max-height も拡大。 */
+  /* ログはコンパクト化＋半透明背景でフィールドの「上に乗っている」感を出す。
+     最新行 1〜2 行がギリギリ見える程度の高さに抑える。 */
   #dungeon-log {
     flex: 0 0 auto;
-    min-height: 64px;
-    max-height: 120px;
-    font-size: 13px;
+    min-height: 36px;
+    max-height: 60px;
+    font-size: 12px;
+    background: rgba(0,0,0,0.4);
+    border-radius: 6px;
+    padding: 3px 6px;
   }
-  .log-line        { font-size: 12px; padding: 4px 7px; }
-  .log-line.recent { font-size: 14px; padding: 5px 8px; }
+  .log-line        { font-size: 11px; padding: 3px 6px; }
+  .log-line.recent { font-size: 13px; padding: 4px 7px; }
+  .dungeon-controls {
+    justify-content: space-between;
+    align-items: center;
+    gap: 6px;
+  }
   .waza-bar {
-    width: 100%;
+    width: auto;
+    flex: 1;
+    max-width: 240px;
     grid-template-columns: repeat(4, 1fr);
     grid-template-rows: 1fr;
   }
-  .waza-slot { min-height: 42px; padding: 3px 4px; }
+  .waza-slot { min-height: 40px; padding: 3px 4px; }
   .waza-slot-name { font-size: 10px; }
-  .dpad { align-self: center; }
-  /* 縦の余白を稼ぐため D-pad ボタンを若干コンパクトに */
-  .dpad-btn { width: 40px; height: 40px; font-size: 17px; }
+  /* 横並びにした分、D-pad ボタンを若干コンパクトに */
+  .dpad-btn { width: 38px; height: 38px; font-size: 16px; }
+  .dpad     { gap: 2px; }
+  .dpad-row { gap: 2px; }
 }
 
 .modal-meta {
@@ -553,10 +572,15 @@ html, body {
 .dungeon-footer {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 14px;
   padding: 10px 14px 16px;
   background: var(--surface);
   flex-shrink: 0;
+  /* PC・タブレットの広い画面でも操作キーがビューポート端にぶつからないよう
+     最大幅をビューポートに合わせ、中央寄せ。横並びの log/操作キーが
+     視覚的にバランス良く分かれて見える。 */
+  width: 100%;
+  box-sizing: border-box;
 }
 
 #dungeon-log {

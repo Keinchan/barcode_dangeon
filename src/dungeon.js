@@ -779,7 +779,10 @@ export class Dungeon {
     const footerH = visibleFooter?.offsetHeight ?? 200;
     const availW  = window.innerWidth;
     const availH  = window.innerHeight - headerH - footerH - 16;
-    const size = Math.max(220, Math.min(availW, availH, 480));
+    // canvas の上限を 480 → 760 に拡張。広い PC/タブレットでフィールドが
+    // 視認しやすいようにする。利用可能スペース（availW/availH）が小さい場合は
+    // それに自然に追従するので、スマホ縦は availH 律速のまま変化なし。
+    const size = Math.max(220, Math.min(availW, availH, 760));
     const ts = Math.max(20, Math.floor(size / VIEW));
     canvas.width  = ts * VIEW;
     canvas.height = ts * VIEW;
