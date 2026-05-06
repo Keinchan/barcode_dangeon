@@ -432,34 +432,61 @@ function _toCenterPoint(target) {
 }
 
 // ─────────────────────────────────────────────
-// 技パターン別の特殊演出
-//   A 型 = 上下左右の隣 4 マス：プレイヤー中心に十字スラッシュ
-//   B 型 = 周囲 8 マス（王将）：プレイヤー中心に拡大円波
-//   C 型 = 4 方向 2 マス先まで：4 方向のレーザービーム
-//   D 型 = 周囲 2 マス全 24：大きな拡大リング + 渦
+// 範囲タイプ別の特殊演出（19 種類）
 //
-//   呼び出し側は技の属性カラーと「マス幅 (tileSize)」を渡す。
+//   呼び出し側は範囲タイプ ID（CROSS / ADJ / LINE_INF 等）と
+//   技の属性カラーと「マス幅 (tileSize)」を渡す。
 //   playerCenter = { x, y } はプレイヤーの画面中心（canvas 内中央）。
+//
+//   旧 A/B/C/D/E/F も互換的に受け付ける（古いセーブからの保険）。
 // ─────────────────────────────────────────────
-export function showSkillPatternVfx(pattern, playerCenter, tileSize, color = '#b070dd', opts = {}) {
-  switch (pattern) {
-    case 'A': _vfxCrossSlash (playerCenter, tileSize, color); break;
-    case 'B': _vfxOmniSweep  (playerCenter, tileSize, color); break;
-    case 'C': _vfxFourBeams  (playerCenter, tileSize, color); break;
-    case 'D': _vfxBigAoeRing (playerCenter, tileSize, color); break;
-    case 'E': _vfxLongBeam   (playerCenter, tileSize, color, opts.facing ?? [0, 1]); break;
-    case 'F': _vfxRoomFlash  (playerCenter, tileSize, color); break;
-    default:  _vfxOmniSweep  (playerCenter, tileSize, color);
+const _LEGACY_PATTERN_TO_RANGE = {
+  A: 'CROSS', B: 'ADJ', C: 'LINE3', D: 'TERRAIN_5X5', E: 'LINE_INF', F: 'ROOM',
+};
+
+export function showSkillPatternVfx(rangeId, playerCenter, tileSize, color = '#b070dd', opts = {}) {
+  const id = _LEGACY_PATTERN_TO_RANGE[rangeId] ?? rangeId;
+  const facing = opts.facing ?? [0, 1];
+  switch (id) {
+    // 単体・近接系
+    case 'SELF':         _vfxSelfAura   (playerCenter, tileSize, color); break;
+    case 'MELEE':        _vfxLongBeam   (playerCenter, tileSize, color, facing, 1.0); break;
+    case 'ADJ':          _vfxOmniSweep  (playerCenter, tileSize, color); break;
+    case 'CROSS':        _vfxCrossSlash (playerCenter, tileSize, color); break;
+    case 'DIAG':         _vfxDiagSlash  (playerCenter, tileSize, color); break;
+
+    // 直線・距離系
+    case 'LINE3':        _vfxLongBeam   (playerCenter, tileSize, color, facing, 3.4); break;
+    case 'LINE5':        _vfxLongBeam   (playerCenter, tileSize, color, facing, 5.4); break;
+    case 'LINE_INF':     _vfxLongBeam   (playerCenter, tileSize, color, facing, 6.4); break;
+    case 'PIERCE':       _vfxPierceBeam (playerCenter, tileSize, color, facing); break;
+    case 'RANGED':       _vfxRangedShot (playerCenter, tileSize, color, facing); break;
+
+    // 部屋・全体系
+    case 'ROOM':         _vfxRoomFlash  (playerCenter, tileSize, color); break;
+    case 'ROOM_ALL':     _vfxRoomFlash  (playerCenter, tileSize, color); break;
+    case 'FLOOR':        _vfxFloorBurst (playerCenter, tileSize, color); break;
+    case 'FLOOR_ALL':    _vfxFloorBurst (playerCenter, tileSize, color); break;
+
+    // 地形・特殊系
+    case 'TERRAIN_3X3':  _vfxBigAoeRing (playerCenter, tileSize * 0.7, color); break;
+    case 'TERRAIN_5X5':  _vfxBigAoeRing (playerCenter, tileSize, color); break;
+    case 'CONE3':        _vfxConeFan    (playerCenter, tileSize, color, facing); break;
+    case 'AROUND_TARGET':_vfxAroundTarget(playerCenter, tileSize, color, facing); break;
+    case 'TRAP':         _vfxTrapPulse  (playerCenter, tileSize, color); break;
+
+    default:             _vfxOmniSweep  (playerCenter, tileSize, color);
   }
 }
 
-// E 型: 正面方向に伸びる長尺ビーム（C 型の 4 方向版に対し 1 方向で長い）。
+// 正面方向に伸びる長尺ビーム。lengthInTiles を変えれば MELEE / LINE3 / LINE5 /
+// LINE_INF を同じ実装で描き分けられる。
 // facing は dungeon の playerPos.facing をそのまま渡す ([dx, dy] / 8 方向)。
-function _vfxLongBeam(c, ts, color, facing) {
+function _vfxLongBeam(c, ts, color, facing, lengthInTiles = 6.4) {
   const fx = facing[0];
   const fy = facing[1];
   if (fx === 0 && fy === 0) return;
-  const len = ts * 6.4;
+  const len = ts * lengthInTiles;
   // 角度: 基準は右方向（rotate 0deg = ベース向き）。faceing [1,0] → 0deg, [0,1] → 90deg
   const ang = Math.atan2(fy, fx) * 180 / Math.PI;
   const offX = Math.cos(ang * Math.PI / 180) * (len / 2 + ts * 0.3);
@@ -475,6 +502,144 @@ function _vfxLongBeam(c, ts, color, facing) {
   el.style.transform = `translate(-50%,-50%) rotate(${ang}deg)`;
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 560);
+}
+
+// SELF: 自分中心の柔らかいオーラリング（バフ感）
+function _vfxSelfAura(c, ts, color) {
+  for (let i = 0; i < 2; i++) {
+    setTimeout(() => {
+      const el = document.createElement('div');
+      el.className = 'vfx-aoe-ring vfx-aoe-ring-1';
+      el.style.left = c.x + 'px';
+      el.style.top  = c.y + 'px';
+      el.style.setProperty('--c', color);
+      el.style.setProperty('--max', (ts * 2.0) + 'px');
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 700);
+    }, i * 120);
+  }
+  sparkSpray({ left: c.x - 16, top: c.y - 16, width: 32, height: 32 }, { count: 14, color });
+}
+
+// DIAG: 斜め 4 方向のスラッシュ
+function _vfxDiagSlash(c, ts, color) {
+  const len = ts * 1.3;
+  const angles = [45, 135, -45, -135];
+  for (const aDeg of angles) {
+    const el = document.createElement('div');
+    el.className = 'vfx-slash';
+    const a = aDeg * Math.PI / 180;
+    el.style.left = (c.x + Math.cos(a) * len * 0.55) + 'px';
+    el.style.top  = (c.y + Math.sin(a) * len * 0.55) + 'px';
+    el.style.width  = len + 'px';
+    el.style.height = (ts * 0.18) + 'px';
+    el.style.background = `linear-gradient(90deg, transparent 0%, ${color} 30%, #fff 50%, ${color} 70%, transparent 100%)`;
+    el.style.boxShadow = `0 0 12px ${color}`;
+    el.style.transform = `translate(-50%,-50%) rotate(${aDeg}deg)`;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 480);
+  }
+}
+
+// PIERCE: 細く速いビーム + 中央の貫通弾エフェクト
+function _vfxPierceBeam(c, ts, color, facing) {
+  _vfxLongBeam(c, ts, '#fff', facing, 6.4);   // 白い芯
+  setTimeout(() => _vfxLongBeam(c, ts, color, facing, 6.4), 60);
+}
+
+// RANGED: 正面 N マス先に閃光リング + 中央へのビーム導入
+function _vfxRangedShot(c, ts, color, facing) {
+  _vfxLongBeam(c, ts, color, facing, 3.0);
+  const fx = facing[0], fy = facing[1];
+  const dist = ts * 3;
+  const tx = c.x + fx * dist;
+  const ty = c.y + fy * dist;
+  setTimeout(() => {
+    const ring = document.createElement('div');
+    ring.className = 'vfx-aoe-ring vfx-aoe-ring-1';
+    ring.style.left = tx + 'px';
+    ring.style.top  = ty + 'px';
+    ring.style.setProperty('--c', color);
+    ring.style.setProperty('--max', (ts * 1.6) + 'px');
+    document.body.appendChild(ring);
+    setTimeout(() => ring.remove(), 700);
+    sparkSpray({ left: tx - 16, top: ty - 16, width: 32, height: 32 }, { count: 14, color });
+  }, 200);
+}
+
+// FLOOR: フロア全体に広がる超大型 AoE（部屋技より大きく）
+function _vfxFloorBurst(c, ts, color) {
+  const flash = document.createElement('div');
+  flash.className = 'vfx-hitflash';
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(color);
+  if (m) {
+    const r = parseInt(m[1], 16), g = parseInt(m[2], 16), b = parseInt(m[3], 16);
+    flash.style.background = `rgba(${r},${g},${b},0.55)`;
+  }
+  document.body.appendChild(flash);
+  setTimeout(() => flash.remove(), 280);
+  _vfxBigAoeRing(c, ts * 1.8, color);
+  // 4 方向にも光帯を伸ばしてフロアスケール感を出す
+  for (const angle of [0, 90, 180, 270]) {
+    const el = document.createElement('div');
+    el.className = 'vfx-beam';
+    el.style.left = c.x + 'px';
+    el.style.top  = c.y + 'px';
+    el.style.width  = (ts * 14) + 'px';
+    el.style.height = (ts * 0.22) + 'px';
+    el.style.background = `linear-gradient(90deg, transparent 0%, ${color} 50%, transparent 100%)`;
+    el.style.boxShadow = `0 0 14px ${color}`;
+    el.style.transform = `translate(-50%,-50%) rotate(${angle}deg)`;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 560);
+  }
+}
+
+// CONE3: 正面扇形 3 マス幅。3 本のスラッシュを少し時差で重ねる
+function _vfxConeFan(c, ts, color, facing) {
+  const fx = facing[0], fy = facing[1];
+  if (fx === 0 && fy === 0) return _vfxOmniSweep(c, ts, color);
+  const baseAng = Math.atan2(fy, fx) * 180 / Math.PI;
+  const offsets = [-25, 0, 25];   // 中央 + 左右 25°
+  offsets.forEach((da, i) => {
+    setTimeout(() => {
+      const el = document.createElement('div');
+      el.className = 'vfx-beam';
+      const a = (baseAng + da) * Math.PI / 180;
+      const len = ts * 3.2;
+      el.style.left = (c.x + Math.cos(a) * (len / 2 + ts * 0.3)) + 'px';
+      el.style.top  = (c.y + Math.sin(a) * (len / 2 + ts * 0.3)) + 'px';
+      el.style.width  = len + 'px';
+      el.style.height = (ts * 0.22) + 'px';
+      el.style.background = `linear-gradient(90deg, transparent 0%, ${color} 40%, #fff 50%, ${color} 60%, transparent 100%)`;
+      el.style.boxShadow = `0 0 12px ${color}`;
+      el.style.transform = `translate(-50%,-50%) rotate(${baseAng + da}deg)`;
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 520);
+    }, i * 60);
+  });
+}
+
+// AROUND_TARGET: 正面方向にビーム → 着弾点で 3x3 の AoE
+function _vfxAroundTarget(c, ts, color, facing) {
+  _vfxLongBeam(c, ts, color, facing, 4.0);
+  const fx = facing[0], fy = facing[1];
+  const dist = ts * 3;
+  const tx = c.x + fx * dist;
+  const ty = c.y + fy * dist;
+  setTimeout(() => _vfxBigAoeRing({ x: tx, y: ty }, ts * 0.8, color), 180);
+}
+
+// TRAP: 足元にパルスする小さなリング（設置済みマーカー感）
+function _vfxTrapPulse(c, ts, color) {
+  const el = document.createElement('div');
+  el.className = 'vfx-aoe-ring vfx-aoe-ring-2';
+  el.style.left = c.x + 'px';
+  el.style.top  = c.y + 'px';
+  el.style.setProperty('--c', color);
+  el.style.setProperty('--max', (ts * 1.2) + 'px');
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 700);
 }
 
 // F 型: 部屋全体を覆う色付きフラッシュ + 大型 AoE リング（部屋掃除感）。

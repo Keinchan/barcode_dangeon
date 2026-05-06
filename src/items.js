@@ -436,68 +436,121 @@ export function randomMysteryScroll(rng = Math.random) {
 // 技の書（スキルブック）と技ライブラリ
 // ─────────────────────────────────────────────
 //   使用すると永続的に技を習得（最大 4 スロット）。技は MP を消費して
-//   攻撃パターン A/B/C/D の範囲ダメージを与える（バトルパネルではなく
-//   ダンジョン探索中に発動。複数モンスターを巻き込める）。
+//   範囲タイプに応じた攻撃を放つ。範囲タイプは設計書 range_type_definitions.md
+//   準拠の 19 種類で、ローグライク的なマス目戦闘を表現する。
 //
-//   pattern:
-//     A = プレイヤーの周囲十字 4 マス（上下左右）
-//     B = プレイヤーの周囲 8 マス（王将の移動範囲）
-//     C = 4 方向に 2 マスまでの直線（飛び道具）
-//     D = チェビシェフ距離 2 以内の全 24 マス（広範囲）
-export const PATTERN_DESC = {
-  A: 'A型: 上下左右の隣 4 マス',
-  B: 'B型: 周囲 8 マス（王将）',
-  C: 'C型: 4 方向 2 マス先まで（直線飛び道具）',
-  D: 'D型: 周囲 2 マス全範囲',
-  E: 'E型: 正面に最大 6 マスの長距離ビーム',
-  F: 'F型: 部屋内の敵全員',
-};
+//   範囲タイプの分類:
+//     単体・近接系: SELF / MELEE / ADJ / CROSS / DIAG
+//     直線・距離系: LINE3 / LINE5 / LINE_INF / PIERCE / RANGED
+//     部屋・全体系: ROOM / ROOM_ALL / FLOOR / FLOOR_ALL
+//     地形・特殊系: TERRAIN_3X3 / TERRAIN_5X5 / CONE3 / AROUND_TARGET / TRAP
+//
+//   各範囲タイプは offsets（向き [0,1] 基準のローカル座標差分）か special
+//   （室内全敵など座標で表現できないもの）を持つ。`_executeSkill` 側で向き
+//   回転とフォールバックを行う。
+export const RANGE_TYPES = {
+  // ── 単体・近接系 ──
+  SELF:        { id: 'SELF',        label: 'じぶん',        desc: '自分自身に効果',           kind: 'self' },
+  MELEE:       { id: 'MELEE',       label: 'せっしょく',    desc: '正面 1 マス',              kind: 'offsets',  offsets: [[0, 1]],                                                                                                                                                                                                                  rotatable: true  },
+  ADJ:         { id: 'ADJ',         label: 'となり',        desc: '隣接 8 マス',              kind: 'offsets',  offsets: [[-1,-1],[0,-1],[1,-1],[-1,0],[1,0],[-1,1],[0,1],[1,1]],                                                                                                                                                                rotatable: false },
+  CROSS:       { id: 'CROSS',       label: 'じゅうじ',      desc: '上下左右 4 マス',          kind: 'offsets',  offsets: [[0,-1],[0,1],[-1,0],[1,0]],                                                                                                                                                                                            rotatable: false },
+  DIAG:        { id: 'DIAG',        label: 'ななめ',        desc: '斜め 4 マス',              kind: 'offsets',  offsets: [[-1,-1],[1,-1],[-1,1],[1,1]],                                                                                                                                                                                          rotatable: false },
 
-export const PATTERN_OFFSETS = {
-  A: [[0,-1],[0,1],[-1,0],[1,0]],
-  B: [[-1,-1],[0,-1],[1,-1],[-1,0],[1,0],[-1,1],[0,1],[1,1]],
-  C: [[0,-1],[0,-2],[0,1],[0,2],[-1,0],[-2,0],[1,0],[2,0]],
-  D: (() => {
+  // ── 直線・距離系（向きに合わせて回転） ──
+  LINE3:       { id: 'LINE3',       label: 'みじかいいっせん', desc: '正面 3 マス',              kind: 'offsets',  offsets: [[0,1],[0,2],[0,3]],                                                                                                                                                                                                rotatable: true  },
+  LINE5:       { id: 'LINE5',       label: 'ちゅういっせん',  desc: '正面 5 マス',              kind: 'offsets',  offsets: [[0,1],[0,2],[0,3],[0,4],[0,5]],                                                                                                                                                                                    rotatable: true  },
+  LINE_INF:    { id: 'LINE_INF',    label: 'ながいいっせん',  desc: '正面方向に壁まで貫通',     kind: 'line_inf', maxRange: 12,                                                                                                                                                                                                                rotatable: true  },
+  PIERCE:      { id: 'PIERCE',      label: 'つらぬき',      desc: '正面方向の敵を貫通（壁で停止）', kind: 'pierce',   maxRange: 12,                                                                                                                                                                                                            rotatable: true  },
+  RANGED:      { id: 'RANGED',      label: 'きょりしてい',  desc: '正面 3 マス先の 1 点',     kind: 'ranged',   distance: 3,                                                                                                                                                                                                                  rotatable: true  },
+
+  // ── 部屋・全体系（座標オフセットで表現できない＝ special） ──
+  ROOM:        { id: 'ROOM',        label: 'ぜんしつ',      desc: '同じ部屋の敵全員',         kind: 'room' },
+  ROOM_ALL:    { id: 'ROOM_ALL',    label: 'しつないぜんいん', desc: '同じ部屋の味方含む全員', kind: 'room_all' },
+  FLOOR:       { id: 'FLOOR',       label: 'ぜんかい',      desc: 'フロア全敵',               kind: 'floor' },
+  FLOOR_ALL:   { id: 'FLOOR_ALL',   label: 'かいぜんいん',  desc: 'フロア全員（味方含む）',   kind: 'floor_all' },
+
+  // ── 地形・特殊系 ──
+  TERRAIN_3X3: { id: 'TERRAIN_3X3', label: 'せいほうけい3', desc: '自分中心 3×3（自分含む）', kind: 'offsets',  offsets: (() => {
     const out = [];
-    for (let dy = -2; dy <= 2; dy++) {
-      for (let dx = -2; dx <= 2; dx++) {
-        if (dx === 0 && dy === 0) continue;
-        out.push([dx, dy]);
-      }
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) out.push([dx, dy]);
+    return out;
+  })(), includeSelf: true, rotatable: false },
+  TERRAIN_5X5: { id: 'TERRAIN_5X5', label: 'せいほうけい5', desc: '自分中心 5×5 全範囲',      kind: 'offsets',  offsets: (() => {
+    const out = [];
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+      if (dx === 0 && dy === 0) continue;
+      out.push([dx, dy]);
     }
     return out;
-  })(),
-  // E: 正面方向に 6 マスのビーム。基準は「下向き [0,1]」なので
-  //    _facingRotatedOffsets が向きで回転させると常に正面方向になる。
-  E: [[0,1],[0,2],[0,3],[0,4],[0,5],[0,6]],
-  // F: 「部屋全体」は座標オフセットでは表現できないので _executeSkill 側で
-  //    pattern==='F' を特別扱いし、PATTERN_OFFSETS は空配列にしておく。
-  F: [],
+  })(), rotatable: false },
+  CONE3:       { id: 'CONE3',       label: 'おうぎがた',    desc: '正面扇形 3 マス幅',        kind: 'offsets',  offsets: [[0,1],[-1,1],[1,1],[0,2],[-1,2],[1,2],[0,3]],                                                                                                                                                                          rotatable: true  },
+  AROUND_TARGET: { id: 'AROUND_TARGET', label: 'てきしゅうい', desc: '正面方向最寄り敵 + 周囲 8 マス', kind: 'around_target', maxRange: 5,                                                                                                                                                                                              rotatable: true  },
+  TRAP:        { id: 'TRAP',        label: 'せっち',        desc: '足元に罠を設置',           kind: 'trap' },
 };
 
+// 範囲タイプの ID 列（ループ・検索用）
+export const RANGE_TYPE_IDS = Object.keys(RANGE_TYPES);
+
+// 旧 A/B/C/D/E/F → 新範囲タイプ。古いセーブの skill.pattern を読み込む時の互換用。
+//   A: 上下左右 4 マス      → CROSS
+//   B: 周囲 8 マス          → ADJ
+//   C: 4 方向 2 マス先      → LINE3 相当（過去は十字飛び道具だったため近いものを選択）
+//   D: 周囲 2 マス全範囲    → TERRAIN_5X5
+//   E: 正面 6 マスビーム    → LINE_INF（最寄り壁まで）
+//   F: 部屋全敵             → ROOM
+export const LEGACY_PATTERN_MAP = {
+  A: 'CROSS', B: 'ADJ', C: 'LINE3', D: 'TERRAIN_5X5', E: 'LINE_INF', F: 'ROOM',
+};
+
+// 任意の入力（旧パターン or 新名称）を新範囲タイプ ID に正規化。
+// 不明な値は CROSS にフォールバック（保守的・最も狭い既存範囲）。
+export function normalizeRangeType(input) {
+  if (!input) return 'CROSS';
+  if (RANGE_TYPES[input]) return input;
+  const mapped = LEGACY_PATTERN_MAP[input];
+  if (mapped && RANGE_TYPES[mapped]) return mapped;
+  return 'CROSS';
+}
+
+// 範囲タイプの説明（UI 用）。「正面 3 マス」のような短い文字列。
+export const PATTERN_DESC = Object.fromEntries(
+  Object.entries(RANGE_TYPES).map(([id, r]) => [id, `${r.label}: ${r.desc}`]),
+);
+
+// 互換: 旧 PATTERN_OFFSETS は固定オフセット系のみ抽出（旧コードが触る場合の保険）。
+// 新コードは RANGE_TYPES[id].offsets を直接見るのが推奨。
+export const PATTERN_OFFSETS = Object.fromEntries(
+  Object.entries(RANGE_TYPES)
+    .filter(([, r]) => r.kind === 'offsets')
+    .map(([id, r]) => [id, r.offsets]),
+);
+
+// 既存技を新範囲タイプにマッピングし直したライブラリ。
+//   pattern フィールドは旧コードとの互換のため残し、新範囲タイプ ID を入れる。
+//   _executeSkill は normalizeRangeType を通すので旧 A〜F でも動くが、定義は新名称で。
 export const SKILLS_LIBRARY = [
   // コモン
-  { id: 'sweep',     name: '薙ぎ払い',   pattern: 'A', dmgMult: 1.0, mpCost: 6,  element: '火', rarity: 'コモン',     desc: '十字隣接 4 マスを薙ぐ' },
-  { id: 'jab',       name: '小突き',     pattern: 'C', dmgMult: 0.8, mpCost: 5,  element: '火', rarity: 'コモン',     desc: '直線 2 マスを軽く突く' },
-  { id: 'volley',    name: '軽矢',       pattern: 'E', dmgMult: 0.9, mpCost: 7,  element: '雷', rarity: 'コモン',     desc: '正面に 6 マスの矢を放つ' },
+  { id: 'sweep',     name: '薙ぎ払い',   pattern: 'CROSS',       dmgMult: 1.0, mpCost: 6,  element: '火', rarity: 'コモン',     desc: '十字隣接 4 マスを薙ぐ' },
+  { id: 'jab',       name: '小突き',     pattern: 'LINE3',       dmgMult: 0.8, mpCost: 5,  element: '火', rarity: 'コモン',     desc: '正面 3 マスを軽く突く' },
+  { id: 'volley',    name: '軽矢',       pattern: 'LINE_INF',    dmgMult: 0.9, mpCost: 7,  element: '雷', rarity: 'コモン',     desc: '正面に壁まで矢を放つ' },
   // レア
-  { id: 'whirl',     name: '水流斬',     pattern: 'B', dmgMult: 1.2, mpCost: 10, element: '水', rarity: 'レア',       desc: '周囲 8 マスを攻撃 + 1 マス突き飛ばし', knockback: 1 },
-  { id: 'pierce',    name: '貫通弾',     pattern: 'C', dmgMult: 1.5, mpCost: 12, element: '雷', rarity: 'レア',       desc: '直線 2 マス先まで貫く' },
-  { id: 'cannon',    name: '大砲',       pattern: 'E', dmgMult: 1.6, mpCost: 14, element: '火', rarity: 'レア',       desc: '正面 6 マスを貫き 1 マス吹き飛ばす', knockback: 1 },
+  { id: 'whirl',     name: '水流斬',     pattern: 'ADJ',         dmgMult: 1.2, mpCost: 10, element: '水', rarity: 'レア',       desc: '周囲 8 マスを攻撃 + 1 マス突き飛ばし', knockback: 1 },
+  { id: 'pierce',    name: '貫通弾',     pattern: 'PIERCE',      dmgMult: 1.5, mpCost: 12, element: '雷', rarity: 'レア',       desc: '正面方向の敵を貫通する弾' },
+  { id: 'cannon',    name: '大砲',       pattern: 'LINE_INF',    dmgMult: 1.6, mpCost: 14, element: '火', rarity: 'レア',       desc: '正面に壁まで届く砲撃 + 吹き飛ばし', knockback: 1 },
   // エピック
-  { id: 'snipe',     name: '影狙撃',     pattern: 'C', dmgMult: 2.5, mpCost: 14, element: '闇', rarity: 'エピック',   desc: '4方向 2 マス先（高威力）' },
-  { id: 'storm',     name: '光の嵐',     pattern: 'D', dmgMult: 1.4, mpCost: 18, element: '光', rarity: 'エピック',   desc: '周囲 2 マス全範囲' },
-  { id: 'tempest',   name: '部屋風嵐',   pattern: 'F', dmgMult: 1.3, mpCost: 22, element: '草', rarity: 'エピック',   desc: '部屋内の敵全員に 1 マス突風', knockback: 1 },
+  { id: 'snipe',     name: '影狙撃',     pattern: 'RANGED',      dmgMult: 2.5, mpCost: 14, element: '闇', rarity: 'エピック',   desc: '正面 3 マス先の 1 点を高威力で撃つ' },
+  { id: 'storm',     name: '光の嵐',     pattern: 'TERRAIN_5X5', dmgMult: 1.4, mpCost: 18, element: '光', rarity: 'エピック',   desc: '周囲 2 マス全範囲' },
+  { id: 'tempest',   name: '部屋風嵐',   pattern: 'ROOM',        dmgMult: 1.3, mpCost: 22, element: '草', rarity: 'エピック',   desc: '部屋内の敵全員に 1 マス突風', knockback: 1 },
   // レジェンド
-  { id: 'doom',      name: '草薙ぎ',     pattern: 'D', dmgMult: 2.5, mpCost: 28, element: '草', rarity: 'レジェンド', desc: '広範囲・高威力' },
-  { id: 'overdrive', name: '神無双',     pattern: 'B', dmgMult: 3.0, mpCost: 22, element: '火', rarity: 'レジェンド', desc: '周囲 8 マスを必殺 + 2 マス吹き飛ばし', knockback: 2 },
-  { id: 'meteor',    name: '隕石落とし', pattern: 'F', dmgMult: 2.0, mpCost: 32, element: '火', rarity: 'レジェンド', desc: '部屋全体に大隕石、敵を 2 マス吹き飛ばす', knockback: 2 },
+  { id: 'doom',      name: '草薙ぎ',     pattern: 'TERRAIN_5X5', dmgMult: 2.5, mpCost: 28, element: '草', rarity: 'レジェンド', desc: '広範囲・高威力' },
+  { id: 'overdrive', name: '神無双',     pattern: 'ADJ',         dmgMult: 3.0, mpCost: 22, element: '火', rarity: 'レジェンド', desc: '周囲 8 マスを必殺 + 2 マス吹き飛ばし', knockback: 2 },
+  { id: 'meteor',    name: '隕石落とし', pattern: 'ROOM',        dmgMult: 2.0, mpCost: 32, element: '火', rarity: 'レジェンド', desc: '部屋全体に大隕石、敵を 2 マス吹き飛ばす', knockback: 2 },
   // 行動阻害技: ダメージは控えめだが命中した敵を行動不能/攻撃不能にする。
   //   stun = 移動も攻撃も不可（フラッシュ）/ seal = 移動可・攻撃不可（封じ込み）
-  { id: 'flash',     name: 'フラッシュ', pattern: 'B', dmgMult: 0.4, mpCost: 12, element: '光', rarity: 'レア',       desc: '周囲 8 マスを目眩で 2 ターン気絶', status: { kind: 'stun', turns: 2 } },
-  { id: 'seal',      name: '封じ込み',   pattern: 'A', dmgMult: 0.5, mpCost: 10, element: '闇', rarity: 'レア',       desc: '隣接 4 マスを 3 ターン攻撃封印',     status: { kind: 'seal', turns: 3 } },
-  { id: 'roomFlash', name: '閃光弾',     pattern: 'F', dmgMult: 0.6, mpCost: 24, element: '光', rarity: 'エピック',   desc: '部屋全体を 2 ターン気絶させる',       status: { kind: 'stun', turns: 2 } },
-  { id: 'silence',   name: '沈黙呪',     pattern: 'D', dmgMult: 0.7, mpCost: 20, element: '闇', rarity: 'エピック',   desc: '周囲 2 マスを 4 ターン攻撃封印',     status: { kind: 'seal', turns: 4 } },
+  { id: 'flash',     name: 'フラッシュ', pattern: 'ADJ',         dmgMult: 0.4, mpCost: 12, element: '光', rarity: 'レア',       desc: '周囲 8 マスを目眩で 2 ターン気絶', status: { kind: 'stun', turns: 2 } },
+  { id: 'seal',      name: '封じ込み',   pattern: 'CROSS',       dmgMult: 0.5, mpCost: 10, element: '闇', rarity: 'レア',       desc: '隣接 4 マスを 3 ターン攻撃封印',     status: { kind: 'seal', turns: 3 } },
+  { id: 'roomFlash', name: '閃光弾',     pattern: 'ROOM',        dmgMult: 0.6, mpCost: 24, element: '光', rarity: 'エピック',   desc: '部屋全体を 2 ターン気絶させる',       status: { kind: 'stun', turns: 2 } },
+  { id: 'silence',   name: '沈黙呪',     pattern: 'TERRAIN_5X5', dmgMult: 0.7, mpCost: 20, element: '闇', rarity: 'エピック',   desc: '周囲 2 マスを 4 ターン攻撃封印',     status: { kind: 'seal', turns: 4 } },
 ];
 
 export function findSkillById(id) {
