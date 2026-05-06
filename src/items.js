@@ -1,4 +1,8 @@
 import { createRNG, hashString } from './rng.js';
+import { WIZARD_SKILL_LIBRARY, findWizardSkillById, wizardSkillsLearnableAt } from './wizard-skills.js';
+
+// re-export so main.js can import from one place
+export { WIZARD_SKILL_LIBRARY, wizardSkillsLearnableAt };
 
 // ── レアリティ ──
 export const RARITIES = [
@@ -553,12 +557,18 @@ export const SKILLS_LIBRARY = [
   { id: 'silence',   name: '沈黙呪',     pattern: 'TERRAIN_5X5', dmgMult: 0.7, mpCost: 20, element: '闇', rarity: 'エピック',   desc: '周囲 2 マスを 4 ターン攻撃封印',     status: { kind: 'seal', turns: 4 } },
 ];
 
+// 技 ID から技定義を取り出す。SKILLS_LIBRARY（巻物で覚える汎用技）と
+// WIZARD_SKILL_LIBRARY（タイプ別レベル習得技）の両方を横断検索する。
 export function findSkillById(id) {
-  return SKILLS_LIBRARY.find(s => s.id === id) ?? null;
+  return SKILLS_LIBRARY.find(s => s.id === id)
+      ?? findWizardSkillById(id)
+      ?? null;
 }
 
 // 技解放レベル（レア度ごと）。プレイヤー / ミニオンの level がこの値以上の時だけ
 // スロットにセットして発動できる。学習自体は level 不問（巻物を読めば覚える）。
+//   ウィザード技は skill.learnedAt（タイプ自動習得レベル）をそのまま要件にする：
+//   レベル 23 で覚えた技はレベル 23 以上ならスロットにセット可能。
 export const SKILL_LEVEL_REQ = {
   'コモン':     1,
   'レア':       5,
@@ -566,6 +576,7 @@ export const SKILL_LEVEL_REQ = {
   'レジェンド': 30,
 };
 export function skillLevelReq(skill) {
+  if (skill && typeof skill.learnedAt === 'number') return skill.learnedAt;
   return SKILL_LEVEL_REQ[skill?.rarity] ?? 1;
 }
 
