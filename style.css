@@ -431,14 +431,16 @@ html, body {
 .hp-text { font-size: 15px; color: var(--success); font-weight: bold; }
 .mp-text { font-size: 14px; color: #4dc4ff; font-weight: bold; }
 
-/* 技クイックバー（D-pad の左、最大 4 スロット）。各スロットは技の属性カラーで縁取り。 */
+/* 技クイックバー（フッター左、最大 4 スロット 横一列）。各スロットは技の属性カラーで縁取り。
+   旧 2x2 の正方形配置から横一列にしたのは、3x3 D-pad と物理的に異なる形状にして
+   PC で隣り合った時の「重なって見える錯視」を防ぐため。 */
 .waza-bar {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  grid-template-rows: 1fr 1fr;
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: 1fr;
   gap: 4px;
   flex-shrink: 0;
-  width: 110px;
+  width: 200px;
 }
 .waza-slot {
   display: flex;
@@ -478,30 +480,22 @@ html, body {
 .waza-slot-name  { font-size: 10px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .waza-slot-mp    { font-size: 9px; opacity: 0.75; }
 
-/* 操作キー（waza-bar + dpad）を 1 つのまとまりとして扱う。
-   PC ではフッター内で log と横並びに、スマホでは log の下で横並びに、
-   どちらの場合も waza-bar と dpad が同じ高さに揃う。 */
-.dungeon-controls {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
-}
-
-/* スマホ向けレイアウト。狭い端末（320-360 幅）で waza-bar と dpad を
-   横並びにすると幅が足りずに重なるため、フッターは 3 段縦積みに固定する:
-     [探索ログ：横幅いっぱい・コンパクト・半透明]
-     [技クイックバー (4 スロット横一列・全幅)]
-     [十字キー (中央寄せ)]
-   各要素を圧縮することで縦消費を ~200px に抑え、フィールドに余白を回す。 */
+/* スマホ向けレイアウト: フッターを縦積みにする。HTML の順序は
+   [waza-bar][log][dpad] だが、CSS order でモバイルでは [log][waza-bar][dpad] に並べ替え。
+   各要素を圧縮することで縦消費を ~200px に抑える。 */
 @media (max-width: 480px) {
   .dungeon-footer {
+    /* grid から column flex に切替。auto/1fr/auto は無視されて子要素が縦積みに */
+    display: flex;
     flex-direction: column;
     align-items: stretch;
     gap: 4px;
     padding: 4px 8px 6px;
   }
+  /* CSS order でモバイルの並び替え: log → waza-bar → dpad */
+  #dungeon-log { order: 1; }
+  #waza-bar    { order: 2; }
+  .dpad        { order: 3; }
   /* ログはコンパクト化＋半透明背景でフィールドの「上に乗っている」感を出す。 */
   #dungeon-log {
     flex: 0 0 auto;
@@ -514,23 +508,18 @@ html, body {
   }
   .log-line        { font-size: 11px; padding: 3px 6px; }
   .log-line.recent { font-size: 13px; padding: 4px 7px; }
-  /* スマホでは .dungeon-controls を縦積みに（waza-bar 全幅, dpad 中央）。
-     PC のように横並びにすると 320-360px 幅の端末で衝突するため。 */
-  .dungeon-controls {
-    flex-direction: column;
-    align-items: center;
-    gap: 4px;
-  }
   .waza-bar {
     width: 100%;
     grid-template-columns: repeat(4, 1fr);
     grid-template-rows: 1fr;
+    align-self: stretch;
   }
   .waza-slot { min-height: 38px; padding: 3px 4px; }
   .waza-slot-name { font-size: 10px; }
-  .dpad-btn { width: 38px; height: 38px; font-size: 16px; }
-  .dpad     { gap: 2px; }
-  .dpad-row { gap: 2px; }
+  .dpad        { align-self: center; }
+  .dpad-btn    { width: 38px; height: 38px; font-size: 16px; }
+  .dpad        { gap: 2px; }
+  .dpad-row    { gap: 2px; }
 }
 
 .modal-meta {
@@ -568,16 +557,17 @@ html, body {
   /* サイズは src/dungeon.js の render() がwindow基準で完全制御 */
 }
 
+/* PC レイアウト: CSS Grid で [waza-bar | log | dpad] の 3 カラムを物理的に確定。
+   waza-bar(auto) と dpad(auto) はコンテンツ幅、log(1fr) が残り幅を全部もらう。
+   Grid のカラムは独立しているので、長いログでも操作キーを押し出せない。 */
 .dungeon-footer {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 14px;
   padding: 10px 14px 16px;
   background: var(--surface);
   flex-shrink: 0;
-  /* PC・タブレットの広い画面でも操作キーがビューポート端にぶつからないよう
-     最大幅をビューポートに合わせ、中央寄せ。横並びの log/操作キーが
-     視覚的にバランス良く分かれて見える。 */
   width: 100%;
   box-sizing: border-box;
 }
@@ -736,22 +726,31 @@ html, body {
 .btn-icon-menu:active { background: var(--primary); }
 .btn-icon-menu:disabled { opacity: 0.35; cursor: not-allowed; }
 
-/* フィールド拡大率コントロール（ダンジョンヘッダ右側、メニューボタンの左隣） */
+/* フィールド拡大率コントロール（canvas 右上の floating overlay）。
+   minimap が左上に居るのと対称的に右上配置。ヘッダの混雑から離脱して
+   PC でも確実に見える位置に固定する。 */
 .dungeon-zoom-controls {
+  position: absolute;
+  top: 70px;
+  right: 8px;
+  z-index: 11;
   display: flex;
   align-items: center;
   gap: 4px;
-  margin-left: 6px;
-  flex-shrink: 0;
+  padding: 3px 5px;
+  background: rgba(0,0,0,0.55);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 8px;
+  backdrop-filter: blur(2px);
 }
 .btn-icon-zoom {
   width: 30px;
   height: 30px;
   border-radius: 6px;
-  background: rgba(255,255,255,0.08);
-  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.12);
+  border: 1px solid rgba(255,255,255,0.2);
   color: #fff;
-  font-size: 16px;
+  font-size: 18px;
   font-weight: bold;
   line-height: 1;
   cursor: pointer;
@@ -763,16 +762,17 @@ html, body {
 .btn-icon-zoom:active { background: var(--primary); }
 .btn-icon-zoom:disabled { opacity: 0.35; cursor: not-allowed; }
 .zoom-level {
-  font-size: 11px;
-  color: var(--muted);
-  min-width: 36px;
+  font-size: 12px;
+  color: #fff;
+  min-width: 38px;
   text-align: center;
   font-variant-numeric: tabular-nums;
+  font-weight: bold;
 }
 @media (max-width: 480px) {
-  .btn-icon-zoom { width: 26px; height: 26px; font-size: 14px; }
-  .zoom-level    { font-size: 10px; min-width: 30px; }
-  .dungeon-zoom-controls { margin-left: 4px; gap: 2px; }
+  .dungeon-zoom-controls { top: 56px; gap: 2px; padding: 2px 4px; }
+  .btn-icon-zoom { width: 26px; height: 26px; font-size: 16px; }
+  .zoom-level    { font-size: 11px; min-width: 32px; }
 }
 
 /* ── COMBAT PANEL（ダンジョン画面に統合・スマホで収まるよう密度を下げる） ── */
