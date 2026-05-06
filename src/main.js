@@ -29,6 +29,7 @@ import {
   aptitudeElementsForPlayer, aptitudeElementsForMinion,
   canLearnSkillForPlayer, canLearnSkillForMinion,
   skillLevelReq, SKILLS_LIBRARY,
+  WIZARD_SKILL_LIBRARY, wizardSkillsLearnableAt,
 } from './items.js';
 import { hashString } from './rng.js';
 import { Dungeon } from './dungeon.js';
@@ -562,6 +563,54 @@ function _ensurePlayerSkillFields() {
     player.skillSlots = [null, null, null, null];
   }
 }
+
+// プライマリタイプの属性に対応するウィザード技を、現在レベル以下のものまで
+// 自動習得する。重複は弾く。レベルアップ時 / タイプ変更時に呼ぶ。
+//
+//   silent: true なら習得バナーを表示しない（タイプ変更で 20 個まとめて学習する
+//     ようなケースで通知が連発するのを抑制）。
+//   slotAuto: true（デフォルト）なら、空きスロットにレベル要件を満たす新規技を
+//     自動でセットする（プレイヤーがメニューを開かなくても技が発動可能になる）。
+function _autoLearnWizardSkills({ silent = false, slotAuto = true } = {}) {
+  _ensurePlayerSkillFields();
+  const t = findPlayerType(player.type);
+  if (!t) return;                           // タイプ未設定は救済（コモン技のみ）。自動習得しない
+  const want = wizardSkillsLearnableAt(t.primary, player.level);
+  const newlyLearned = [];
+  for (const sk of want) {
+    if (player.learnedSkills.find(x => x.id === sk.id)) continue;
+    player.learnedSkills.push({ ...sk });
+    newlyLearned.push(sk);
+  }
+  if (newlyLearned.length === 0) return;
+
+  // 空きスロットがあればレベル要件を満たす新規技から順にオートセット
+  if (slotAuto) {
+    for (const sk of newlyLearned) {
+      if (player.level < skillLevelReq(sk)) continue;
+      const empty = player.skillSlots.findIndex(s => !s);
+      if (empty === -1) break;
+      player.skillSlots[empty] = { ...sk };
+    }
+  }
+
+  // ダンジョン内ならログ。それ以外（マップ画面で経験値増減ボタン等）はバナー
+  if (!silent) {
+    for (const sk of newlyLearned) {
+      const msg = `📕 ${sk.name} を習得！（${sk.element}・${sk.rarity}）`;
+      if (screen === 'dungeon') dungeonLog(msg, { rarity: sk.rarity });
+      else                       showItemBanner(
+        { name: sk.name, rarity: sk.rarity, rarityColor: RARITIES.find(r => r.name === sk.rarity)?.color, level: sk.learnedAt, emoji: '📕' },
+        { action: '技を習得' },
+      );
+    }
+    playSfx('pickup', { rarityTier: rarityTier(newlyLearned[newlyLearned.length - 1].rarity) });
+  }
+  // メニュー開きっぱなしなら反映
+  if (!document.getElementById('menu-modal').classList.contains('hidden')) {
+    refreshMenu();
+  }
+}
 function _ensureMinionSkillFields(mi) {
   if (!Array.isArray(mi.learnedSkills)) mi.learnedSkills = [];
   if (!Array.isArray(mi.skillSlots) || mi.skillSlots.length !== 4) {
@@ -710,6 +759,9 @@ document.getElementById('btn-open-type-select')?.addEventListener('click', () =>
       player.type = btn.dataset.id;
       playSfx('confirm');
       document.getElementById('type-select-modal').classList.add('hidden');
+      // タイプ変更時も自動習得を回す。すでに覚えた技（旧タイプの技含む）は失われない。
+      // 新タイプのプライマリ属性で「現在のレベル以下の技」を全部覚える。
+      _autoLearnWizardSkills({ silent: true });
       _refreshSkillConfig();
       autoSave();
     });
@@ -1535,8 +1587,29 @@ function _executeSkill(skill) {
   let targets = [];   // { m, dx, dy } の配列
   switch (r?.kind) {
     case 'self': {
-      // バフ系: 命中対象は自分のみ。Phase 2 では効果未実装なのでログだけ。
-      break;
+      // バフ・回復・召喚等の支援系: 命中対象は無し。VFX とログを出して敵ターンへ。
+      // 効果（バフ持続・召喚・反射バリア etc）は未実装のため、視覚的演出と
+      // 「使用感」だけ提供する。MP は既に消費済み。
+      const elColor = SKILL_ELEMENT_COLOR[skill.element] ?? '#b070dd';
+      hitFlash({ color: _alphaize(elColor, 0.35) });
+      magicCircle(playerVfxAnchor(), skill.element);
+      const canvas = document.getElementById('dungeon-canvas');
+      if (canvas) {
+        const cRect = canvas.getBoundingClientRect();
+        const ts    = canvas.width / 11;
+        const half  = 5;
+        const playerScreen = {
+          x: cRect.left + (half * ts + ts / 2),
+          y: cRect.top  + (half * ts + ts / 2),
+        };
+        showSkillPatternVfx(rangeId, playerScreen, ts, elColor, { facing });
+      }
+      dungeonLog(`✨ 技「${skill.name}」を発動！（${skill.desc}）／ MP -${skill.mpCost}`, { rarity: skill.rarity });
+      playSfx('crit');
+      refreshHUD();
+      _runEnemyTurn();
+      autoSave();
+      return;
     }
     case 'offsets': {
       const offsets = _facingRotatedOffsets(rangeId, facing);
@@ -2518,6 +2591,9 @@ function gainXp(amount) {
       dungeonLog(`🎉 レベルアップ！ Lv${player.level}（HP+${HP_PER_LEVEL} ATK+${ATK_PER_LEVEL} DEF+${DEF_PER_LEVEL}）`);
     }
     playSfx('levelup');
+    // タイプ別ウィザード技の自動習得（プライマリ属性のみ）。
+    // 既習得の技は重複追加しない。新規習得分は習得バナーとログで通知する。
+    _autoLearnWizardSkills();
   }
   refreshHUD();
   if (!document.getElementById('menu-modal').classList.contains('hidden')) refreshMenu();
@@ -3334,6 +3410,10 @@ function _applySave(data) {
   if (Array.isArray(data.clearedSeeds)) {
     for (const s of data.clearedSeeds) clearedSet.add(s);
   }
+  // 既存ユーザーがレベルだけ高くタイプ別技を持っていない場合のキャッチアップ:
+  // タイプが設定されていれば現在レベルまでのプライマリ属性技を一括習得する。
+  // バナーは出さず（ロード時に大量通知が出ないように）静かに揃える。
+  _autoLearnWizardSkills({ silent: true, slotAuto: false });
   refreshHUD();
 }
 
