@@ -167,6 +167,81 @@ export class Dungeon {
   removeMonster(m)    { const i = this.monsters.indexOf(m);    if (i !== -1) this.monsters.splice(i, 1); }
   removeFloorItem(it) { const i = this.floorItems.indexOf(it); if (i !== -1) this.floorItems.splice(i, 1); }
 
+  // ── 巻物による地形操作ヘルパ（Phase 4 で追加） ──
+
+  // 隣接 4 方向の壁を破壊する（ウォールクラッシュの巻物）。
+  // 盤外と外周（最外列）はそのまま残す（穴が空くと描画/AI が壊れるため）。
+  // 戻り値: 破壊できたマスの数
+  destroyAdjacentWalls(x, y) {
+    let n = 0;
+    for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+      const tx = x + dx, ty = y + dy;
+      if (tx <= 0 || tx >= W - 1 || ty <= 0 || ty >= H - 1) continue;
+      if (this.grid[ty][tx] === T.WALL) {
+        this.grid[ty][tx] = T.FLOOR;
+        n += 1;
+      }
+    }
+    return n;
+  }
+
+  // 自分から階段まで通路を生成する（パッセージの巻物）。
+  // 既存の _corridor と同じ L 字型のシンプルな掘削。
+  carvePassageToStairs(fromX, fromY) {
+    if (!this.stairsPos) return false;
+    let x = fromX, y = fromY;
+    while (x !== this.stairsPos.x) {
+      if (this.grid[y][x] === T.WALL) this.grid[y][x] = T.FLOOR;
+      x += x < this.stairsPos.x ? 1 : -1;
+    }
+    while (y !== this.stairsPos.y) {
+      if (this.grid[y][x] === T.WALL) this.grid[y][x] = T.FLOOR;
+      y += y < this.stairsPos.y ? 1 : -1;
+    }
+    return true;
+  }
+
+  // 部屋内の全ての（生存中・非商人）モンスターを返す（部屋系巻物用）。
+  monstersInRoom(room) {
+    if (!room) return [];
+    return this.monsters.filter(m =>
+      m.hp > 0 && !m.isShopkeeper &&
+      m.x >= room.x && m.x < room.x + room.w &&
+      m.y >= room.y && m.y < room.y + room.h
+    );
+  }
+
+  // フロア内の全ての（生存中・非商人）モンスターを返す。
+  allLivingMonsters() {
+    return this.monsters.filter(m => m.hp > 0 && !m.isShopkeeper);
+  }
+
+  // 同じ部屋のランダム床マス（プレイヤーマス除く）を返す。ブリンクの巻物用。
+  randomFloorInRoom(room) {
+    if (!room) return null;
+    const cands = [];
+    for (let y = room.y; y < room.y + room.h; y++) {
+      for (let x = room.x; x < room.x + room.w; x++) {
+        if (this.grid[y][x] !== T.FLOOR) continue;
+        if (this.playerPos.x === x && this.playerPos.y === y) continue;
+        if (this._monsterAt(x, y)) continue;
+        if (this.minionAt && this.minionAt(x, y)) continue;
+        cands.push({ x, y });
+      }
+    }
+    if (cands.length === 0) return null;
+    return cands[Math.floor(Math.random() * cands.length)];
+  }
+
+  // フロアのランダムな部屋の中央（プレイヤーが今いる部屋以外）を返す。ワープの巻物用。
+  randomRoomCenterOtherThan(room) {
+    if (!Array.isArray(this.rooms) || this.rooms.length <= 1) return null;
+    const others = this.rooms.filter(r => r !== room);
+    if (others.length === 0) return null;
+    const target = others[Math.floor(Math.random() * others.length)];
+    return this._center(target);
+  }
+
   // ミニオンをプレイヤーの周囲 8 マスに展開する。フロア入場時に 1 度だけ呼ぶ。
   // 入場直後は player.minions（テンプレート＋現在 HP）と同じ並びでスポーンし、
   // 階層を越えるたびにこれを呼び直すため、各フロアでスポーン位置がリセットされる。

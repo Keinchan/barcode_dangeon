@@ -2393,7 +2393,13 @@ function _useScrollFromInventory(idx) {
   autoSave();
 }
 
-// 不思議系巻物の使用：効果フラグを dungeon に書き込み再描画。フロアでのみ使える
+// 不思議系巻物の使用。Phase 4 から 5 カテゴリの効果に拡張。
+//   scout    : フロアの可視化フラグを書き換え（再フロアでリセット）
+//   move     : プレイヤーを瞬間移動
+//   status   : HP/MP 全回復・経験値ブースト・所持金倍化
+//   terrain  : 壁破壊・通路掘削
+//   combat   : 部屋 / フロア全敵にダメージ
+//   forbidden: 諸刃の剣（自傷ダメージと引き換えに大効果）
 function _useMysteryScrollFromInventory(idx) {
   const item = player.inventory[idx];
   if (!item || item.type !== 'mysteryScroll') return;
@@ -2401,20 +2407,188 @@ function _useMysteryScrollFromInventory(idx) {
     showAlert('巻物はダンジョン探索中にしか使えません');
     return;
   }
-  switch (item.effect) {
-    case 'reveal-stairs':  dungeon.revealStairs  = true; break;
-    case 'reveal-enemies': dungeon.revealEnemies = true; break;
-    case 'reveal-items':   dungeon.revealItems   = true; break;
-    case 'reveal-all':     dungeon.revealFloor   = true; break;
-    default: showAlert('効果不明な巻物'); return;
+  // 効果ハンドラ。戻り値 false なら巻物を消費しない（条件不足等）。
+  const effect = _MYSTERY_SCROLL_EFFECTS[item.effect];
+  if (!effect) {
+    showAlert(`効果不明な巻物: ${item.effect}`);
+    return;
   }
+  const ok = effect(item);
+  if (ok === false) return;   // 効果側がアラート出して中断
+
+  // 共通: 巻物を消費 + メニュー閉じる + 演出 + 1 ターン進行
   takeOneFromInventory(idx);
-  dungeonLog(`📜 ${item.name} を読んだ！効果は今のフロアに有効`);
+  document.getElementById('menu-modal')?.classList.add('hidden');
   playSfx('crit');
   refreshHUD();
-  refreshMenu();
   dungeon.render(document.getElementById('dungeon-canvas'));
+  // 索敵・地形・移動系は敵ターンを進める（巻物使用 = 1 ターン）。
+  // 戦闘 AoE は既に大ダメージを与えているので敵ターンも回す（取り囲まれても
+  // 1 ターン猶予する仕様にしない＝撃ち漏らしたら反撃を食らう）。
+  _runEnemyTurn();
   autoSave();
+}
+
+// 巻物効果のディスパッチ表。各ハンドラは true を返したら成功（消費する）、
+// false を返したら失敗（巻物を消費せずに中断）。
+const _MYSTERY_SCROLL_EFFECTS = {
+  // ── 索敵系（既存） ──
+  'reveal-stairs':  (item) => { dungeon.revealStairs  = true; dungeonLog(`🔍 ${item.name} を読んだ！ 階段位置が見える`); return true; },
+  'reveal-enemies': (item) => { dungeon.revealEnemies = true; dungeonLog(`👁 ${item.name} を読んだ！ 敵位置が見える`); return true; },
+  'reveal-items':   (item) => { dungeon.revealItems   = true; dungeonLog(`🎁 ${item.name} を読んだ！ アイテム位置が見える`); return true; },
+  'reveal-all':     (item) => { dungeon.revealFloor   = true; dungeonLog(`🗺 ${item.name} を読んだ！ フロア全マップが照らされた`); return true; },
+
+  // ── 移動系 ──
+  'blink': (item) => {
+    const room = dungeon.roomAt?.(dungeon.playerPos.x, dungeon.playerPos.y);
+    const dst  = dungeon.randomFloorInRoom(room);
+    if (!dst) { showAlert('部屋の中で他に移動できる場所がありません'); return false; }
+    _teleportPlayer(dst.x, dst.y);
+    dungeonLog(`✨ ${item.name} を読んだ！ 同じ部屋の別マスに転移した`);
+    return true;
+  },
+  'warp': (item) => {
+    const curRoom = dungeon.roomAt?.(dungeon.playerPos.x, dungeon.playerPos.y);
+    const dst = dungeon.randomRoomCenterOtherThan(curRoom);
+    if (!dst) { showAlert('別の部屋がありません'); return false; }
+    _teleportPlayer(dst.x, dst.y);
+    dungeonLog(`🌀 ${item.name} を読んだ！ 別の部屋に転移した`);
+    return true;
+  },
+  'stairway': (item) => {
+    if (!dungeon.stairsPos) { showAlert('階段の位置が見つかりません'); return false; }
+    _teleportPlayer(dungeon.stairsPos.x, dungeon.stairsPos.y);
+    dungeonLog(`⤵ ${item.name} を読んだ！ 階段に転移した`, { rarity: item.rarity });
+    return true;
+  },
+
+  // ── 状態回復・支援系 ──
+  'cure-all': (item) => {
+    player.hp = player.maxHp;
+    player.mp = player.maxMp ?? 0;
+    // ミニオンも回復対象（味方共通の癒し）
+    for (const mi of (player.minions ?? [])) mi.hp = mi.maxHp ?? mi.hp ?? 0;
+    dungeonLog(`💖 ${item.name} を読んだ！ HP/MP が完全回復した`);
+    return true;
+  },
+  'power-up': (item) => {
+    if (player.level >= MAX_LEVEL) { showAlert('既に最大レベルです'); return false; }
+    const need = xpRequiredForLevel(player.level) - player.xp;
+    gainXp(Math.max(1, need));
+    dungeonLog(`⬆ ${item.name} を読んだ！ レベルアップした！`, { rarity: item.rarity });
+    return true;
+  },
+  'silver-jewel': (item) => {
+    const before = player.gold ?? 0;
+    if (before <= 0) { showAlert('所持金が無いので効果がない…'); return false; }
+    const after = Math.floor(before * 1.5);
+    const gain  = after - before;
+    player.gold = after;
+    dungeonLog(`💎 ${item.name} を読んだ！ ${gain} ゴールド増えた（合計 ${after}）`, { rarity: item.rarity });
+    return true;
+  },
+
+  // ── 地形操作系 ──
+  'wall-crush': (item) => {
+    const n = dungeon.destroyAdjacentWalls(dungeon.playerPos.x, dungeon.playerPos.y);
+    if (n === 0) { showAlert('隣接マスに破壊できる壁がありません'); return false; }
+    dungeonLog(`🪨 ${item.name} を読んだ！ ${n} マスの壁を破壊した`);
+    return true;
+  },
+  'passage': (item) => {
+    if (!dungeon.stairsPos) { showAlert('階段が見つかりません'); return false; }
+    dungeon.carvePassageToStairs(dungeon.playerPos.x, dungeon.playerPos.y);
+    dungeonLog(`🛤 ${item.name} を読んだ！ 階段までの通路が開けた`, { rarity: item.rarity });
+    return true;
+  },
+
+  // ── 戦闘 AoE ──
+  'room-damage': (item) => {
+    const room = dungeon.roomAt?.(dungeon.playerPos.x, dungeon.playerPos.y);
+    const targets = dungeon.monstersInRoom(room);
+    if (targets.length === 0) { showAlert('部屋に敵がいません'); return false; }
+    _scrollAoeDamage(targets, item, 1.6, '⚡', '#ffd54f');
+    return true;
+  },
+  'floor-damage': (item) => {
+    const targets = dungeon.allLivingMonsters();
+    if (targets.length === 0) { showAlert('フロアに敵がいません'); return false; }
+    _scrollAoeDamage(targets, item, 1.2, '🔥', '#ff6b3d');
+    return true;
+  },
+
+  // ── 禁忌系 ──
+  'apocalypse': (item) => {
+    const targets = dungeon.allLivingMonsters();
+    // 敵がいなくても代償だけは払う（禁忌の名にふさわしい）
+    _scrollAoeDamage(targets, item, 3.0, '☠', '#b070dd');
+    const cost = Math.floor(player.maxHp * 0.5);
+    player.hp = Math.max(1, player.hp - cost);   // 1 だけは残す（自殺技にはしない）
+    dungeonLog(`💀 代償として HP が ${cost} 減った…`, { rarity: 'レジェンド' });
+    hitFlash({ color: 'rgba(176,112,221,0.55)' });
+    screenShake(14, 480);
+    return true;
+  },
+  'berserk': (item) => {
+    const cost = Math.floor(player.hp * 0.5);
+    player.hp = Math.max(1, player.hp - cost);
+    // ATK ベースを 30% 加算（フロア中持続。次フロア入場の applyLevelStats でリセット）。
+    player.atkBase = Math.floor(player.atkBase * 1.3);
+    player.atk     = player.atkBase + (player.weapon?.atkBonus ?? 0);
+    dungeonLog(`😈 ${item.name} を読んだ！ HP -${cost} と引き換えに ATK が大幅上昇！`, { rarity: 'レジェンド' });
+    hitFlash({ color: 'rgba(255,82,82,0.4)' });
+    screenShake(8, 280);
+    return true;
+  },
+};
+
+// プレイヤーの位置を瞬間移動（巻物の移動効果共通ヘルパ）
+function _teleportPlayer(nx, ny) {
+  dungeon.playerPos.x = nx;
+  dungeon.playerPos.y = ny;
+  hitFlash({ color: 'rgba(124,77,255,0.45)' });
+  magicCircle(playerVfxAnchor(), '光');
+}
+
+// 巻物の AoE ダメージ共通処理: 各ターゲットに dmgMult をプレイヤー ATK に乗せた
+// 攻撃力を当てる。属性相性は無し（無属性扱い）。
+function _scrollAoeDamage(targets, item, dmgMult, fxEmoji, fxColor) {
+  hitFlash({ color: fxColor + '55' });
+  screenShake(10, 380);
+  let killed = 0;
+  for (const m of targets) {
+    const base = Math.max(2, Math.floor(player.atk * dmgMult) - Math.floor(m.def * 0.5));
+    const dmg  = Math.max(2, base + Math.floor(Math.random() * Math.max(1, base * 0.3)));
+    m.hp = Math.max(0, m.hp - dmg);
+    const anchor = _mobScreenAnchor(m);
+    if (anchor) {
+      explosion(anchor, { color: fxColor });
+      showDamageAt(anchor, dmg, { kind: 'crit' });
+      if (m.hp <= 0) deathBurst(anchor, { color: m.rarityColor ?? fxColor });
+    }
+    if (m.hp <= 0) killed += 1;
+  }
+  dungeonLog(`${fxEmoji} ${item.name} を読んだ！ ${targets.length} 体に直撃 / ${killed} 体撃破！`, { rarity: item.rarity });
+  // 撃破した敵をフロアから一括除去 + XP/ドロップ
+  const dead = dungeon.monsters.filter(m => m.hp <= 0);
+  for (const m of dead) {
+    _maybeRecruitMinion(m);
+    dungeon.removeMonster(m);
+    gainXp(_xpFromMonster(m));
+    const gold = rollGoldDropFromMonster(m);
+    if (gold > 0) {
+      const goldItem = makeGoldFloorItem(gold);
+      goldItem.x = m.x; goldItem.y = m.y;
+      dungeon.floorItems.push(goldItem);
+    }
+    const matDrop = _rollMaterialDrop(m);
+    if (matDrop) _autoCollectDrop(matDrop);
+    const drop = _rollMonsterDrop(m);
+    if (drop) {
+      drop.x = m.x; drop.y = m.y;
+      dungeon.floorItems.push(drop);
+    }
+  }
 }
 
 function _usePotionFromInventory(idx) {
