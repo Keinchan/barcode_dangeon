@@ -769,8 +769,6 @@ export class Dungeon {
 
   // ── Canvas 描画 ──
   render(canvas) {
-    const VIEW = 11;
-    const half = Math.floor(VIEW / 2);
     const header  = document.querySelector('#screen-dungeon .dungeon-header');
     const explore = document.getElementById('dungeon-footer');
     const visibleFooter = explore && !explore.classList.contains('hidden') ? explore : null;
@@ -784,13 +782,23 @@ export class Dungeon {
     const zoom = (typeof window !== 'undefined' && Number.isFinite(window.__fieldZoom))
       ? Math.max(0.5, Math.min(2.0, window.__fieldZoom))
       : 1.0;
-    // canvas の自然サイズ上限を 760 とし、zoom で拡大する。
-    // 利用可能スペース（availW/availH）が小さい場合はそれに自然に追従する。
-    const cap = Math.floor(760 * zoom);
-    const size = Math.max(160, Math.min(availW, availH, cap));
-    const ts = Math.max(20, Math.floor(size / VIEW));
+    // canvas は viewport に合わせる（PC 上限 760）。利用可能スペースで頭打ち。
+    const baseSize = Math.max(160, Math.min(availW, availH, 760));
+    // 「拡大率」= タイルサイズ倍率。zoom が大きいほどタイルが大きく描かれ、
+    // その分 canvas 内に収まるタイル数（VIEW）が減る = マップにズームインした感覚。
+    // 逆に zoom < 1.0 ではタイルが小さくなり VIEW が増える = ズームアウト。
+    // VIEW は 5〜17 にクランプ（極端な値で描画ループが破綻しないように）。
+    // zoom 2.0 → VIEW=5 / 1.5 → 7 / 1.0 → 11 / 0.7 → 17 のように段階的に変わる。
+    // floor で算出 → bit-or 1 で奇数化（中央 1 マスを保証）→ [5,17] にクランプ。
+    const VIEW = Math.max(5, Math.min(17, Math.floor(11 / zoom) | 1));
+    const half = Math.floor(VIEW / 2);
+    const ts = Math.max(18, Math.floor(baseSize / VIEW));
     canvas.width  = ts * VIEW;
     canvas.height = ts * VIEW;
+    // 主要 VFX のアンカー計算（main.js の _minionScreenAnchor / _mobScreenAnchor）が
+    // 動的 VIEW と整合できるように、最後の描画状態を dungeon インスタンスに残す。
+    this._viewTiles = VIEW;
+    this._tileSize  = ts;
     canvas.style.width  = canvas.width  + 'px';
     canvas.style.height = canvas.height + 'px';
 

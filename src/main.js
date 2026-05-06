@@ -3210,13 +3210,16 @@ function _minionScreenAnchor(mi) {
   const canvas = document.getElementById('dungeon-canvas');
   if (!canvas) return null;
   const r = canvas.getBoundingClientRect();
-  const VIEW = 11, half = 5;
+  // VIEW/ts は zoom に応じて動的に変わるので dungeon が最後の render で残した
+  // 値を使う（未設定なら従来の 11/55 互換でフォールバック）。
+  const VIEW = dungeon._viewTiles ?? 11;
+  const half = Math.floor(VIEW / 2);
+  const ts   = dungeon._tileSize ?? (canvas.width / VIEW);
   const px = dungeon.playerPos.x;
   const py = dungeon.playerPos.y;
   const tx = mi.x - (px - half);
   const ty = mi.y - (py - half);
   if (tx < 0 || tx >= VIEW || ty < 0 || ty >= VIEW) return null;
-  const ts = canvas.width / VIEW;
   return {
     left: r.left + tx * ts + ts / 2 - 16,
     top:  r.top  + ty * ts + ts / 2 - 16,
@@ -3285,13 +3288,14 @@ function _mobScreenAnchor(mob) {
   const canvas = document.getElementById('dungeon-canvas');
   if (!canvas) return null;
   const r = canvas.getBoundingClientRect();
-  const VIEW = 11, half = 5;
+  const VIEW = dungeon._viewTiles ?? 11;
+  const half = Math.floor(VIEW / 2);
+  const ts   = dungeon._tileSize ?? (canvas.width / VIEW);
   const px = dungeon.playerPos.x;
   const py = dungeon.playerPos.y;
   const tx = mob.x - (px - half);
   const ty = mob.y - (py - half);
   if (tx < 0 || tx >= VIEW || ty < 0 || ty >= VIEW) return null;
-  const ts = canvas.width / VIEW;
   return {
     left: r.left + tx * ts + ts / 2 - 16,
     top:  r.top  + ty * ts + ts / 2 - 16,

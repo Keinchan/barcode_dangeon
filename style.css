@@ -489,11 +489,12 @@ html, body {
   flex-shrink: 0;
 }
 
-/* スマホ向けレイアウト。フィールドの canvas が広く取れるよう、フッターは
+/* スマホ向けレイアウト。狭い端末（320-360 幅）で waza-bar と dpad を
+   横並びにすると幅が足りずに重なるため、フッターは 3 段縦積みに固定する:
      [探索ログ：横幅いっぱい・コンパクト・半透明]
-     [技クイックバー(4 スロット横一列) | 十字キー]   ← 横並びで縦消費を圧縮
-   の 2 段構成に。旧仕様（log/waza/dpad の 3 段縦積み 250px+）から
-   高さを ~140px まで削って canvas に回す。 */
+     [技クイックバー (4 スロット横一列・全幅)]
+     [十字キー (中央寄せ)]
+   各要素を圧縮することで縦消費を ~200px に抑え、フィールドに余白を回す。 */
 @media (max-width: 480px) {
   .dungeon-footer {
     flex-direction: column;
@@ -501,8 +502,7 @@ html, body {
     gap: 4px;
     padding: 4px 8px 6px;
   }
-  /* ログはコンパクト化＋半透明背景でフィールドの「上に乗っている」感を出す。
-     最新行 1〜2 行がギリギリ見える程度の高さに抑える。 */
+  /* ログはコンパクト化＋半透明背景でフィールドの「上に乗っている」感を出す。 */
   #dungeon-log {
     flex: 0 0 auto;
     min-height: 36px;
@@ -514,21 +514,20 @@ html, body {
   }
   .log-line        { font-size: 11px; padding: 3px 6px; }
   .log-line.recent { font-size: 13px; padding: 4px 7px; }
+  /* スマホでは .dungeon-controls を縦積みに（waza-bar 全幅, dpad 中央）。
+     PC のように横並びにすると 320-360px 幅の端末で衝突するため。 */
   .dungeon-controls {
-    justify-content: space-between;
+    flex-direction: column;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
   }
   .waza-bar {
-    width: auto;
-    flex: 1;
-    max-width: 240px;
+    width: 100%;
     grid-template-columns: repeat(4, 1fr);
     grid-template-rows: 1fr;
   }
-  .waza-slot { min-height: 40px; padding: 3px 4px; }
+  .waza-slot { min-height: 38px; padding: 3px 4px; }
   .waza-slot-name { font-size: 10px; }
-  /* 横並びにした分、D-pad ボタンを若干コンパクトに */
   .dpad-btn { width: 38px; height: 38px; font-size: 16px; }
   .dpad     { gap: 2px; }
   .dpad-row { gap: 2px; }
