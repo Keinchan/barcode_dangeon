@@ -585,15 +585,26 @@ html, body {
 
 #dungeon-log {
   flex: 1;
+  /* min-width: 0 が無いと flex:1 のデフォルト min-width:auto により log が
+     コンテンツ最小幅以下に縮まらず、waza-bar/dpad を画面端へ押し出して
+     視覚的に重なる事故になる（PC ビューで顕在化していた）。 */
+  min-width: 0;
   font-size: 13px;
   color: var(--text);
   line-height: 1.5;
   min-height: 54px;
   max-height: 110px;
   overflow-y: auto;
+  /* 横方向は常に隠す。長い 1 行は折り返し（word-break）で対応する */
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+/* 異常に長い 1 単語があってもレイアウトを壊さない */
+#dungeon-log .log-line {
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 /* スマホ Safari の慣性スクロール対応 */
 #dungeon-log { -webkit-overflow-scrolling: touch; }
@@ -725,6 +736,45 @@ html, body {
 }
 .btn-icon-menu:active { background: var(--primary); }
 .btn-icon-menu:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* フィールド拡大率コントロール（ダンジョンヘッダ右側、メニューボタンの左隣） */
+.dungeon-zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+  flex-shrink: 0;
+}
+.btn-icon-zoom {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.15);
+  color: #fff;
+  font-size: 16px;
+  font-weight: bold;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.btn-icon-zoom:active { background: var(--primary); }
+.btn-icon-zoom:disabled { opacity: 0.35; cursor: not-allowed; }
+.zoom-level {
+  font-size: 11px;
+  color: var(--muted);
+  min-width: 36px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 480px) {
+  .btn-icon-zoom { width: 26px; height: 26px; font-size: 14px; }
+  .zoom-level    { font-size: 10px; min-width: 30px; }
+  .dungeon-zoom-controls { margin-left: 4px; gap: 2px; }
+}
 
 /* ── COMBAT PANEL（ダンジョン画面に統合・スマホで収まるよう密度を下げる） ── */
 .combat-panel {

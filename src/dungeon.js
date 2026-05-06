@@ -779,10 +779,15 @@ export class Dungeon {
     const footerH = visibleFooter?.offsetHeight ?? 200;
     const availW  = window.innerWidth;
     const availH  = window.innerHeight - headerH - footerH - 16;
-    // canvas の上限を 480 → 760 に拡張。広い PC/タブレットでフィールドが
-    // 視認しやすいようにする。利用可能スペース（availW/availH）が小さい場合は
-    // それに自然に追従するので、スマホ縦は availH 律速のまま変化なし。
-    const size = Math.max(220, Math.min(availW, availH, 760));
+    // ユーザー指定の拡大率（main.js が localStorage から読み込んで
+    // window.__fieldZoom にセットする）。0.5〜2.0 の範囲。
+    const zoom = (typeof window !== 'undefined' && Number.isFinite(window.__fieldZoom))
+      ? Math.max(0.5, Math.min(2.0, window.__fieldZoom))
+      : 1.0;
+    // canvas の自然サイズ上限を 760 とし、zoom で拡大する。
+    // 利用可能スペース（availW/availH）が小さい場合はそれに自然に追従する。
+    const cap = Math.floor(760 * zoom);
+    const size = Math.max(160, Math.min(availW, availH, cap));
     const ts = Math.max(20, Math.floor(size / VIEW));
     canvas.width  = ts * VIEW;
     canvas.height = ts * VIEW;
