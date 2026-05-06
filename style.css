@@ -514,6 +514,75 @@ html, body {
   margin-left: 8px;
 }
 
+/* ── 技の効果範囲プレビュー（将棋風マス図） ──
+   waza-slot を長押し（mobile）/ 右クリック（PC） すると開く。 */
+.range-preview-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 4px 8px;
+}
+.range-preview-info {
+  font-size: 13px;
+  color: var(--text);
+  text-align: center;
+  line-height: 1.4;
+}
+.range-preview-info .rp-name { font-size: 16px; font-weight: bold; }
+.range-preview-info .rp-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.range-preview-info .rp-desc { font-size: 12px; margin-top: 6px; max-width: 260px; }
+.range-preview-grid {
+  display: grid;
+  gap: 2px;
+  background: rgba(0,0,0,0.4);
+  padding: 4px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.1);
+}
+.range-cell {
+  width: 28px;
+  height: 28px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  line-height: 1;
+}
+.range-cell.player {
+  background: rgba(124,77,255,0.5);
+  border-color: rgba(124,77,255,0.85);
+  box-shadow: inset 0 0 8px rgba(255,255,255,0.25);
+}
+.range-cell.hit {
+  background: var(--rp-color, rgba(255,82,82,0.55));
+  border-color: var(--rp-border, rgba(255,82,82,0.9));
+  box-shadow: 0 0 6px var(--rp-glow, rgba(255,82,82,0.4));
+}
+.range-cell.hit-dim {
+  /* 範囲外（壁の向こう・距離オーバー）の暗示用：薄く色付け */
+  background: var(--rp-color-dim, rgba(255,82,82,0.18));
+  border-color: var(--rp-border-dim, rgba(255,82,82,0.35));
+}
+.range-preview-special {
+  font-size: 13px;
+  color: var(--rp-color, #ff5252);
+  font-weight: bold;
+  text-align: center;
+  background: rgba(0,0,0,0.4);
+  padding: 18px 16px;
+  border-radius: 8px;
+  border: 1px dashed currentColor;
+  min-width: 220px;
+}
+@media (max-width: 480px) {
+  .range-cell { width: 24px; height: 24px; font-size: 14px; }
+  .range-preview-info .rp-desc { max-width: 220px; }
+}
+
 /* ショップ価格表示 */
 .shop-price {
   color: #ffd54f;
