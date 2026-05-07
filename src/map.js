@@ -222,6 +222,24 @@ export function recenterOnPlayer() {
   return true;
 }
 
+// ダンジョン→マップ復帰時に呼ぶ：watchPosition がブラウザのバックグラウンド
+// スロットリングや error fallback の 30 秒待ちで止まっている可能性があるので、
+// 必ず watch を貼り直して即時 getCurrentPosition も併用する。
+// 「死んで戻った直後にマップをワンタップしないと現在地が更新されない」UX バグの根治。
+export function resumeGeolocation() {
+  if (!navigator.geolocation) return;
+  _startGeolocationWatch();    // 旧 watch を clearWatch → 新 watch
+  // 即時 1 回も叩いて UI を最新化（watchPosition の初回コールバックは
+  // 端末によっては数秒〜数十秒遅延するため）
+  try {
+    navigator.geolocation.getCurrentPosition(
+      pos => _setPlayer(pos.coords.latitude, pos.coords.longitude),
+      err => { console.warn('resumeGeolocation getCurrentPosition error:', err?.message); },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 },
+    );
+  } catch (e) { /* ignore */ }
+}
+
 // 右下に「現在地」ボタンを置く（leaflet コントロールとして実装）。
 // 手動でマップを動かした後、すぐ自分の位置に戻したい時用。
 function _addRecenterButton() {
