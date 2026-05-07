@@ -3288,11 +3288,48 @@ function _logClassFor(rarity) {
   }
 }
 
-// 拾得時の派手な演出（コモンは何もしない）。レア+はバナー、テキストも色付け
+// 拾得 / ドロップ時の派手な演出。
+//   コモン: 何もしない
+//   レア:   バナーのみ
+//   エピック: バナー + 紫フラッシュ + 軽いシェイク + 紫スパーク
+//   レジェンド: バナー + 金フラッシュ + 強シェイク + 金スパーク多重 + 中央爆発 +
+//                 0.4s 後に再スパーク（脳汁ポップ）
+//   action が「ドロップ」のときも同じ演出を出す。
+//   _celebratePickup の旧仕様（バナーだけ）から拡張：レア度別に層を重ねる。
 function _celebratePickup(item, action = '入手') {
   if (!item) return;
-  if (item.rarity !== 'コモン') {
-    showItemBanner(item, { action });
+  const rarity = item.rarity;
+  if (rarity === 'コモン') return;
+  showItemBanner(item, { action });
+
+  // 画面中央のアンカー: window 全域を使う仮想 rect
+  const centerAnchor = (() => {
+    const cx = (window.innerWidth ?? 360) / 2;
+    const cy = (window.innerHeight ?? 600) / 2;
+    return { left: cx - 12, top: cy - 12, width: 24, height: 24 };
+  })();
+  const playerAt = playerVfxAnchor() ?? centerAnchor;
+
+  if (rarity === 'エピック') {
+    hitFlash({ color: 'rgba(171,71,188,0.32)' });
+    screenShake(5, 220);
+    sparkSpray(centerAnchor, { count: 16, color: '#ce93d8' });
+    sparkSpray(playerAt,     { count: 10, color: '#ce93d8' });
+    playSfx('crit');
+  } else if (rarity === 'レジェンド') {
+    hitFlash({ color: 'rgba(255,213,79,0.42)' });
+    screenShake(10, 340);
+    explosion(centerAnchor, { color: '#ffd54f' });
+    sparkSpray(centerAnchor, { count: 26, color: '#ffd54f' });
+    sparkSpray(centerAnchor, { count: 16, color: '#fff' });
+    sparkSpray(playerAt,     { count: 14, color: '#ffd54f' });
+    playSfx('crit');
+    // 0.4 秒遅らせて 2 波目（脳汁感）
+    setTimeout(() => {
+      sparkSpray(centerAnchor, { count: 18, color: '#ffe082' });
+      sparkSpray(playerAt,     { count: 10, color: '#fff176' });
+      playSfx('levelup');
+    }, 400);
   }
 }
 
