@@ -376,6 +376,28 @@ function _elementColor(element) {
 //   color は枠の色（属性カラーを渡すのが推奨）。
 //   durationMs はフラッシュの持続時間（テレグラフ後に攻撃を発動するタイマーと
 //   合わせる）。
+// 技種別バッジ：攻撃者の上に絵文字をふわっと浮かせる。
+//   target: 要素 or 矩形（_rectOf 互換）
+//   emoji:  '😡' / '❄' / '⚡' のような短い記号
+//   color:  発光色（属性カラー推奨）。省略時は白
+//   durationMs: 表示時間。CSS 側のアニメーション長と概ね揃える
+export function showSkillBadge(target, emoji, color = '#fff', durationMs = 700) {
+  if (!emoji) return;
+  const r = _rectOf(target);
+  if (!r) return;
+  const cx = r.left + (r.width  ?? 0) / 2;
+  const cy = r.top  + (r.height ?? 0) / 2;
+  const el = document.createElement('div');
+  el.className = 'vfx-skill-badge';
+  el.style.left  = cx + 'px';
+  el.style.top   = cy + 'px';
+  el.style.color = color;
+  el.style.animationDuration = (durationMs / 1000) + 's';
+  el.textContent = emoji;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), durationMs + 80);
+}
+
 export function showAttackTelegraph(target, color = '#ffd54f', durationMs = 360) {
   const r = _rectOf(target);
   if (!r) return;

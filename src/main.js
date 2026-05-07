@@ -37,7 +37,7 @@ import {
   showFloatingDamage, showItemBanner, shockwave, magicCircle, playerVfxAnchor,
   hitFlash, screenShake, deathBurst, sparkSpray, explosion,
   showEnhanceCelebration, showDamageAt, showMissAt, showSkillPatternVfx,
-  attackTrail, showAttackTelegraph,
+  attackTrail, showAttackTelegraph, showSkillBadge,
 } from './ui.js';
 import {
   getCombatSpeed, setCombatSpeed,
@@ -2055,6 +2055,17 @@ function _executeSkill(skill) {
   screenShake(Math.min(14, 6 + hits.length * 2), 350);
   magicCircle(playerVfxAnchor(), skill.element);
 
+  // 攻撃者（プレイヤー）に技種別バッジと発光テレグラフを出して、
+  // 「誰が・何の技を・これから撃つか」を視覚化する。ダメージ着弾は
+  // この余韻のあとに setTimeout でずらす（preDelay）。
+  const playerAnchor = playerVfxAnchor();
+  if (playerAnchor) {
+    showAttackTelegraph(playerAnchor, elColor, 380);
+    showSkillBadge(playerAnchor, SKILL_ELEMENT_EMOJI[skill.element] ?? '✨', elColor, 700);
+  }
+  // 戦闘速度設定があればその preFlashMs を使い、無ければ最低 240ms 待たせる。
+  const preDelay = Math.max(240, combatPreFlashMs() | 0);
+
   const canvas = document.getElementById('dungeon-canvas');
   const cRect  = canvas.getBoundingClientRect();
   const ts     = canvas.width / 11;
@@ -2065,7 +2076,8 @@ function _executeSkill(skill) {
     x: cRect.left + (half * ts + ts / 2),
     y: cRect.top  + (half * ts + ts / 2),
   };
-  // 範囲タイプに応じた特殊演出（円・十字・ビーム・AoE リング）
+  // 範囲タイプに応じた特殊演出（円・十字・ビーム・AoE リング）。
+  // pattern VFX はバッジと同じタイミングで出すので preDelay は加味しない。
   showSkillPatternVfx(rangeId, playerScreen, ts, elColor, { facing });
 
   hits.forEach((h, i) => {
@@ -2081,7 +2093,7 @@ function _executeSkill(skill) {
       const kind = h.matchup >= 1.5 ? 'crit' : h.matchup <= 0.7 ? 'weak' : 'effective';
       showDamageAt({ left: sx, top: sy - 18, width: 0, height: 0 }, h.dmg, { kind });
       if (h.m.hp <= 0) deathBurst(anchor, { color: h.m.rarityColor ?? '#ff7043' });
-    }, 60 + i * 70);
+    }, preDelay + i * 70);
   });
 
   // すかしマスにも MISS をフロート（命中演出と同じタイミング系列上に並べる）
@@ -2092,7 +2104,7 @@ function _executeSkill(skill) {
       const sx = cRect.left + tx * ts + ts / 2;
       const sy = cRect.top  + ty * ts + ts / 2;
       showMissAt({ left: sx, top: sy - 14, width: 0, height: 0 });
-    }, 60 + (hits.length + i) * 70);
+    }, preDelay + (hits.length + i) * 70);
   });
 
   // 死亡した敵を一括処理（XP・ゴールド・ドロップ）

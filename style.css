@@ -2151,21 +2151,44 @@ input, textarea {
   100% { transform: rotate(360deg) scale(1.6); opacity: 0; }
 }
 
-/* 攻撃予告テレグラフ。低速モードで攻撃発動前にこの枠を 1 周パルスさせて
-   「次に攻撃する敵はこれ」をプレイヤーに把握させる。 */
+/* 攻撃予告テレグラフ。攻撃発動前にこの枠を 1 周パルスさせて
+   「誰がこれから攻撃するか」をプレイヤーに把握させる。
+   旧仕様は margin-left:-50% を併用して中心合わせを試みていたが、
+   margin の % は要素自体ではなく親（viewport）幅を基準にするため
+   「画面左上に常に枠が光る」位置バグの原因になっていた。
+   正しくは transform: translate(-50%, -50%) のみで中心合わせする。 */
 .vfx-telegraph {
   position: fixed;
-  margin-left: -50%; margin-top: -50%;
   border: 3px solid;
   border-radius: 8px;
   pointer-events: none;
   z-index: 4400;
+  transform: translate(-50%, -50%);
   animation: vfxTelegraph 0.36s ease-out 2;
 }
 @keyframes vfxTelegraph {
   0%   { transform: translate(-50%, -50%) scale(0.85); opacity: 0; }
   35%  { transform: translate(-50%, -50%) scale(1.10); opacity: 1; }
   100% { transform: translate(-50%, -50%) scale(1.25); opacity: 0; }
+}
+
+/* 技種別バッジ（怒/凍/雷 等）を攻撃者の上に浮かせて、ダメージ発生の
+   一瞬前に「これから何を撃つか」を視覚化する。 */
+.vfx-skill-badge {
+  position: fixed;
+  font-size: 28px;
+  line-height: 1;
+  pointer-events: none;
+  z-index: 4450;
+  text-shadow: 0 0 10px currentColor, 0 2px 4px rgba(0,0,0,0.6);
+  transform: translate(-50%, -50%);
+  animation: vfxSkillBadge 0.7s ease-out forwards;
+}
+@keyframes vfxSkillBadge {
+  0%   { transform: translate(-50%, -50%) scale(0.6); opacity: 0; }
+  20%  { transform: translate(-50%, -90%) scale(1.4); opacity: 1; }
+  70%  { transform: translate(-50%, -110%) scale(1.2); opacity: 1; }
+  100% { transform: translate(-50%, -140%) scale(1.0); opacity: 0; }
 }
 
 /* ── ストレージ ── */

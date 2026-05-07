@@ -15,7 +15,7 @@ const STORAGE_KEY = 'real_hide:combat-speed:v1';
 const PROFILES = {
   fast: {
     label:    '高速',
-    desc:     'テンポ重視（既存の挙動）',
+    desc:     'テンポ重視（演出ほぼ無し）',
     stepMs:    280,    // 攻撃 1 件ごとの間隔
     preFlashMs:  0,    // 攻撃前テレグラフの待ち時間
     showTelegraph: false,
@@ -25,6 +25,13 @@ const PROFILES = {
     desc:     '誰が何を攻撃しているか分かる速さ',
     stepMs:    720,
     preFlashMs: 360,
+    showTelegraph: true,
+  },
+  vslow: {
+    label:    '超低速',
+    desc:     '技マークが出てからダメージ。誰が打ったかしっかり追える',
+    stepMs:   1100,
+    preFlashMs: 520,
     showTelegraph: true,
   },
 };
