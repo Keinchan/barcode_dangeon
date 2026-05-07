@@ -21,6 +21,16 @@ html, body {
   color: var(--text);
   font-family: 'Hiragino Sans', 'Meiryo', system-ui, sans-serif;
   touch-action: manipulation;
+  /* 矢印キー / Shift+Arrow / ドラッグでゲーム上の文字列が選択されない（テキスト
+     コピペ用途のキャレット移動が誤発火するのを抑止）。input/textarea だけは
+     下で個別に user-select:text を許可する。 */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+input, textarea {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 /* ── SCREENS ── */
