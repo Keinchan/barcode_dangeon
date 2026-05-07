@@ -1,4 +1,4 @@
-import { initMap, refreshPin, setPlayerPosition, invalidateMapSize, recenterOnPlayer } from './map.js';
+import { initMap, refreshPin, setPlayerPosition, invalidateMapSize, recenterOnPlayer, resumeGeolocation } from './map.js';
 import { startScanner, stopScanner, getPosition, categoryOfFormat } from './scanner.js';
 import {
   createPlayer,
@@ -193,6 +193,10 @@ function show(name) {
     requestAnimationFrame(() => {
       invalidateMapSize();
       recenterOnPlayer();
+      // ダンジョン中にバックグラウンドで止まった可能性のある GPS watch を
+      // 必ず再起動して即時 getCurrentPosition も叩く。死亡→マップ復帰直後に
+      // ワンタップしないと現在地が動かない UX バグの根治。
+      resumeGeolocation();
     });
   }
   _bgmForScreen(name);
