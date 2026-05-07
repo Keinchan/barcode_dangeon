@@ -832,15 +832,17 @@ export function shopPriceFor(item, dungeonRarity = 'コモン') {
 
 // ── アイテム使用（バトル中） ──
 // 戻り値: { msg, healAmt, dmgAmt, mpHealAmt, consumed }
+// 回復は「少しでも欠けていればフル加算」方式：max 未満なら item.heal を素直に加え、
+// max を超えても overcap として保持する（次に被弾すれば自然に max 以下に戻る）。
 export function applyItem(item, player, monster) {
   if (item.type === 'potion') {
-    const actual = Math.min(item.heal, player.maxHp - player.hp);
-    player.hp = Math.min(player.maxHp, player.hp + item.heal);
+    const actual = item.heal;
+    player.hp = player.hp + item.heal;
     return { msg: `🧪 ${item.name} 使用！ HPが${actual}回復した`, healAmt: actual, dmgAmt: 0, mpHealAmt: 0, consumed: true };
   }
   if (item.type === 'mpPotion') {
-    const actual = Math.min(item.mpHeal, (player.maxMp ?? 0) - (player.mp ?? 0));
-    player.mp = Math.min(player.maxMp ?? 0, (player.mp ?? 0) + item.mpHeal);
+    const actual = item.mpHeal;
+    player.mp = (player.mp ?? 0) + item.mpHeal;
     return { msg: `🔵 ${item.name} 使用！ MPが${actual}回復した`, healAmt: 0, dmgAmt: 0, mpHealAmt: actual, consumed: true };
   }
   if (item.type === 'scroll') {
