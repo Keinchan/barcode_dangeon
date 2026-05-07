@@ -3027,8 +3027,17 @@ function enterDungeon(data) {
   player.hp    = player.maxHp;     // 入場時に HP/MP 全回復
   player.mp    = player.maxMp ?? 0;
   currentFloor = 1;
-  loadFloor(1);
+  // 先に screen を活性化。screen が hidden（display:none）のままだと
+  // header/footer の offsetHeight が 0 になり、render が canvas サイズを過大に
+  // 計算してタイルが過剰に大きく描かれてしまう（入場直後に拡大されすぎる
+  // バグの根治）。loadFloor 内の render は次フレームに走らせる。
   show('dungeon');
+  loadFloor(1);
+  // レイアウト確定後にもう一度描いて、初期 render が hidden 中の
+  // 古い offsetHeight を拾っていた場合の見た目を修正する（保険）。
+  requestAnimationFrame(() => {
+    if (dungeon) dungeon.render(document.getElementById('dungeon-canvas'));
+  });
   autoSave();
 }
 
