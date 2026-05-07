@@ -2814,22 +2814,29 @@ function _usePotionFromInventory(idx) {
   if (!item) return;
   if (item.type === 'potion') {
     if (player.hp >= player.maxHp) { showAlert('HPが満タンです'); return; }
+    // 「少しでも欠けていれば上限解放」: 欠けている時に飲むなら回復量フルで加算し、
+    // maxHp を一時的に上回る overcap を許可する。次に被弾すれば自然に max 以下に
+    // 戻る（HUD は overcap 中だけ金色表示）。
     const before = player.hp;
-    player.hp = Math.min(player.maxHp, player.hp + item.heal);
+    player.hp = before + item.heal;
     const actual = player.hp - before;
     takeOneFromInventory(idx);
     if (typeof dungeonLog === 'function' && screen === 'dungeon') {
-      dungeonLog(`🧪 ${item.name} を使用！ HPが${actual}回復した`);
+      const overcap = player.hp > player.maxHp ? `（上限突破！ ${player.hp}/${player.maxHp}）` : '';
+      dungeonLog(`🧪 ${item.name} を使用！ HPが${actual}回復した${overcap}`,
+                 overcap ? { rarity: 'レア' } : {});
     }
     playSfx('drink');
   } else if (item.type === 'mpPotion') {
     if ((player.mp ?? 0) >= (player.maxMp ?? 0)) { showAlert('MPが満タンです'); return; }
     const before = player.mp ?? 0;
-    player.mp = Math.min(player.maxMp ?? 0, before + item.mpHeal);
+    player.mp = before + item.mpHeal;
     const actual = player.mp - before;
     takeOneFromInventory(idx);
     if (typeof dungeonLog === 'function' && screen === 'dungeon') {
-      dungeonLog(`🔵 ${item.name} を使用！ MPが${actual}回復した`);
+      const overcap = player.mp > (player.maxMp ?? 0) ? `（上限突破！ ${player.mp}/${player.maxMp}）` : '';
+      dungeonLog(`🔵 ${item.name} を使用！ MPが${actual}回復した${overcap}`,
+                 overcap ? { rarity: 'レア' } : {});
     }
     playSfx('drink');
   } else {
@@ -3070,9 +3077,15 @@ function loadFloor(floor) {
 
 function refreshHUD() {
   document.getElementById('player-lv').textContent = `Lv${player.level}`;
-  document.getElementById('player-hp').textContent = `HP: ${player.hp}/${player.maxHp}`;
+  const hpEl = document.getElementById('player-hp');
+  hpEl.textContent = `HP: ${player.hp}/${player.maxHp}`;
+  // overcap（上限突破中）= 現 HP > maxHp。CSS の .hp-text.overcap で金色表示にする
+  hpEl.classList.toggle('overcap', player.hp > player.maxHp);
   const mpEl = document.getElementById('player-mp');
-  if (mpEl) mpEl.textContent = `MP: ${player.mp ?? 0}/${player.maxMp ?? 0}`;
+  if (mpEl) {
+    mpEl.textContent = `MP: ${player.mp ?? 0}/${player.maxMp ?? 0}`;
+    mpEl.classList.toggle('overcap', (player.mp ?? 0) > (player.maxMp ?? 0));
+  }
   const wHtml = player.weapon ? `${iconImg(player.weapon, 18)} +${player.weapon.atkBonus}` : '⚔️ ー';
   const aHtml = player.armor  ? `${iconImg(player.armor, 18)} +${player.armor.defBonus}`  : '🛡️ ー';
   document.getElementById('equip-display').innerHTML = `${wHtml}　${aHtml}`;

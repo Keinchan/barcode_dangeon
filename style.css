@@ -440,6 +440,12 @@ input, textarea {
 #floor-label   { font-size: 18px; font-weight: bold; margin-top: 2px; }
 .hp-text { font-size: 15px; color: var(--success); font-weight: bold; }
 .mp-text { font-size: 14px; color: #4dc4ff; font-weight: bold; }
+/* 上限突破中（リミッター解除）: 金色＋ふんわり光らせて「Now overcap!」を強調。
+   被弾して max 以下に戻ったら自動で剥がれる（refreshHUD が toggle する）。 */
+.hp-text.overcap, .mp-text.overcap {
+  color: #ffd54f !important;
+  text-shadow: 0 0 6px rgba(255,213,79,0.85), 0 0 2px rgba(255,213,79,0.6);
+}
 
 /* 技クイックバー（フッター左、最大 4 スロット 横一列）。各スロットは技の属性カラーで縁取り。
    旧 2x2 の正方形配置から横一列にしたのは、3x3 D-pad と物理的に異なる形状にして
