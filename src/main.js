@@ -2248,7 +2248,8 @@ function _alphaize(hex, a) {
   return `rgba(${r},${g},${b},${a})`;
 }
 // 技の効果範囲を将棋風グリッドで描画してモーダルに表示する。
-// 長押し（モバイル）or 右クリック（PC）で waza-slot から呼ばれる。
+// waza-slot 内の右上にある「?」情報ボタンから呼ばれる。
+// （旧仕様：長押し / 右クリックは UX 不明瞭だったので明示的なボタン化）
 function _showSkillRangePreview(skill) {
   if (!skill) return;
   const rangeId = normalizeRangeType(skill.pattern);
@@ -2378,6 +2379,14 @@ function _refreshWazaBar() {
       btn.removeEventListener('click', btn._wazaHandler);
       btn._wazaHandler = null;
     }
+    // 旧仕様の長押し / 右クリックハンドラが残っていれば剥がす
+    if (btn._wazaLongHandler) {
+      btn.removeEventListener('contextmenu', btn._wazaLongHandler.context);
+      btn.removeEventListener('touchstart',  btn._wazaLongHandler.touchstart, { passive: true });
+      btn.removeEventListener('touchend',    btn._wazaLongHandler.touchend);
+      btn.removeEventListener('touchmove',   btn._wazaLongHandler.touchmove);
+      btn._wazaLongHandler = null;
+    }
 
     if (!sk) {
       btn.classList.add('empty');
@@ -2418,7 +2427,8 @@ function _refreshWazaBar() {
     btn.innerHTML =
       `<span class="waza-slot-emoji">${emoji}</span>` +
       `<span class="waza-slot-name">${sk.name}${lvLocked ? '🔒' : ''}</span>` +
-      `<span class="waza-slot-mp">MP-${sk.mpCost}</span>`;
+      `<span class="waza-slot-mp">MP-${sk.mpCost}</span>` +
+      `<span class="waza-slot-info" role="button" aria-label="効果範囲を見る" title="効果範囲を見る">?</span>`;
     const filledHandler = () => {
       // ダンジョン外では使えない（メニューや他画面でも誤発動しないように）
       if (screen !== 'dungeon' || !dungeon) {
@@ -2439,45 +2449,22 @@ function _refreshWazaBar() {
     btn._wazaHandler = filledHandler;
     btn.addEventListener('click', filledHandler);
 
-    // 長押し（モバイル）or 右クリック（PC）で範囲プレビューを開く。
-    // 既存の長押しハンドラがあれば剥がしてから付け直す（再描画時の二重バインド回避）。
-    if (btn._wazaLongHandler) {
-      btn.removeEventListener('contextmenu', btn._wazaLongHandler.context);
-      btn.removeEventListener('touchstart',  btn._wazaLongHandler.touchstart, { passive: true });
-      btn.removeEventListener('touchend',    btn._wazaLongHandler.touchend);
-      btn.removeEventListener('touchmove',   btn._wazaLongHandler.touchmove);
-      btn._wazaLongHandler = null;
-    }
-    let _holdTimer = null;
-    let _holdFired = false;
-    const _startHold = () => {
-      _holdFired = false;
-      _holdTimer = setTimeout(() => {
-        _holdFired = true;
-        _showSkillRangePreview(sk);
-      }, 500);
-    };
-    const _cancelHold = () => {
-      if (_holdTimer) { clearTimeout(_holdTimer); _holdTimer = null; }
-    };
-    const onContext = (e) => { e.preventDefault(); _showSkillRangePreview(sk); };
-    const onTouchStart = () => { _startHold(); };
-    const onTouchEnd   = (e) => {
-      _cancelHold();
-      // 長押しでプレビューを開いた後の release はクリックを抑止（技を発動させない）
-      if (_holdFired) {
-        e.preventDefault();
+    // 「?」情報ボタンで効果範囲プレビューを開く（タップ専用 / 明示 UI）。
+    // span は button 内に置いてあり、click を stopPropagation して
+    // スロット本体（技発動）への伝播を止めることで誤発動を防ぐ。
+    const infoEl = btn.querySelector('.waza-slot-info');
+    if (infoEl) {
+      const onInfo = (e) => {
         e.stopPropagation();
-      }
-    };
-    const onTouchMove = () => { _cancelHold(); };
-    btn.addEventListener('contextmenu', onContext);
-    btn.addEventListener('touchstart',  onTouchStart, { passive: true });
-    btn.addEventListener('touchend',    onTouchEnd);
-    btn.addEventListener('touchmove',   onTouchMove);
-    btn._wazaLongHandler = {
-      context: onContext, touchstart: onTouchStart, touchend: onTouchEnd, touchmove: onTouchMove,
-    };
+        e.preventDefault();
+        playSfx('click');
+        _showSkillRangePreview(sk);
+      };
+      infoEl.addEventListener('click', onInfo);
+      // touchend でも click を発火させない端末向け（pointerup 系の保険）。
+      // pointerdown は無視させる必要は無いが、念のため stop しておく。
+      infoEl.addEventListener('pointerdown', (e) => { e.stopPropagation(); });
+    }
   }
 }
 

@@ -443,6 +443,7 @@ html, body {
   width: 200px;
 }
 .waza-slot {
+  position: relative;          /* 右上に「?」情報ボタンを絶対配置するため */
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -480,6 +481,39 @@ html, body {
 .waza-slot-name  { font-size: 10px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .waza-slot-mp    { font-size: 9px; opacity: 0.75; }
 
+/* 効果範囲を見るための「?」情報ボタン。
+   waza-slot の右上角に小さく重ねる。click は span 側で stopPropagation し、
+   親 button（技発動）には伝播しないので「?」を押しても技は発動しない。
+   slot の中に収めるので隣の slot と重ならない。 */
+.waza-slot-info {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(20,20,28,0.95);
+  border: 1.5px solid currentColor;
+  color: inherit;
+  font-size: 11px;
+  font-weight: bold;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: help;
+  user-select: none;
+  -webkit-user-select: none;
+  box-shadow: 0 0 4px rgba(0,0,0,0.4), 0 0 3px currentColor;
+  z-index: 2;
+  transition: transform .1s, box-shadow .1s;
+}
+.waza-slot-info:hover  { transform: scale(1.18); box-shadow: 0 0 6px currentColor; }
+.waza-slot-info:active { transform: scale(0.88); }
+@media (max-width: 480px) {
+  .waza-slot-info { width: 16px; height: 16px; font-size: 10px; }
+}
+
 /* スマホ向けレイアウト: 縦積みは PC と同じ。各要素を圧縮するだけ。 */
 @media (max-width: 480px) {
   .dungeon-footer {
@@ -515,7 +549,7 @@ html, body {
 }
 
 /* ── 技の効果範囲プレビュー（将棋風マス図） ──
-   waza-slot を長押し（mobile）/ 右クリック（PC） すると開く。 */
+   waza-slot の右上にある「?」情報ボタンをタップで開く（PC・スマホ共通）。 */
 .range-preview-body {
   display: flex;
   flex-direction: column;
