@@ -1970,15 +1970,29 @@ input, textarea {
   background: rgba(255,255,255,0.04);
   border: 1px solid rgba(255,255,255,0.08);
   border-radius: 8px;
-  cursor: pointer;
+  /* 旧仕様で行クリック=送信だった時は cursor:pointer だったが、
+     現在は明示ボタン経由のみなので default にする（誤タップ抑止の意味も込めて）。 */
+  cursor: default;
   transition: background .12s;
 }
-.storage-mini-row:active { background: var(--primary); }
 .storage-mini-row .item-icon { width: 28px; height: 28px; }
 .storage-mini-row-info { flex: 1; min-width: 0; }
 .storage-mini-row-name { font-size: 12px; font-weight: bold; }
 .storage-mini-row-stat { font-size: 10px; color: var(--muted); }
-.storage-mini-row-arrow { color: var(--primary); font-size: 14px; }
+.storage-mini-row-send {
+  flex: 0 0 auto;
+  background: rgba(124,77,255,0.18);
+  border: 1px solid rgba(124,77,255,0.55);
+  border-radius: 6px;
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: bold;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: background .12s, transform .08s;
+}
+.storage-mini-row-send:hover  { background: rgba(124,77,255,0.32); }
+.storage-mini-row-send:active { transform: scale(0.92); background: var(--primary); color: #fff; }
 .storage-mini-help {
   font-size: 11px;
   color: var(--muted);
