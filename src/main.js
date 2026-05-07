@@ -23,7 +23,7 @@ import {
   findSkillById, elementMatchup, matchupLabel,
   elementMatchupTable, ELEMENTS,
   shopPriceFor,
-  ENHANCE_RECIPES, applyEnhanceRecipe, fuseLegendaries,
+  ENHANCE_RECIPES, applyEnhanceRecipe, fuseLegendaries, MATERIALS,
   makeLegendaryTome,
   PLAYER_TYPES, findPlayerType,
   aptitudeElementsForPlayer, aptitudeElementsForMinion,
@@ -2082,9 +2082,20 @@ function _refreshSynthesisUI() {
     const recipe = ENHANCE_RECIPES[item.rarity];
     const matCount = recipe ? _countMaterial(recipe.matName) : 0;
     const canDo    = recipe && matCount >= recipe.matCount;
-    const requirement = recipe
-      ? `${recipe.matName}×${recipe.matCount}（所持 ${matCount}）→ ATK×${recipe.mult.toFixed(2)}`
-      : '対応レシピなし';
+    // 必要素材を絵文字付き＋所持/必要の比較で色分け表示。
+    // 「鉄片 ⛓️ 1/2」のように赤(不足)/緑(達成)で視認性を上げる。
+    let requirementHtml;
+    if (!recipe) {
+      requirementHtml = '<span style="color:#888">🛠 このレア度の武器には強化レシピがありません</span>';
+    } else {
+      const matInfo  = MATERIALS.find(m => m.name === recipe.matName);
+      const matEmoji = matInfo?.emoji ?? '🧰';
+      const colorOk  = matCount >= recipe.matCount ? '#4caf50' : '#ff5252';
+      requirementHtml =
+        `<span class="synth-mat" style="color:${colorOk}">${matEmoji} ${recipe.matName} ` +
+        `<b>${matCount}/${recipe.matCount}</b></span>` +
+        ` <span style="color:#aaa">→ ATK×${recipe.mult.toFixed(2)}</span>`;
+    }
 
     const div = document.createElement('div');
     div.className = 'menu-row';
@@ -2094,7 +2105,7 @@ function _refreshSynthesisUI() {
       <div class="menu-row-info">
         <div class="menu-row-name" style="color:${item.rarityColor}">${item.name} <span class="menu-row-lv">${where}</span></div>
         <div class="menu-row-stat">ATK +${item.atkBonus} / ${item.rarity}</div>
-        <div class="menu-row-skill">🛠 ${requirement}</div>
+        <div class="menu-row-skill">🛠 ${requirementHtml}</div>
       </div>
       <div class="menu-row-actions">
         <button class="menu-action-btn" ${canDo ? '' : 'disabled'}>強化</button>
@@ -2134,10 +2145,22 @@ function _refreshSynthesisUI() {
     groups.get(key).push(w);
   }
   const fusable = [...groups.values()].filter(arr => arr.length >= 2);
+  // 旧: 候補が無ければボタン自体を hidden にしていた。新: 常に表示し、候補が
+  // 無い時はタップで「なぜできないのか」をモーダルで説明する（融合の存在自体が
+  // 見えないと UX 上の発見性が低いという指摘への対応）。
+  fuseBtn.classList.remove('hidden');
   if (fusable.length === 0) {
-    fuseBtn.classList.add('hidden');
+    fuseBtn.textContent = '🌟 同名レジェンド融合（条件未達）';
+    fuseBtn.onclick = () => {
+      // 詳細: 現在のレジェンド武器名と「同名 2 個」になっているグループ数を見せる
+      const list = legendaries.map(w => `・${w.item.name}`).join('\n') || '（レジェンド武器なし）';
+      showAlert(
+        '同名レジェンド融合をするには、同じ名前のレジェンド武器が 2 個以上必要です。\n\n' +
+        '現在のレジェンド武器:\n' + list + '\n\n' +
+        '※ 強化済み（+鉄/+魔 等の接尾辞付き）でも、ベース名が同じなら融合可能です。',
+      );
+    };
   } else {
-    fuseBtn.classList.remove('hidden');
     fuseBtn.textContent = `🌟 同名レジェンド融合 (${fusable.length} 種)`;
     fuseBtn.onclick = () => _openFuseModal(fusable);
   }

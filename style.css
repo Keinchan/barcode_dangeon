@@ -2000,6 +2000,10 @@ input, textarea {
   line-height: 1.5;
 }
 
+/* 合成行の必要素材インライン表示。色は所持/必要の比較で JS が決める。 */
+.synth-mat { font-weight: bold; }
+.synth-mat b { font-variant-numeric: tabular-nums; }
+
 /* ── 素材ボックス（メニュー内） ── */
 .materials-grid {
   display: grid;
