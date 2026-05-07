@@ -34,6 +34,10 @@ import {
 import { hashString } from './rng.js';
 import { Dungeon } from './dungeon.js';
 import {
+  STATUS_DEFS, applyStatus, hasStatus, removeStatus, tickStatuses,
+  accuracyMultiplier, shockSkipChance, fractureSelfHurtChance, dominantStatus,
+} from './status.js';
+import {
   showFloatingDamage, showItemBanner, shockwave, magicCircle, playerVfxAnchor,
   hitFlash, screenShake, deathBurst, sparkSpray, explosion,
   showEnhanceCelebration, showDamageAt, showMissAt, showSkillPatternVfx,
@@ -1820,18 +1824,31 @@ function _executeSkill(skill) {
     showAlert('技はダンジョン探索中にだけ使えます');
     return;
   }
-  if ((player.mp ?? 0) < skill.mpCost) {
-    showAlert(`MP が足りません（必要 ${skill.mpCost}）`);
+  // 状態異常で技使用が制限される: sleep=封じ / shock=確率封じ / burn=MP+1
+  if (hasStatus(player, 'sleep')) {
+    dungeonLog('😴 睡眠中で技を使えない！'); _runEnemyTurn(); return;
+  }
+  if (Math.random() < shockSkipChance(player)) {
+    dungeonLog('⚡ 感電して技を発動できなかった！'); _runEnemyTurn(); return;
+  }
+  const burnExtra = hasStatus(player, 'burn') ? 1 : 0;
+  const mpNeeded  = skill.mpCost + burnExtra;
+  if ((player.mp ?? 0) < mpNeeded) {
+    showAlert(`MP が足りません（必要 ${mpNeeded}${burnExtra ? ' / 熱傷で+1' : ''}）`);
     return;
   }
-  player.mp = Math.max(0, (player.mp ?? 0) - skill.mpCost);
+  player.mp = Math.max(0, (player.mp ?? 0) - mpNeeded);
+  // 骨折で行動時に自傷判定
+  _maybeFractureSelfHurt();
 
   const facing = dungeon.playerPos.facing ?? [0, 1];
   const px = dungeon.playerPos.x;
   const py = dungeon.playerPos.y;
   const hits   = [];
   const misses = [];   // すかした敵: { m, dx, dy }
-  const whiffP = _WHIFF_CHANCE[skill.rarity] ?? 0.20;
+  // 痙攣で命中率が下がるので whiff が増える
+  const baseWhiff = _WHIFF_CHANCE[skill.rarity] ?? 0.20;
+  const whiffP    = Math.min(0.85, baseWhiff / accuracyMultiplier(player));
 
   // 範囲タイプを正規化（旧 A〜F のセーブからもこの段で新名称になる）
   const rangeId = normalizeRangeType(skill.pattern);
@@ -1989,17 +2006,25 @@ function _executeSkill(skill) {
     hits.push({ m: t.m, dmg, matchup, dx: t.dx, dy: t.dy });
   }
 
-  // 状態異常付与（フラッシュ/封じ込み等）: 命中した生存中の敵に status を上書き。
-  // 既に同じ status が付いている場合は turns を最大値で更新（合算しない）。
+  // 状態異常付与: 命中した生存中の敵に status を上書き。
+  // 旧 stun / seal は m.status（単一）に、新 7 種類は m.statuses[] に乗せる。
   // すかした敵には付かない。
   if (skill.status && hits.length > 0) {
+    const isLegacy = skill.status.kind === 'stun' || skill.status.kind === 'seal';
     for (const h of hits) {
       if (h.m.hp <= 0) continue;
-      const cur = h.m.status;
-      if (cur && cur.kind === skill.status.kind) {
-        cur.turns = Math.max(cur.turns, skill.status.turns);
+      if (isLegacy) {
+        const cur = h.m.status;
+        if (cur && cur.kind === skill.status.kind) {
+          cur.turns = Math.max(cur.turns, skill.status.turns);
+        } else {
+          h.m.status = { kind: skill.status.kind, turns: skill.status.turns };
+        }
       } else {
-        h.m.status = { kind: skill.status.kind, turns: skill.status.turns };
+        applyStatus(h.m, skill.status.kind, {
+          turns:  skill.status.turns,
+          stacks: skill.status.stacks ?? 1,
+        });
       }
     }
   }
@@ -3229,6 +3254,7 @@ function enterDungeon(data) {
   dungeonData  = data;
   if (!Array.isArray(player.materials))   player.materials   = [];
   if (!Array.isArray(player.consumables)) player.consumables = [];
+  if (!Array.isArray(player.statuses))    player.statuses    = [];
   // 入場前スナップショット（敗北時ロールバック）。
   // ロスト対象は inventory + consumables + 装備 + 素材ボックス。storage は据え置き。
   // 配列はディープコピー（アイテム参照だけのコピーだが count などは別個体）が必要なので
@@ -3311,6 +3337,8 @@ function refreshHUD() {
   _refreshScanStatusUI();
   // 技クイックバーは MP 残量で disabled が切り替わるので HUD と同じタイミングで再描画
   _refreshWazaBar();
+  // 状態異常オーバーレイも HUD と同じタイミングで再評価（罹患/解除直後に色が乗る）
+  _refreshStatusOverlay();
 }
 
 // XP獲得＆レベルアップ
@@ -3378,6 +3406,108 @@ function dungeonLog(msg, opts = {}) {
     lines[i].remove();
   }
 }
+
+// ── 状態異常 (status) システム ─────────────────────────────────
+// プレイヤー / 敵に共通の付与・解除・tick・UI 連携。詳細は src/status.js。
+
+// プレイヤー罹患の画面オーバーレイ更新。dominant status の overlay 色を使う。
+function _refreshStatusOverlay() {
+  const el = document.getElementById('status-overlay');
+  if (!el) return;
+  const dom = dominantStatus(player);
+  if (!dom || screen !== 'dungeon') {
+    el.classList.add('hidden');
+    el.style.removeProperty('--overlay');
+    return;
+  }
+  const def = STATUS_DEFS[dom.kind];
+  if (!def) { el.classList.add('hidden'); return; }
+  el.style.setProperty('--overlay', def.overlay);
+  el.classList.remove('hidden');
+}
+
+// プレイヤーに状態異常を付与。バナーログ + オーバーレイ更新。
+function _applyStatusToPlayer(kind, opts = {}) {
+  const ok = applyStatus(player, kind, opts);
+  if (!ok) return;
+  const def = STATUS_DEFS[kind];
+  if (def) dungeonLog(`${def.emoji} ${def.label} 状態になった！`, { rarity: 'レア' });
+  _refreshStatusOverlay();
+}
+
+// プレイヤーのターン経過処理: DoT / mp+1 / 期限切れ通知。
+// 戻り値: 'dead' なら HP 0 で死亡確定、'alive' なら継続。
+function _tickPlayerStatuses() {
+  const tick = tickStatuses(player);
+  if (tick.dotDamage > 0) {
+    player.hp = Math.max(0, player.hp - tick.dotDamage);
+    dungeonLog(`💥 状態異常で ${tick.dotDamage} ダメージ`);
+    refreshHUD();
+  }
+  for (const ex of tick.expired) {
+    const def = STATUS_DEFS[ex.kind];
+    if (def) dungeonLog(`✨ ${def.label} が解除された`);
+  }
+  _refreshStatusOverlay();
+  return player.hp <= 0 ? 'dead' : 'alive';
+}
+
+// 入力された移動方向を状態異常で改変する。confuse でランダム化、
+// shock で 確率的に待機（dx,dy=0,0）に置換、sleep で常に待機。
+// 返り値: { dx, dy, blocked, replacedReason }
+function _transformInputForStatuses(dx, dy) {
+  if (hasStatus(player, 'sleep')) {
+    return { dx: 0, dy: 0, blocked: true, replacedReason: 'sleep' };
+  }
+  const skip = shockSkipChance(player);
+  if (skip > 0 && Math.random() < skip) {
+    return { dx: 0, dy: 0, blocked: true, replacedReason: 'shock' };
+  }
+  if (hasStatus(player, 'confuse')) {
+    const dirs = [[0,-1],[0,1],[-1,0],[1,0],[-1,-1],[-1,1],[1,-1],[1,1]];
+    const r = dirs[Math.floor(Math.random() * dirs.length)];
+    return { dx: r[0], dy: r[1], blocked: false, replacedReason: 'confuse' };
+  }
+  return { dx, dy, blocked: false, replacedReason: null };
+}
+
+// 行動時の自傷判定（骨折）。発動するとプレイヤーが小ダメージを受ける。
+function _maybeFractureSelfHurt() {
+  const ch = fractureSelfHurtChance(player);
+  if (ch <= 0) return false;
+  if (Math.random() >= ch) return false;
+  const dmg = Math.max(1, Math.floor(player.maxHp * 0.05));
+  player.hp = Math.max(0, player.hp - dmg);
+  dungeonLog(`🦴 骨折で ${dmg} ダメージ（自傷）`);
+  refreshHUD();
+  return true;
+}
+
+// 状態異常 説明モーダル
+function _openStatusInfoModal() {
+  const body = document.getElementById('status-info-body');
+  if (!body) return;
+  body.innerHTML = Object.entries(STATUS_DEFS).map(([kind, def]) =>
+    `<div class="status-info-row" style="--c:${def.color}">
+       <div class="status-info-emoji">${def.emoji}</div>
+       <div>
+         <div class="status-info-name">${def.emoji} ${def.label}</div>
+         <div class="status-info-text">${def.desc}</div>
+       </div>
+     </div>`
+  ).join('');
+  document.getElementById('status-info-modal')?.classList.remove('hidden');
+}
+document.getElementById('btn-open-status-info')?.addEventListener('click', () => {
+  playSfx('click');
+  _openStatusInfoModal();
+});
+document.getElementById('btn-status-info-close')?.addEventListener('click', () => {
+  document.getElementById('status-info-modal')?.classList.add('hidden');
+});
+document.getElementById('status-info-modal')?.addEventListener('click', (e) => {
+  if (e.target.id === 'status-info-modal') e.target.classList.add('hidden');
+});
 
 // 「📜 ログ履歴」モーダル：保持中の log-line を全件まとめて表示する。
 // クイックバー左の📜ボタンから開く。閉じる/背景タップで閉じる。
@@ -3494,6 +3624,19 @@ function _celebratePickup(item, action = '入手') {
 function move(dx, dy) {
   if (!dungeon || screen !== 'dungeon') return;
 
+  // 状態異常で入力が変質する: sleep=必ず待機 / shock=確率で待機 / confuse=方向ランダム
+  if (dx !== 0 || dy !== 0) {
+    const t = _transformInputForStatuses(dx, dy);
+    if (t.replacedReason === 'sleep') {
+      dungeonLog('😴 睡眠中で動けない！');
+    } else if (t.replacedReason === 'shock') {
+      dungeonLog('⚡ 感電して行動できなかった！');
+    } else if (t.replacedReason === 'confuse') {
+      dungeonLog(`😵 錯乱で別方向（${t.dx},${t.dy}）に動いた！`);
+    }
+    dx = t.dx; dy = t.dy;
+  }
+
   // 待機: その場で敵ターンを進める
   if (dx === 0 && dy === 0) {
     _runEnemyTurn();
@@ -3578,6 +3721,25 @@ function move(dx, dy) {
 //   ミニオン行動 → 敵行動を 1 件ずつ時間差で演出する（プレイヤーが目で追える速さ）。
 //   各攻撃にはアタックトレイル + ダメージ表示 + 1 呼吸の間（STEP_MS）を入れる。
 function _runEnemyTurn() {
+  // ターン進行: 状態異常 (DoT / 期限切れ通知) を最初に処理。
+  // 死亡したらリザルトへ。
+  if (_tickPlayerStatuses() === 'dead') {
+    setTimeout(() => showResult(false), 250);
+    return;
+  }
+  // 敵側の状態異常もまとめてティック（DoT は m.hp に直接適用）
+  for (const m of (dungeon?.monsters ?? [])) {
+    if (m.hp <= 0) continue;
+    const t = tickStatuses(m);
+    if (t.dotDamage > 0) {
+      m.hp = Math.max(0, m.hp - t.dotDamage);
+      if (m.hp <= 0) {
+        // 倒した扱い: ドロップ等は省略（状態異常での自然死は通常撃破とは別経路）
+        dungeon.removeMonster(m);
+        dungeonLog(`💢 ${m.name} は状態異常で力尽きた`);
+      }
+    }
+  }
   // 1) ミニオンのターン: 攻撃と位置交換イベントを同期処理
   const minionRes = dungeon.tickMinions(player);
   const minionAttacks = (minionRes?.events ?? []).filter(e => e.type === 'minion-attack');
@@ -4216,6 +4378,8 @@ function showResult(isWin) {
     player.def         = entrySnapshot.def;
   }
   player.hp = player.maxHp;       // マップ復帰時は全回復
+  player.statuses = [];           // ダンジョン外では状態異常も全解除
+  _refreshStatusOverlay();
   entrySnapshot = null;
 
   show('result');
@@ -4260,6 +4424,7 @@ function autoSave() {
       consumables: player.consumables ?? [],
       storage:     player.storage     ?? [],
       materials:   player.materials   ?? [],
+      statuses:    player.statuses    ?? [],   // 罹患中の状態異常も保持（ダンジョン途中ログアウト対応）
       gold:       player.gold       ?? 0,
       platinum:   player.platinum   ?? 0,
       scanBudget: player.scanBudget ?? null,
