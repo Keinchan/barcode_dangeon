@@ -2151,6 +2151,42 @@ input, textarea {
   100% { transform: rotate(360deg) scale(1.6); opacity: 0; }
 }
 
+/* 状態異常オーバーレイ（プレイヤー罹患中に画面に薄く色を乗せる）。
+   blur は処理コストが高いのでごく弱め。色は --overlay でJSが上書きする。 */
+.status-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 30;          /* HUD より上、モーダルより下 */
+  background: var(--overlay, rgba(255,213,79,0.10));
+  backdrop-filter: blur(0.5px);
+  -webkit-backdrop-filter: blur(0.5px);
+  transition: background .25s, opacity .25s;
+  opacity: 1;
+}
+.status-overlay.hidden { opacity: 0; display: block; pointer-events: none; }
+
+/* 状態異常 説明モーダルの中身 */
+.status-info-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 2px;
+  text-align: left;
+}
+.status-info-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px 8px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 6px;
+  border-left: 3px solid var(--c, #888);
+}
+.status-info-emoji { font-size: 22px; line-height: 1; }
+.status-info-text  { font-size: 12px; color: #ddd; line-height: 1.45; }
+.status-info-name  { font-size: 13px; font-weight: bold; color: var(--c, #fff); }
+
 /* 攻撃予告テレグラフ。攻撃発動前にこの枠を 1 周パルスさせて
    「誰がこれから攻撃するか」をプレイヤーに把握させる。
    旧仕様は margin-left:-50% を併用して中心合わせを試みていたが、

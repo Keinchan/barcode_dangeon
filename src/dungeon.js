@@ -935,8 +935,9 @@ export class Dungeon {
         ctx.fill();
       }
 
-      // 状態異常マーカー: 右上に絵文字を 1 つ重ねて、行動不能か封じか一目で分かる。
-      // stun=💫 / seal=🔒。残ターン数を小さく付記。
+      // 状態異常マーカー: 右上に絵文字を重ねて、行動不能か封じか一目で分かる。
+      // stun=💫 / seal=🔒（旧 m.status 単独管理）。
+      // 新仕様の m.statuses[] は別ライン（左上）で 3 個まで表示。
       if (m.status && m.status.turns > 0) {
         const glyph = m.status.kind === 'stun' ? '💫' : '🔒';
         ctx.font = `${Math.floor(ts * 0.40)}px serif`;
@@ -946,6 +947,20 @@ export class Dungeon {
         ctx.fillStyle = '#fff';
         ctx.font = `bold ${Math.floor(ts * 0.22)}px sans-serif`;
         ctx.fillText(String(m.status.turns), dx * ts + ts - 4, dy * ts + ts - 6);
+      }
+      if (Array.isArray(m.statuses) && m.statuses.length > 0) {
+        const STATUS_GLYPH = {
+          poison: '☠', burn: '🔥', confuse: '😵', sleep: '😴',
+          shock: '⚡', fracture: '🦴', spasm: '💢',
+        };
+        ctx.font = `${Math.floor(ts * 0.32)}px serif`;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        const visible = m.statuses.slice(0, 3);
+        visible.forEach((s, i) => {
+          const g = STATUS_GLYPH[s.kind] ?? '?';
+          ctx.fillText(g, dx * ts + 1 + i * (ts * 0.30), dy * ts + 1);
+        });
       }
       ctx.globalAlpha = 1;
     }
