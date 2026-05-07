@@ -813,13 +813,15 @@ html, body {
 .btn-icon-menu:active { background: var(--primary); }
 .btn-icon-menu:disabled { opacity: 0.35; cursor: not-allowed; }
 
-/* フィールド拡大率コントロール（canvas 右上の floating overlay）。
-   minimap が左上に居るのと対称的に右上配置。ヘッダの混雑から離脱して
-   PC でも確実に見える位置に固定する。 */
+/* フィールド拡大率コントロール（canvas 左上の minimap 直下に floating overlay）。
+   旧: 右上配置だったが、debug-panel（top:8 right:8 width:260）と
+   ヘッダ右端の equip-display（DEF/装備）+ 🎒メニューボタン と被るので
+   左上の minimap（top:70 left:8 84x76 → 末端 y=146）の真下に再配置。
+   debug が居ても対角に位置する形になり PC/スマホ両方で衝突しない。 */
 .dungeon-zoom-controls {
   position: absolute;
-  top: 70px;
-  right: 8px;
+  top: 152px;        /* minimap (top:70 + height:76) + 6px gap */
+  left: 8px;
   z-index: 11;
   display: flex;
   align-items: center;
@@ -857,7 +859,9 @@ html, body {
   font-weight: bold;
 }
 @media (max-width: 480px) {
-  .dungeon-zoom-controls { top: 56px; gap: 2px; padding: 2px 4px; }
+  /* スマホでも minimap の真下。minimap サイズは PC と同じなので
+     位置も同じ top:152px で OK。ボタンを少し縮めるだけ。 */
+  .dungeon-zoom-controls { top: 152px; left: 8px; gap: 2px; padding: 2px 4px; }
   .btn-icon-zoom { width: 26px; height: 26px; font-size: 16px; }
   .zoom-level    { font-size: 11px; min-width: 32px; }
 }
