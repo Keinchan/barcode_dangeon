@@ -1107,6 +1107,47 @@ function _depositToStorage(idx) {
   autoSave();
 }
 
+// 床にアイテムをドロップする時の配置ヘルパ。元座標 (ox,oy) が walkable で
+// 他の床アイテムが居なければそこ、既に何か置いてあれば BFS で 8 方向に
+// 1 マスずつ広げて空き walkable マスを探す。階段マスは除外（拾い忘れの
+// 「降りた瞬間に消える」UX 事故を防ぐ）。完全に詰まっていたら原点に重ねる。
+// drop.x / drop.y を確定させた状態で floorItems に push する。
+function _placeFloorDrop(item, ox, oy) {
+  if (!dungeon) return;
+  const occupied = (x, y) => dungeon.floorItems.some(i => i.x === x && i.y === y);
+  const isStairs = (x, y) => dungeon.atStairs?.(x, y);
+  const tryPlace = (x, y) => {
+    if (!dungeon.canWalk(x, y)) return false;
+    if (isStairs(x, y))           return false;
+    if (occupied(x, y))           return false;
+    item.x = x; item.y = y;
+    dungeon.floorItems.push(item);
+    return true;
+  };
+  if (tryPlace(ox, oy)) return;
+  // BFS: 距離 1 → 2 → 3 ... 最大 4 まで（壁に閉じ込められた特殊配置は諦める）
+  for (let r = 1; r <= 4; r++) {
+    const ring = [];
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        ring.push([dx, dy]);
+      }
+    }
+    // 同じ距離内ではランダム順で試す（毎回同じ方向に偏らないように）
+    for (let i = ring.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [ring[i], ring[j]] = [ring[j], ring[i]];
+    }
+    for (const [dx, dy] of ring) {
+      if (tryPlace(ox + dx, oy + dy)) return;
+    }
+  }
+  // 完全に詰まっている時は原点に重ねるしかない（旧挙動）
+  item.x = ox; item.y = oy;
+  dungeon.floorItems.push(item);
+}
+
 // ボス撃破直後など、フロアに置けないドロップを自動取得。
 // 素材は素材ボックスへ直行（インベントリを圧迫しない）。
 // それ以外はインベントリ余裕があればそこ、満杯ならストレージに退避（永久消失を防ぐ）。
@@ -1922,17 +1963,14 @@ function _executeSkill(skill) {
     gainXp(_xpFromMonster(m));
     const gold = rollGoldDropFromMonster(m);
     if (gold > 0) {
-      const goldItem = makeGoldFloorItem(gold);
-      goldItem.x = m.x; goldItem.y = m.y;
-      dungeon.floorItems.push(goldItem);
+      _placeFloorDrop(makeGoldFloorItem(gold), m.x, m.y);
       dungeonLog(`🪙 ${m.name} は ${gold} ゴールドを落とした`);
     }
     const matDrop = _rollMaterialDrop(m);
     if (matDrop) _autoCollectDrop(matDrop);
     const drop = _rollMonsterDrop(m);
     if (drop) {
-      drop.x = m.x; drop.y = m.y;
-      dungeon.floorItems.push(drop);
+      _placeFloorDrop(drop, m.x, m.y);
       dungeonLog(`💎 ${m.name} は ${drop.name} を落とした！`, { rarity: drop.rarity });
     }
   }
@@ -2794,18 +2832,11 @@ function _scrollAoeDamage(targets, item, dmgMult, fxEmoji, fxColor) {
     dungeon.removeMonster(m);
     gainXp(_xpFromMonster(m));
     const gold = rollGoldDropFromMonster(m);
-    if (gold > 0) {
-      const goldItem = makeGoldFloorItem(gold);
-      goldItem.x = m.x; goldItem.y = m.y;
-      dungeon.floorItems.push(goldItem);
-    }
+    if (gold > 0) _placeFloorDrop(makeGoldFloorItem(gold), m.x, m.y);
     const matDrop = _rollMaterialDrop(m);
     if (matDrop) _autoCollectDrop(matDrop);
     const drop = _rollMonsterDrop(m);
-    if (drop) {
-      drop.x = m.x; drop.y = m.y;
-      dungeon.floorItems.push(drop);
-    }
+    if (drop) _placeFloorDrop(drop, m.x, m.y);
   }
 }
 
@@ -3759,18 +3790,10 @@ function _handleMonsterDefeated(mob) {
   // 商人撃破: 在庫を全て床にぶちまける + 大量ゴールド
   if (mob.isShopkeeper || dungeon.shopkeeperToStock?.has(mob)) {
     const stock = dungeon.getShopStock(mob);
-    const placed = [];
     for (const entry of stock) {
-      const it = { ...entry.item, x: mob.x, y: mob.y };
-      for (const [dx, dy] of [[0,0],[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,-1],[1,-1],[-1,1]]) {
-        const tx = mob.x + dx, ty = mob.y + dy;
-        if (!dungeon.canWalk(tx, ty)) continue;
-        if (placed.some(p => p.x === tx && p.y === ty)) continue;
-        it.x = tx; it.y = ty;
-        placed.push(it);
-        break;
-      }
-      dungeon.floorItems.push(it);
+      // _placeFloorDrop が他の床アイテムを避けて配置するので、商人の在庫が
+      // 全部同じマスに重なる旧バグも自動で解消される。
+      _placeFloorDrop({ ...entry.item }, mob.x, mob.y);
     }
     dungeon.shopkeeperToStock?.delete(mob);
     const bonus = 500 + (mob.level ?? 30) * 30;
@@ -3787,9 +3810,7 @@ function _handleMonsterDefeated(mob) {
       dungeonLog(`🪙 ${mob.name} から ${gold} ゴールドを得た`);
       refreshHUD();
     } else {
-      const goldItem = makeGoldFloorItem(gold);
-      goldItem.x = mob.x; goldItem.y = mob.y;
-      dungeon.floorItems.push(goldItem);
+      _placeFloorDrop(makeGoldFloorItem(gold), mob.x, mob.y);
       dungeonLog(`🪙 ${mob.name} は ${gold} ゴールドを落とした`);
     }
   }
@@ -3802,8 +3823,7 @@ function _handleMonsterDefeated(mob) {
     if (mob.isBoss) {
       _autoCollectDrop(drop);
     } else {
-      drop.x = mob.x; drop.y = mob.y;
-      dungeon.floorItems.push(drop);
+      _placeFloorDrop(drop, mob.x, mob.y);
       dungeonLog(`💎 ${mob.name} は ${drop.name} を落とした！`, { rarity: drop.rarity });
       playSfx('drop', { rarityTier: rarityTier(drop.rarity) });
       _celebratePickup(drop, 'ドロップ');
@@ -4361,16 +4381,12 @@ if (DEBUG) {
       gainXp(_xpFromMonster(mob));
       const gold = rollGoldDropFromMonster(mob);
       if (gold > 0) {
-        const goldItem = makeGoldFloorItem(gold);
-        goldItem.x = mob.x; goldItem.y = mob.y;
-        dungeon.floorItems.push(goldItem);
+        _placeFloorDrop(makeGoldFloorItem(gold), mob.x, mob.y);
         dungeonLog(`🪙 ${mob.name} は ${gold} ゴールドを落とした`);
       }
       const drop = _rollMonsterDrop(mob);
       if (drop) {
-        drop.x = mob.x;
-        drop.y = mob.y;
-        dungeon.floorItems.push(drop);
+        _placeFloorDrop(drop, mob.x, mob.y);
         dungeonLog(`💎 ${mob.name} は ${drop.name} を落とした！`, { rarity: drop.rarity });
         playSfx('drop', { rarityTier: rarityTier(drop.rarity) });
         _celebratePickup(drop, 'ドロップ');
