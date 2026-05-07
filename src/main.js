@@ -503,7 +503,9 @@ document.getElementById('btn-menu-back').addEventListener('click', () => {
   _setMenuStage('home');
 });
 
-// ストレージ画面の「持ち物ミニ」描画。行タップで 1 個だけストレージへ送る
+// ストレージ画面の「持ち物ミニ」描画。
+// 旧: 行全体タップで 1 個ストレージへ送られる → 名前を見ようとした時の誤送信が
+// 多発していた。明示的に「→📦」ボタンタップ時だけ送るよう変更。
 function _refreshInventoryMini() {
   const wrap = document.getElementById('menu-inventory-mini');
   if (!wrap) return;
@@ -524,9 +526,10 @@ function _refreshInventoryMini() {
         <div class="storage-mini-row-name" style="color:${it.rarityColor}">${it.name} ${cnt}</div>
         <div class="storage-mini-row-stat">${_statLine(it)}</div>
       </div>
-      <span class="storage-mini-row-arrow">→📦</span>
+      <button class="storage-mini-row-send" type="button" aria-label="ストレージへ送る">→📦</button>
     `;
-    row.addEventListener('click', () => {
+    row.querySelector('.storage-mini-row-send').addEventListener('click', (e) => {
+      e.stopPropagation();
       _depositToStorage(idx);
       _refreshInventoryMini();   // ミニ側も即更新
     });
