@@ -485,7 +485,8 @@ export function createPlayer() {
     atkBase: 9, defBase: 3,
     atk: 9, def: 3,
     weapon: null, armor: null,
-    inventory: [],          // 最大8個（持ち物）
+    inventory: [],          // 武器・防具・巻物（最大8個・スタック可）
+    consumables: [],        // 回復薬専用ボックス（HP/MP ポーション）。容量無制限・スタック可・敗北時はロスト
     storage:   [],          // 容量無制限のアイテムボックス
     materials: [],          // 合成素材専用ボックス（持ち物を圧迫しない / 敗北時はロスト）
     gold:      0,           // 所持金（敵撃破・床落ちで増加。死亡しても持ち越し）

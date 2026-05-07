@@ -2169,13 +2169,15 @@ input, textarea {
 }
 
 /* ── ストレージ ── */
-.storage-tabs {
+/* 持ち物のタブも同じ見た目を流用。pocket-tab/pocket-tabs の方は menu-section
+   の中の小さなツールバー扱い。 */
+.storage-tabs, .pocket-tabs {
   display: flex;
   gap: 4px;
   margin-bottom: 6px;
   flex-wrap: wrap;
 }
-.storage-tab {
+.storage-tab, .pocket-tab {
   background: rgba(255,255,255,0.04);
   border: 1px solid rgba(255,255,255,0.12);
   color: var(--text);
@@ -2185,12 +2187,12 @@ input, textarea {
   cursor: pointer;
   font-family: inherit;
 }
-.storage-tab.active {
+.storage-tab.active, .pocket-tab.active {
   background: var(--primary);
   border-color: var(--primary);
   color: #fff;
 }
-.storage-tab:active { transform: scale(0.96); }
+.storage-tab:active, .pocket-tab:active { transform: scale(0.96); }
 
 .storage-controls {
   display: flex;

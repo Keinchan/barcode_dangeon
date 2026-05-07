@@ -98,8 +98,17 @@ import {
 //   isStackable(item) が true の場合、同じ stackKey のスタックに合算する。
 //   非スタックは個体差があるので必ず別スロット。
 //   capacity 指定時は新規スタック作成のみ枠を消費する（既存スタックへの加算は枠外）。
-// インベントリに追加できるか事前判定（スタックなら既存に合算可能なので true）
+// 回復薬（potion / mpPotion）は別ボックス（player.consumables / 容量無制限）。
+// 「持ち物8枠」を圧迫しないので、判定とプッシュ先を分岐させる。
+function _isConsumableType(item) {
+  return item?.type === 'potion' || item?.type === 'mpPotion';
+}
+// インベントリに追加できるか事前判定。
+//   - 回復薬: 容量無制限なので常に true
+//   - スタック可能アイテム: 既存スタックがあれば true（枠を消費しない）
+//   - それ以外: 持ち物枠 < 8 で true
 function canAddToInventory(item) {
+  if (_isConsumableType(item)) return true;
   if (isStackable(item)) {
     const ex = player.inventory.find(it => isStackable(it) && stackKey(it) === stackKey(item));
     if (ex) return true;
@@ -124,11 +133,29 @@ function _addToList(list, item, capacity) {
   list.push(entry);
   return { ok: true, stacked: false };
 }
-function addToInventory(item) { return _addToList(player.inventory, item, 8); }
+// 回復薬は player.consumables（容量無制限）へ自動振り分け。それ以外は従来通り inventory（8枠）。
+function addToInventory(item) {
+  if (_isConsumableType(item)) {
+    if (!Array.isArray(player.consumables)) player.consumables = [];
+    return _addToList(player.consumables, item, null);
+  }
+  return _addToList(player.inventory, item, 8);
+}
 function addToStorage(item)   { return _addToList(player.storage,   item, null); }
 // 素材は専用ボックス（容量無制限・スタック）。
 // 持ち物を 1 枠も消費せず、敗北時の entrySnapshot 復元対象に含める。
 function addToMaterials(item) { return _addToList(player.materials, item, null); }
+// 回復薬の取り出し（HUD/メニュー使用時の 1 個減らし）。
+function takeOneFromConsumables(idx) {
+  if (!Array.isArray(player.consumables)) return null;
+  const it = player.consumables[idx];
+  if (!it) return null;
+  if (isStackable(it) && (it.count ?? 1) > 1) {
+    it.count -= 1;
+    return { ...it, count: 1 };
+  }
+  return player.consumables.splice(idx, 1)[0];
+}
 
 // 指定 idx のアイテムを 1 個取り出す。スタックなら count -= 1、最後の 1 個 or
 // 非スタックなら splice で除去。返り値は count=1 のシングルアイテム
@@ -144,7 +171,7 @@ function takeOneFromInventory(idx) {
 
 // セーブロード時の互換: 既存配列に count を埋め、同 stackKey の重複を 1 スタックに集約
 function _consolidateStacks(p) {
-  for (const arrName of ['inventory', 'storage', 'materials']) {
+  for (const arrName of ['inventory', 'consumables', 'storage', 'materials']) {
     const arr = p[arrName];
     if (!Array.isArray(arr)) continue;
     const merged = [];
@@ -579,17 +606,13 @@ function refreshMenu() {
     eq.innerHTML = '<div class="menu-empty">装備なし</div>';
   }
 
-  // 持ち物
-  const inv = document.getElementById('menu-inventory');
-  document.getElementById('menu-inv-count').textContent = `(${player.inventory.length}/8)`;
-  inv.innerHTML = '';
-  if (player.inventory.length === 0) {
-    inv.innerHTML = '<div class="menu-empty">持ち物なし</div>';
-  } else {
-    player.inventory.forEach((item, idx) => {
-      inv.appendChild(_renderInventoryRow(item, idx));
-    });
-  }
+  // 持ち物（タブ切替対応）
+  if (!Array.isArray(player.consumables)) player.consumables = [];
+  const consCount = player.consumables.reduce((s, it) => s + (it.count ?? 1), 0);
+  document.getElementById('menu-inv-count').textContent =
+    `(${player.inventory.length}/8 + 回復${consCount}個)`;
+  _refreshPocketTabs();
+  _renderActivePocketTab();
 
   // ストレージ + 持ち物ミニ（ストレージ画面用）
   _refreshStorageUI();
@@ -604,6 +627,120 @@ function refreshMenu() {
   _refreshSkillConfig();
   // 技を学ぶ/忘れるとスロット内容が変わるのでクイックバーも再描画
   _refreshWazaBar();
+}
+
+// ─────────────────────────────────────────────
+// 持ち物タブ（all / weapon / armor / scroll / cons）
+//   cons は consumables ボックス（容量無制限の回復薬専用）。それ以外は
+//   player.inventory を type でフィルタ。
+// ─────────────────────────────────────────────
+let _activePocketTab = 'all';
+function _refreshPocketTabs() {
+  const wrap = document.getElementById('pocket-tabs');
+  if (!wrap || wrap._wired) return;
+  wrap._wired = true;
+  for (const btn of wrap.querySelectorAll('.pocket-tab')) {
+    btn.addEventListener('click', () => {
+      _activePocketTab = btn.dataset.cat;
+      wrap.querySelectorAll('.pocket-tab').forEach(b =>
+        b.classList.toggle('active', b === btn));
+      _renderActivePocketTab();
+    });
+  }
+}
+function _renderActivePocketTab() {
+  const inv = document.getElementById('menu-inventory');
+  if (!inv) return;
+  inv.innerHTML = '';
+  if (_activePocketTab === 'cons') {
+    const list = player.consumables ?? [];
+    if (list.length === 0) {
+      inv.innerHTML = '<div class="menu-empty">回復薬なし</div>';
+      return;
+    }
+    list.forEach((item, idx) => {
+      inv.appendChild(_renderConsumableRow(item, idx));
+    });
+    return;
+  }
+  // 通常タブ: player.inventory を type でフィルタ。'all' はそのまま全件
+  const filterFn = (it) => {
+    switch (_activePocketTab) {
+      case 'weapon': return it.type === 'weapon';
+      case 'armor':  return it.type === 'armor';
+      case 'scroll': return it.type === 'scroll' || it.type === 'mysteryScroll' || it.type === 'skillBook' || it.type === 'legendaryTome';
+      default:       return true;
+    }
+  };
+  // 元の idx を保持したいので map → filter（idx は player.inventory 内のもの）
+  const rows = player.inventory
+    .map((item, idx) => ({ item, idx }))
+    .filter(({ item }) => filterFn(item));
+  if (rows.length === 0) {
+    inv.innerHTML = '<div class="menu-empty">該当アイテムなし</div>';
+    return;
+  }
+  for (const { item, idx } of rows) {
+    inv.appendChild(_renderInventoryRow(item, idx));
+  }
+}
+
+// 回復薬行: _renderInventoryRow と似ているが consumables ボックス用に
+// idx の解釈と削除/消費が異なる（splice 対象が player.consumables）。
+function _renderConsumableRow(item, idx) {
+  const div = document.createElement('div');
+  div.className = 'menu-row';
+  const countHtml = (isStackable(item) && (item.count ?? 1) > 1)
+    ? `<span class="menu-row-count">×${item.count}</span>` : '';
+  // 使用は screen === 'dungeon' のみ。ダンジョン外でも表示はするが行動は不可にする
+  // （_usePotionFromInventory が dungeonLog を出すので screen 不問でも安全に動くが、
+  // UX 上は満タン警告のみを場外で出す挙動になる）。
+  const isUsable = (item.type === 'potion' || item.type === 'mpPotion') && screen === 'dungeon';
+  const action = isUsable ? 'use' : 'none';
+  div.innerHTML = `
+    <button class="menu-row-main" data-action="${action}" ${isUsable ? '' : 'disabled'}>
+      <div class="menu-row-emoji">${iconImg(item, 38)}</div>
+      <div class="menu-row-info">
+        <div class="menu-row-name" style="color:${item.rarityColor}">${item.name} ${countHtml}</div>
+        <div class="menu-row-stat">${_statLine(item)} / ${item.rarity}</div>
+      </div>
+    </button>
+    <div class="menu-row-actions">
+      <button class="menu-action-btn move deposit" title="ストレージへ">→📦</button>
+      <button class="menu-action-btn danger discard">廃棄</button>
+    </div>
+  `;
+  if (isUsable) {
+    div.querySelector('.menu-row-main').addEventListener('click', () => {
+      if (item.type === 'potion' && player.hp >= player.maxHp) {
+        showAlert('HPが満タンです'); return;
+      }
+      if (item.type === 'mpPotion' && (player.mp ?? 0) >= (player.maxMp ?? 0)) {
+        showAlert('MPが満タンです'); return;
+      }
+      showActionConfirm(`${item.name} を使いますか？`, item, '使う', () => {
+        _usePotionFromInventory(idx, 'cons');
+      });
+    });
+  }
+  div.querySelector('.discard').addEventListener('click', async () => {
+    const ok = await showConfirm(`${item.name} を廃棄しますか？`, { danger: true, okLabel: '廃棄' });
+    if (!ok) return;
+    player.consumables.splice(idx, 1);
+    playSfx('discard');
+    refreshMenu();
+    autoSave();
+  });
+  div.querySelector('.deposit').addEventListener('click', () => {
+    // 1 個だけストレージへ。スタックなら count -= 1。
+    const taken = takeOneFromConsumables(idx);
+    if (!taken) return;
+    addToStorage(taken);
+    refreshMenu();
+    playSfx('click');
+    autoSave();
+  });
+  return div;
 }
 
 // ─────────────────────────────────────────────
@@ -2866,8 +3003,11 @@ function _scrollAoeDamage(targets, item, dmgMult, fxEmoji, fxColor) {
   }
 }
 
-function _usePotionFromInventory(idx) {
-  const item = player.inventory[idx];
+// 持ち物 8 枠の中から（旧仕様）/ consumables ボックスから（新仕様）薬を 1 個使用。
+// 第二引数 source で 'inv' or 'cons' を区別（'inv' は旧コードからのフォールバック）。
+function _usePotionFromInventory(idx, source = 'cons') {
+  const list = source === 'inv' ? player.inventory : (player.consumables ?? []);
+  const item = list[idx];
   if (!item) return;
   if (item.type === 'potion') {
     if (player.hp >= player.maxHp) { showAlert('HPが満タンです'); return; }
@@ -2877,7 +3017,7 @@ function _usePotionFromInventory(idx) {
     const before = player.hp;
     player.hp = before + item.heal;
     const actual = player.hp - before;
-    takeOneFromInventory(idx);
+    if (source === 'inv') takeOneFromInventory(idx); else takeOneFromConsumables(idx);
     if (typeof dungeonLog === 'function' && screen === 'dungeon') {
       const overcap = player.hp > player.maxHp ? `（上限突破！ ${player.hp}/${player.maxHp}）` : '';
       dungeonLog(`🧪 ${item.name} を使用！ HPが${actual}回復した${overcap}`,
@@ -2889,7 +3029,7 @@ function _usePotionFromInventory(idx) {
     const before = player.mp ?? 0;
     player.mp = before + item.mpHeal;
     const actual = player.mp - before;
-    takeOneFromInventory(idx);
+    if (source === 'inv') takeOneFromInventory(idx); else takeOneFromConsumables(idx);
     if (typeof dungeonLog === 'function' && screen === 'dungeon') {
       const overcap = player.mp > (player.maxMp ?? 0) ? `（上限突破！ ${player.mp}/${player.maxMp}）` : '';
       dungeonLog(`🔵 ${item.name} を使用！ MPが${actual}回復した${overcap}`,
@@ -3075,14 +3215,16 @@ function enterDungeon(data) {
   document.getElementById('dungeon-footer').classList.remove('hidden');
 
   dungeonData  = data;
-  if (!Array.isArray(player.materials)) player.materials = [];
+  if (!Array.isArray(player.materials))   player.materials   = [];
+  if (!Array.isArray(player.consumables)) player.consumables = [];
   // 入場前スナップショット（敗北時ロールバック）。
-  // ロスト対象は inventory + 装備 + 素材ボックス。storage は据え置き。
+  // ロスト対象は inventory + consumables + 装備 + 素材ボックス。storage は据え置き。
   // 配列はディープコピー（アイテム参照だけのコピーだが count などは別個体）が必要なので
   // map で {...it} する：ロールバック時に二重カウントを防ぐ。
   entrySnapshot = {
-    inventory: player.inventory.map(it => ({ ...it })),
-    materials: player.materials.map(it => ({ ...it })),
+    inventory:   player.inventory.map(it => ({ ...it })),
+    consumables: player.consumables.map(it => ({ ...it })),
+    materials:   player.materials.map(it => ({ ...it })),
     weapon:    player.weapon,
     armor:     player.armor,
     atk:       player.atk,
@@ -4051,14 +4193,15 @@ function dungeonClear() {
 
 function showResult(isWin) {
   if (!isWin && entrySnapshot) {
-    // 敗北：ダンジョンで拾った装備・アイテム・素材をすべてロールバック。
+    // 敗北：ダンジョンで拾った装備・アイテム・回復薬・素材をすべてロールバック。
     // ストレージは入場前から触っていないので据え置き。
-    player.inventory = entrySnapshot.inventory;
-    player.materials = entrySnapshot.materials;
-    player.weapon    = entrySnapshot.weapon;
-    player.armor     = entrySnapshot.armor;
-    player.atk       = entrySnapshot.atk;
-    player.def       = entrySnapshot.def;
+    player.inventory   = entrySnapshot.inventory;
+    player.consumables = entrySnapshot.consumables ?? [];
+    player.materials   = entrySnapshot.materials;
+    player.weapon      = entrySnapshot.weapon;
+    player.armor       = entrySnapshot.armor;
+    player.atk         = entrySnapshot.atk;
+    player.def         = entrySnapshot.def;
   }
   player.hp = player.maxHp;       // マップ復帰時は全回復
   entrySnapshot = null;
@@ -4101,9 +4244,10 @@ function autoSave() {
       def: player.def,
       weapon: player.weapon,
       armor: player.armor,
-      inventory: player.inventory,
-      storage:   player.storage   ?? [],
-      materials: player.materials ?? [],
+      inventory:   player.inventory,
+      consumables: player.consumables ?? [],
+      storage:     player.storage     ?? [],
+      materials:   player.materials   ?? [],
       gold:       player.gold       ?? 0,
       platinum:   player.platinum   ?? 0,
       scanBudget: player.scanBudget ?? null,
@@ -4126,13 +4270,17 @@ function _applySave(data) {
   // フィールドの取り残しを防ぐため初期化してから上書き
   player = createPlayer();
   Object.assign(player, data.player);
-  // 旧セーブ互換: storage / materials / minions が無いケース
-  if (!Array.isArray(player.storage))   player.storage   = [];
-  if (!Array.isArray(player.materials)) player.materials = [];
-  if (!Array.isArray(player.minions))   player.minions   = [];
+  // 旧セーブ互換: storage / materials / minions / consumables が無いケース
+  if (!Array.isArray(player.storage))     player.storage     = [];
+  if (!Array.isArray(player.materials))   player.materials   = [];
+  if (!Array.isArray(player.consumables)) player.consumables = [];
+  if (!Array.isArray(player.minions))     player.minions     = [];
   if (typeof player.gold !== 'number') player.gold = 0;
   // 旧セーブで持ち物・ストレージに混ざっていた素材を素材ボックスへ移送
   _migrateMaterialsFromOldSlots(player);
+  // 旧セーブで持ち物に入っていた回復薬を consumables へ移送（容量無制限化）。
+  // ストレージ内の回復薬は触らない（手動で出し入れする運用前提）。
+  _migrateConsumablesFromInventory(player);
   // 旧セーブ互換: maxMp / mp が未設定 → レベル相当の値を埋め込み
   if (typeof player.maxMp !== 'number') player.maxMp = statsForLevel(player.level || 1).maxMp;
   if (typeof player.mp    !== 'number') player.mp    = player.maxMp;
@@ -4211,6 +4359,20 @@ function _migrateMaterialsFromOldSlots(p) {
       arr.splice(i, 1);
       _addToList(p.materials, it, null);
     }
+  }
+}
+
+// 旧セーブで持ち物に混ざっていた回復薬（potion / mpPotion）を consumables ボックスへ移送。
+// ストレージは整理用なので触らない。スタックは _consolidateStacks がこの後で集約する。
+function _migrateConsumablesFromInventory(p) {
+  if (!Array.isArray(p.consumables)) p.consumables = [];
+  const inv = p.inventory;
+  if (!Array.isArray(inv)) return;
+  for (let i = inv.length - 1; i >= 0; i--) {
+    const it = inv[i];
+    if (!_isConsumableType(it)) continue;
+    inv.splice(i, 1);
+    _addToList(p.consumables, it, null);
   }
 }
 

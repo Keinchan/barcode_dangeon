@@ -302,6 +302,15 @@
       </section>
       <section class="menu-section stage-pocket">
         <div class="menu-section-title">持ち物 <span id="menu-inv-count" class="menu-section-meta"></span></div>
+        <!-- タブ切替（全部/武器/防具/巻物/回復）。回復タブのみ容量無制限の
+             consumables ボックスを表示し、それ以外は player.inventory の typeフィルタ。-->
+        <div class="pocket-tabs" id="pocket-tabs">
+          <button class="pocket-tab active" data-cat="all">すべて</button>
+          <button class="pocket-tab" data-cat="weapon">⚔️</button>
+          <button class="pocket-tab" data-cat="armor">🛡️</button>
+          <button class="pocket-tab" data-cat="scroll">📜</button>
+          <button class="pocket-tab" data-cat="cons">🧪 回復</button>
+        </div>
         <div id="menu-inventory"></div>
       </section>
 
