@@ -133,14 +133,17 @@ const MP_POTIONS = [
   { base: '大マナ薬', emoji: '🩵', mpHeal: 36 },
 ];
 
-// 巻物は新属性に対応した 6 種類。それぞれ ELEMENTS 内の 1 属性とリンクする
+// 巻物は新属性に対応した 6 種類。それぞれ ELEMENTS 内の 1 属性とリンクする。
+// 旧基準は 16-22 で「弱すぎる」というユーザーフィードバックのため、
+// ベースを大幅に引き上げ（×2.5 程度）+ 属性別の状態異常を付与する。
+//   火 → burn / 雷 → shock / 水 → sleep / 草 → poison / 闇 → confuse / 光 → 純高火力
 const SCROLLS = [
-  { base: '炎の巻物', emoji: '🔥', dmg: 18, element: '火' },
-  { base: '水の巻物', emoji: '💧', dmg: 16, element: '水' },
-  { base: '草の巻物', emoji: '🌿', dmg: 17, element: '草' },
-  { base: '雷の巻物', emoji: '⚡', dmg: 20, element: '雷' },
-  { base: '光の巻物', emoji: '✨', dmg: 22, element: '光' },
-  { base: '闇の巻物', emoji: '🌑', dmg: 19, element: '闇' },
+  { base: '炎の巻物', emoji: '🔥', dmg: 48, element: '火', status: { kind: 'burn',    turns: 4, stacks: 1 } },
+  { base: '水の巻物', emoji: '💧', dmg: 42, element: '水', status: { kind: 'sleep',   turns: 2, stacks: 1 } },
+  { base: '草の巻物', emoji: '🌿', dmg: 44, element: '草', status: { kind: 'poison',  turns: 5, stacks: 2 } },
+  { base: '雷の巻物', emoji: '⚡', dmg: 52, element: '雷', status: { kind: 'shock',   turns: 4, stacks: 1 } },
+  { base: '光の巻物', emoji: '✨', dmg: 60, element: '光', status: null /* 高火力一撃 */ },
+  { base: '闇の巻物', emoji: '🌑', dmg: 46, element: '闇', status: { kind: 'confuse', turns: 4, stacks: 1 } },
 ];
 
 // ── 装備の名前接尾辞（レアリティ毎・武器/防具共通） ──
@@ -339,14 +342,24 @@ function _buildScroll(barcode, rng, rarity, element, level) {
   const match = SCROLLS.find(s => s.element === element) ?? SCROLLS[Math.floor(rng() * SCROLLS.length)];
   const dmg   = Math.max(5, Math.floor(match.dmg * rarity.mult * _levelMult(level)));
   const prefix = _pickPrefix(rarity, rng);
+  // status は base から引き継ぐ（火→burn 等）。レアリティが高いほど turns 延長する。
+  let status = null;
+  if (match.status) {
+    const turnBonus = rarity.name === 'レジェンド' ? 3 : rarity.name === 'エピック' ? 2 : rarity.name === 'レア' ? 1 : 0;
+    status = { kind: match.status.kind, turns: match.status.turns + turnBonus, stacks: match.status.stacks ?? 1 };
+  }
+  const statusLabel = status
+    ? ` + ${{ burn:'熱傷', sleep:'睡魔', poison:'毒', shock:'感電', confuse:'錯乱' }[status.kind] ?? status.kind}${status.turns}T`
+    : '';
   return {
     type: 'scroll', barcode,
     name: `${prefix}${rarity.name}の${match.base}`,
     emoji: match.emoji,
     rarity: rarity.name, rarityColor: rarity.color, element: match.element, level,
     atkBonus: 0, defBonus: 0, dmg,
+    status,
     skill: { kind: 'none', name: '' },
-    desc: `敵に${dmg}の${match.element}ダメージ`,
+    desc: `敵に${dmg}の${match.element}ダメージ${statusLabel}`,
   };
 }
 
@@ -451,6 +464,12 @@ export const MYSTERY_SCROLLS = [
     desc: '部屋内の全敵に大ダメージ' },
   { effect: 'floor-damage',   name: '裁きの巻物',         emoji: '🔥', rarity: 'レジェンド', category: 'combat',
     desc: 'フロア内の全敵にダメージ' },
+  // ── 単体超火力 ──
+  { effect: 'mega-bolt',      name: '天罰の巻物',         emoji: '🌩', rarity: 'レジェンド', category: 'combat',
+    desc: '正面方向の敵に 500 ダメージ（壁・属性相性無視）' },
+  // ── 自己バフ ──
+  { effect: 'attack-up',      name: '気力の巻物',         emoji: '💪', rarity: 'エピック',   category: 'status',
+    desc: 'ATK +30% を 8 ターン付与（持続中は HUD が金色）' },
 
   // ── 禁忌系（諸刃の剣） ──
   { effect: 'apocalypse',     name: 'アポカリプスの巻物', emoji: '☠',  rarity: 'レジェンド', category: 'forbidden', isCursed: true,
