@@ -671,10 +671,18 @@ input, textarea {
   box-sizing: border-box;
 }
 
-#dungeon-log {
-  /* 縦積みでは log は最上段の独立行。横は親の幅いっぱいまで広がる。 */
+/* ログを横に「📜履歴」ボタンと並べる行ラッパ。flex で log が伸び、
+   ボタンが右端の固定幅。footer 全体の縦積み（log → waza-bar → dpad）は維持。 */
+.dungeon-log-wrap {
   align-self: stretch;
-  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 0;
+}
+#dungeon-log {
+  /* ラッパ内で flex:1。横は親の幅いっぱいまで広がる。 */
+  flex: 1 1 auto;
   min-width: 0;
   font-size: 13px;
   color: var(--text);
@@ -686,6 +694,43 @@ input, textarea {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+.btn-log-history {
+  flex: 0 0 auto;
+  width: 36px;
+  align-self: stretch;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .12s, transform .08s;
+}
+.btn-log-history:hover  { background: rgba(255,255,255,0.16); }
+.btn-log-history:active { transform: scale(0.92); background: var(--primary); }
+@media (max-width: 480px) {
+  .btn-log-history { width: 30px; font-size: 15px; }
+}
+
+/* ログ履歴モーダル本体 */
+.log-history-body {
+  max-height: 60vh;
+  min-height: 100px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 2px 6px;
+  text-align: left;
+  font-size: 12px;
+}
+.log-history-body .log-line {
+  background: rgba(255,255,255,0.04);
 }
 /* 異常に長い 1 単語があってもレイアウトを壊さない */
 #dungeon-log .log-line {

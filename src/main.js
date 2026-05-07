@@ -3132,7 +3132,9 @@ function _xpFromMonster(mob) {
 //   opts.rarity: レア度別の左カラーバー / グロウを付ける（アイテム入手系）
 //   _enhanceLogText: 数値（ダメージ・HP・MP・ゴールド・Lv）を色付き <span> にして
 //   重要な情報が一目で読めるようにする（XSS は内部呼び出しのみで未対策）。
-const _DUNGEON_LOG_MAX_LINES = 5;
+// ダンジョンログの保持上限。表示自体は max-height でクリップされるが、
+// 「ログ履歴」モーダルで最大 100 件まで遡って読めるようにする。
+const _DUNGEON_LOG_MAX_LINES = 100;
 function dungeonLog(msg, opts = {}) {
   const el = document.getElementById('dungeon-log');
   if (!el) return;
@@ -3143,12 +3145,48 @@ function dungeonLog(msg, opts = {}) {
   div.className = `log-line recent ${rarityCls}`.trim();
   div.innerHTML = _enhanceLogText(msg);
   el.prepend(div);
+  // ユーザーが過去ログを見るためにスクロールしていても、新規ログは最上段に
+  // 居るのが原則（最新が常に明るくハイライトされている UX）。一律 0 に戻す。
+  el.scrollTop = 0;
   // 最大行数を超えたら一番古いものから削除
   const lines = el.querySelectorAll('.log-line');
   for (let i = lines.length - 1; i >= _DUNGEON_LOG_MAX_LINES; i--) {
     lines[i].remove();
   }
 }
+
+// 「📜 ログ履歴」モーダル：保持中の log-line を全件まとめて表示する。
+// クイックバー左の📜ボタンから開く。閉じる/背景タップで閉じる。
+function _openLogHistoryModal() {
+  const modal = document.getElementById('log-history-modal');
+  const body  = document.getElementById('log-history-body');
+  const count = document.getElementById('log-history-count');
+  if (!modal || !body) return;
+  const src   = document.getElementById('dungeon-log');
+  const lines = src ? Array.from(src.querySelectorAll('.log-line')) : [];
+  if (count) count.textContent = `(${lines.length} 件 / 最大 ${_DUNGEON_LOG_MAX_LINES})`;
+  if (!lines.length) {
+    body.innerHTML = '<div style="text-align:center;color:#888;padding:14px">ログはまだありません</div>';
+  } else {
+    // 既に最新→旧の順で並んでいる（dungeonLog が prepend するため）。innerHTML をコピーして
+    // recent クラスは外す（モーダル側では「最新行=リストの先頭」が一目で分かる視覚で十分）。
+    body.innerHTML = lines.map(l => {
+      const cls = l.className.replace('recent', '').trim();
+      return `<div class="${cls}">${l.innerHTML}</div>`;
+    }).join('');
+  }
+  modal.classList.remove('hidden');
+}
+document.getElementById('btn-log-history')?.addEventListener('click', () => {
+  playSfx('click');
+  _openLogHistoryModal();
+});
+document.getElementById('btn-log-history-close')?.addEventListener('click', () => {
+  document.getElementById('log-history-modal')?.classList.add('hidden');
+});
+document.getElementById('log-history-modal')?.addEventListener('click', (e) => {
+  if (e.target.id === 'log-history-modal') e.target.classList.add('hidden');
+});
 
 // ログメッセージの数値・キーワードを色付き <span> でラップ。
 // HTML 注入は無し（内部呼び出しのみ）の前提で正規表現による軽量装飾。

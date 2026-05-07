@@ -110,7 +110,10 @@
            [十字キー]
          PC/スマホ共通で改行配置。横方向の混雑を一切起こさないので overlap が物理的に発生しない。 -->
     <div class="dungeon-footer" id="dungeon-footer">
-      <div id="dungeon-log"></div>
+      <div class="dungeon-log-wrap">
+        <div id="dungeon-log"></div>
+        <button id="btn-log-history" class="btn-log-history" title="ログ履歴を全件表示" aria-label="ログ履歴">📜</button>
+      </div>
       <div id="waza-bar" class="waza-bar" aria-label="技クイックバー（最大4個）">
         <button class="waza-slot empty" data-slot="0" disabled>—</button>
         <button class="waza-slot empty" data-slot="1" disabled>—</button>
@@ -133,6 +136,15 @@
           <button class="dpad-btn" data-dir="down">↓</button>
           <button class="dpad-btn dpad-diag" data-dir="down-right">↘</button>
         </div>
+      </div>
+    </div>
+
+    <!-- ログ履歴モーダル（最大100件遡れる） -->
+    <div id="log-history-modal" class="modal hidden">
+      <div class="modal-box">
+        <div class="modal-title">📜 ログ履歴 <span class="modal-meta" id="log-history-count"></span></div>
+        <div id="log-history-body" class="log-history-body"></div>
+        <button id="btn-log-history-close" class="btn-back">閉じる</button>
       </div>
     </div>
 
