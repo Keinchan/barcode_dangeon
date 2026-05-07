@@ -1570,8 +1570,11 @@ function _renderInventoryRow(item, idx) {
           _useMysteryScrollFromInventory(idx);
         });
       } else if (action === 'scroll') {
+        const stsLabel = item.status
+          ? ` + ${{ burn:'熱傷', sleep:'睡魔', poison:'毒', shock:'感電', confuse:'錯乱' }[item.status.kind] ?? item.status.kind}${item.status.turns}T`
+          : '';
         showActionConfirm(
-          `${item.name} を読みますか？\n正面方向の最初に当たる敵に ${item.dmg} ダメージ`,
+          `${item.name} を読みますか？\n正面方向の最初に当たる敵に ${item.dmg} ダメージ${stsLabel}`,
           item, '読む',
           () => { _useScrollFromInventory(idx); },
         );
@@ -2813,6 +2816,16 @@ function _useScrollFromInventory(idx) {
   const matchup = elementMatchup(item.element, target.element);
   const dmg     = Math.max(1, Math.floor(item.dmg * matchup));
   target.hp     = Math.max(0, target.hp - dmg);
+  // 状態異常付与（火→熱傷 / 雷→感電 等）。生存中の敵にだけ乗る。
+  let appliedStatusLabel = '';
+  if (item.status && target.hp > 0) {
+    applyStatus(target, item.status.kind, {
+      turns:  item.status.turns,
+      stacks: item.status.stacks ?? 1,
+    });
+    const def = STATUS_DEFS?.[item.status.kind];
+    if (def) appliedStatusLabel = `　${def.emoji}${def.label}付与`;
+  }
   takeOneFromInventory(idx);
 
   // 演出: プレイヤー → 着弾点へのトレイル + 敵側の爆発 + 属性魔法陣
@@ -2831,7 +2844,7 @@ function _useScrollFromInventory(idx) {
 
   const matchLbl = matchupLabel(matchup);
   dungeonLog(
-    `${item.emoji ?? '📜'} ${item.name} を読んだ！ ${target.name} に ${dmg} ダメージ${matchLbl ? '　' + matchLbl : ''}`,
+    `${item.emoji ?? '📜'} ${item.name} を読んだ！ ${target.name} に ${dmg} ダメージ${matchLbl ? '　' + matchLbl : ''}${appliedStatusLabel}`,
     { rarity: item.rarity },
   );
 
@@ -2996,7 +3009,77 @@ const _MYSTERY_SCROLL_EFFECTS = {
     screenShake(8, 280);
     return true;
   },
+
+  // ── 単体超火力（投擲一発 500 ダメージ・属性相性無視） ──
+  'mega-bolt': (item) => {
+    const facing = dungeon.playerPos.facing ?? [0, 1];
+    const px = dungeon.playerPos.x;
+    const py = dungeon.playerPos.y;
+    const [fx, fy] = _rotateOffsetByFacing([0, 1], facing);
+    // 壁を貫通して最初の生存中の敵を撃つ
+    let target = null;
+    for (let i = 1; i <= 30; i++) {
+      const tx = px + fx * i;
+      const ty = py + fy * i;
+      if (tx < 0 || ty < 0) break;
+      const mob = dungeon.monsterAt(tx, ty);
+      if (mob) { target = mob; break; }
+    }
+    if (!target) { showAlert('正面方向に敵がいません'); return false; }
+    const dmg = 500;
+    target.hp = Math.max(0, target.hp - dmg);
+    const enemyAt = _mobScreenAnchor(target);
+    const playerAt = playerVfxAnchor();
+    if (playerAt && enemyAt) attackTrail(playerAt, enemyAt, { color: '#ffd54f' });
+    if (enemyAt) {
+      explosion(enemyAt, { color: '#ffd54f' });
+      explosion(enemyAt, { color: '#fff176' });
+      showDamageAt(enemyAt, dmg, { kind: 'crit' });
+    }
+    hitFlash({ color: 'rgba(255,213,79,0.55)' });
+    screenShake(12, 380);
+    dungeonLog(`🌩 ${item.name}！ ${target.name} に ${dmg} ダメージ`, { rarity: 'レジェンド' });
+    if (target.hp <= 0) {
+      if (enemyAt) deathBurst(enemyAt, { color: target.rarityColor ?? '#ffd54f' });
+      _handleMonsterDefeated(target);
+    }
+    return true;
+  },
+
+  // ── 自己バフ（ATK +30% を 8 ターン）──
+  'attack-up': (item) => {
+    const turns = 8;
+    const before = player.atkBase;
+    // フロア間で重ねがけしないよう、過去のバフがあれば剥がしてから再付与
+    if (player._atkBuff) {
+      player.atkBase = player._atkBuff.basePrev;
+    }
+    player.atkBase = Math.floor(player.atkBase * 1.3);
+    player.atk = player.atkBase + (player.weapon?.atkBonus ?? 0);
+    player._atkBuff = { turns, basePrev: before };
+    dungeonLog(`💪 ${item.name}！ ATK +30%（${turns} ターン持続）`, { rarity: 'エピック' });
+    hitFlash({ color: 'rgba(255,213,79,0.30)' });
+    sparkSpray(playerVfxAnchor(), { count: 16, color: '#ffd54f' });
+    refreshHUD();
+    return true;
+  },
 };
+
+// 攻撃バフの残ターン管理（_runEnemyTurn の冒頭で 1 ずつ減らす）。
+// フロアを跨ぐと _resetForFloor 等で _atkBuff がクリアされない可能性があるので、
+// 持続を turns カウントで明示管理する。
+function _tickAttackBuff() {
+  const buff = player._atkBuff;
+  if (!buff) return;
+  buff.turns -= 1;
+  if (buff.turns <= 0) {
+    player.atkBase = buff.basePrev;
+    player.atk = player.atkBase + (player.weapon?.atkBonus ?? 0);
+    player._atkBuff = null;
+    dungeonLog('💨 ATK バフが切れた');
+    refreshHUD();
+  }
+}
 
 // プレイヤーの位置を瞬間移動（巻物の移動効果共通ヘルパ）
 function _teleportPlayer(nx, ny) {
@@ -3727,6 +3810,7 @@ function _runEnemyTurn() {
     setTimeout(() => showResult(false), 250);
     return;
   }
+  _tickAttackBuff();
   // 敵側の状態異常もまとめてティック（DoT は m.hp に直接適用）
   for (const m of (dungeon?.monsters ?? [])) {
     if (m.hp <= 0) continue;
