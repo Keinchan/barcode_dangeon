@@ -26,7 +26,11 @@ export class Dungeon {
     this.data       = dungeonData;
     this.floor      = floor;
     this.isFinal    = floor === dungeonData.floors;
-    this.rng        = createRNG(hashString(`${dungeonData.seed}:${floor}`));
+    // 入る度ランダム生成: dungeonData.runSalt があれば seed に混ぜて
+    // 部屋レイアウト・モンスター配置・床アイテム位置をシャッフルする。
+    // 旧仕様との互換のため runSalt が無ければ従来通り（場所固定）。
+    const _runSalt = dungeonData.runSalt ?? '';
+    this.rng        = createRNG(hashString(`${dungeonData.seed}:${floor}:${_runSalt}`));
     this.grid       = [];
     this.monsters   = [];
     this.floorItems = [];
