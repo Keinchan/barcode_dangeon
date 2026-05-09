@@ -119,6 +119,7 @@ function _drawBody(ctx, item, size, rng) {
     case 'scroll':        _drawScroll(ctx, item, size, rng); break;
     case 'mysteryScroll': _drawEmojiOnFrame(ctx, item.emoji ?? '📜', size); break;
     case 'skillBook':     _drawSkillBook(ctx, item, size); break;
+    case 'key':           _drawEmojiOnFrame(ctx, '🗝️', size); break;
     case 'material':      _drawEmojiOnFrame(ctx, item.emoji ?? '⛓️', size); break;
     case 'gold':          _drawGold(ctx, size); break;
     case 'chest':         _drawChest(ctx, size); break;
