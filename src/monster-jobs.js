@@ -19,6 +19,10 @@ const ELEMENT_PREFIX = {
 
 // 職業ベース名 + 各属性ごとの絵文字（属性別バリアントを軽く表現）。
 // emoji は属性なしの素の絵文字（fallback も兼ねる）。
+//
+// inflictOnHit: 攻撃命中時に確率でプレイヤーへ付与する状態異常。
+//   { kind, chance, turns, stacks? }。chance は基礎確率（0.0〜1.0）で
+//   遠距離技 (`_tryJobRangedAttack` 経由 magic) では確率を 1.5x に増幅する。
 const _JOBS_RAW = [
   {
     id: 'beastking',
@@ -29,6 +33,7 @@ const _JOBS_RAW = [
     aiHint:   'rush',          // 隣接突進。素直な近接強敵
     preferredRange: 'ADJ',     // 周囲 8 マスをまとめて殴れる将来拡張用
     chargeBonus: 0,            // 特殊行動チャージ無し（普通の近接）
+    inflictOnHit: { kind: 'fracture', chance: 0.10, turns: 4 },
     desc: '獰猛な近接型。HP・攻撃力ともに高い',
   },
   {
@@ -40,6 +45,7 @@ const _JOBS_RAW = [
     aiHint:   'doublehit',     // 3 ターンに 1 度、隣接時に 2 連撃
     preferredRange: 'CROSS',
     chargeBonus: 1,
+    inflictOnHit: { kind: 'fracture', chance: 0.15, turns: 4 },
     desc: '素早い拳。隣接時にたまに 2 連撃を放つ',
   },
   {
@@ -51,6 +57,7 @@ const _JOBS_RAW = [
     aiHint:   'phaseseal',     // 3 ターンに 1 度、隣接プレイヤーに seal を付与
     preferredRange: 'DIAG',
     chargeBonus: 0,
+    inflictOnHit: { kind: 'confuse', chance: 0.18, turns: 4 },
     desc: '霊体の脅威。隣接時にときおり封印（技封じ）を放つ',
   },
   {
@@ -62,6 +69,7 @@ const _JOBS_RAW = [
     aiHint:   'line3',         // 直線 3 マスから飛び道具（LINE3）
     preferredRange: 'LINE3',
     chargeBonus: 1,
+    inflictOnHit: { kind: 'spasm', chance: 0.20, turns: 4 },
     desc: '紙装甲だが直線 3 マス先まで超音波を飛ばす',
   },
   {
@@ -73,6 +81,7 @@ const _JOBS_RAW = [
     aiHint:   'rush',
     preferredRange: 'CROSS',
     chargeBonus: 0,
+    inflictOnHit: { kind: 'fracture', chance: 0.12, turns: 4 },
     desc: '骨の鎧。防御力が高い純粋な近接',
   },
   {
@@ -84,6 +93,7 @@ const _JOBS_RAW = [
     aiHint:   'pierce',        // 直線貫通（PIERCE 風）
     preferredRange: 'PIERCE',
     chargeBonus: 1,
+    inflictOnHit: { kind: 'poison', chance: 0.25, turns: 5, stacks: 1 },
     desc: '一直線に貫く牙。同列・同行のプレイヤーに飛び込み攻撃',
   },
   {
@@ -95,6 +105,7 @@ const _JOBS_RAW = [
     aiHint:   'regen',         // 毎ターン少量回復
     preferredRange: 'MELEE',
     chargeBonus: 0,
+    inflictOnHit: { kind: 'sleep', chance: 0.08, turns: 2 },
     desc: '腐肉の塊。HP がとても多く、ターンごとに少量回復する',
   },
   {
@@ -106,9 +117,41 @@ const _JOBS_RAW = [
     aiHint:   'breath',        // 5 ターンに 1 度、視線が通っていれば LINE5 ブレス
     preferredRange: 'LINE5',
     chargeBonus: 2,            // チャージはやや遅め（ロマン砲枠）
+    inflictOnHit: { kind: 'burn', chance: 0.28, turns: 5, stacks: 1 },
     desc: '伝説級の強敵。まれに正面 5 マスのブレスを放つ',
   },
 ];
+
+// 属性ベースのフォールバック付与（job.inflictOnHit が無い場合でも、
+// 属性が一致する魔法攻撃で確率的に状態異常を狙う）。
+// 主属性に合う状態異常を低確率で乗せて「敵から状態異常を貰う」UX を確保する。
+const _ELEMENT_INFLICT = {
+  '火': { kind: 'burn',    chance: 0.10, turns: 4, stacks: 1 },
+  '水': { kind: 'sleep',   chance: 0.08, turns: 2 },
+  '草': { kind: 'poison',  chance: 0.12, turns: 4, stacks: 1 },
+  '雷': { kind: 'shock',   chance: 0.12, turns: 4 },
+  '光': { kind: 'spasm',   chance: 0.10, turns: 4 },
+  '闇': { kind: 'confuse', chance: 0.10, turns: 4 },
+};
+
+// 命中 1 発分の状態異常付与をロールする。
+//   isRanged=true の場合は確率を 1.3x（飛び道具ほど刺さる）。
+//   優先順: ジョブの inflictOnHit → 属性フォールバック。
+// 戻り値: { kind, turns, stacks } もしくは null。
+export function rollInflictOnHit(mob, opts = {}) {
+  if (!mob) return null;
+  const ranged = !!opts.ranged;
+  const job    = mob.job;
+  const inflict = job?.inflictOnHit ?? _ELEMENT_INFLICT[mob.element];
+  if (!inflict) return null;
+  const chance = Math.min(1, (inflict.chance ?? 0) * (ranged ? 1.3 : 1.0));
+  if (Math.random() >= chance) return null;
+  return {
+    kind:   inflict.kind,
+    turns:  inflict.turns  ?? 4,
+    stacks: inflict.stacks ?? 1,
+  };
+}
 
 // id → job の lookup
 const _BY_ID = Object.fromEntries(_JOBS_RAW.map(j => [j.id, j]));

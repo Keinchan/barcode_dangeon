@@ -4,6 +4,7 @@ import { getDebugState } from './debug.js';
 import { getItemIconCanvas } from './icons.js';
 import { findMinionTemplate } from './minions.js';
 import { elementMatchup } from './items.js';
+import { rollInflictOnHit } from './monster-jobs.js';
 
 const W = 21;
 const H = 19;
@@ -502,7 +503,9 @@ export class Dungeon {
         const base = Math.max(1, m.atk - player.def);
         const roll = 1 + Math.floor(Math.random() * Math.ceil(base * 0.4));
         const dmg  = base + roll;
-        events.push({ type: 'magic', mob: m, dmg, hit: true });
+        // ジョブ / 属性ベースで状態異常付与をロール（命中時のみ）。
+        const inflict = rollInflictOnHit(m, { ranged: false });
+        events.push({ type: 'magic', mob: m, dmg, hit: true, inflict });
         totalDmg += dmg;
 
         // 武道家: 隣接時の 2 連撃（chargeBonus + 2 でチャージ充填）
@@ -512,7 +515,8 @@ export class Dungeon {
             const base2 = Math.max(1, Math.floor(m.atk * 0.7) - player.def);
             const roll2 = 1 + Math.floor(Math.random() * Math.ceil(base2 * 0.4));
             const dmg2  = base2 + roll2;
-            events.push({ type: 'magic', mob: m, dmg: dmg2, hit: true });
+            const inflict2 = rollInflictOnHit(m, { ranged: false });
+            events.push({ type: 'magic', mob: m, dmg: dmg2, hit: true, inflict: inflict2 });
             totalDmg += dmg2;
           }
         }
@@ -606,7 +610,9 @@ export class Dungeon {
       }
       const base = Math.max(1, Math.floor(m.atk * mult) - player.def);
       const roll = 1 + Math.floor(Math.random() * Math.ceil(base * 0.4));
-      return { type: 'magic', mob: m, dmg: base + roll, hit: true, ranged: true };
+      // 飛び道具は ranged=true で付与確率にブーストが乗る
+      const inflict = rollInflictOnHit(m, { ranged: true });
+      return { type: 'magic', mob: m, dmg: base + roll, hit: true, ranged: true, inflict };
     };
 
     // breath（ドラゴン）: chargeBonus を加味して 5 ターンに 1 回、正面 5 マス・1.5x

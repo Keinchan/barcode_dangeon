@@ -1,5 +1,7 @@
 import { applyItem, elementMatchup, matchupLabel } from './items.js';
 import { SKILL_MP_COST } from './generator.js';
+import { applyStatus, STATUS_DEFS } from './status.js';
+import { rollInflictOnHit } from './monster-jobs.js';
 import {
   showFloatingDamage, showEnemyDamage,
   sparkSpray, explosion, shockwave, magicCircle,
@@ -341,6 +343,21 @@ export class Battle {
     else step();
   }
 
+  // 戦闘パネル中の状態異常付与: applyStatus + 専用ログ + 真のプレイヤーオブジェクトにも反映。
+  // this.player は Battle がコンストラクタで shallow-copy しているため、外側の真の player に
+  // 状態異常を載せるには onEnd 後に rollback が起きる前のタイミングで反映が必要。
+  // ここでは this.player の statuses を更新し、onEnd で main.js が参照するようにする。
+  _inflictOnPlayer(inflict) {
+    if (!inflict || this.player.hp <= 0) return;
+    const ok = applyStatus(this.player, inflict.kind, {
+      turns:  inflict.turns,
+      stacks: inflict.stacks,
+    });
+    if (!ok) return;
+    const def = STATUS_DEFS[inflict.kind];
+    if (def) this.log(`${def.emoji} ${def.label} 状態になった！`);
+  }
+
   // 壁越し戦闘では魔法ナラティブ、通常戦闘は物理ナラティブ。ダメージ計算は同一
   _enemyBasicAttack() {
     const matchup = elementMatchup(this.monster.element, this.player.armor?.element);
@@ -351,6 +368,8 @@ export class Battle {
     const label = this.wallPiercing ? '✨ 魔法攻撃' : '💥 攻撃';
     const matchLbl = matchupLabel(matchup);
     this.log(`${label} ${this.monster.name} の一撃！ ${dmg} ダメージ！${matchLbl ? '　' + matchLbl : ''}`);
+    // ジョブ / 属性ベースの状態異常付与（命中時のみ）
+    this._inflictOnPlayer(rollInflictOnHit(this.monster, { ranged: this.wallPiercing }));
     const dmgKind = isEffective ? 'crit' : isWeak ? 'weak' : 'normal';
     showFloatingDamage(dmg, { kind: dmgKind });
     playSfx('damage');
@@ -387,7 +406,7 @@ export class Battle {
       this.updateUI();
       // _busy=false は後段の _tickOtherEnemies に委譲（その間に操作させない）
     } else if (sk.poison) {
-      // 毒スキル（闇属性）
+      // 毒スキル（闇属性）: ダメージ + 確実に毒状態を付与（5 ターン）
       const dmg = this._calcDmg(this.monster.atk, this.player.def, sk.mult);
       this.player.hp = Math.max(0, this.player.hp - dmg);
       this.log(`☠️ ${this.monster.name} が「${sk.name}」を使った！ ${dmg} ダメージ＋毒！`);
@@ -395,6 +414,7 @@ export class Battle {
       playSfx('damage');
       magicCircle(enemyVfxAnchor(), '闇');
       shockwave(playerVfxAnchor(), { color: 'rgba(176,112,221,0.6)' });
+      this._inflictOnPlayer({ kind: 'poison', turns: 5, stacks: 1 });
       this.updateUI();
       this._checkPlayerDead();
     } else {
@@ -402,6 +422,8 @@ export class Battle {
       const dmg = this._calcDmg(this.monster.atk, this.player.def, sk.mult);
       this.player.hp = Math.max(0, this.player.hp - dmg);
       this.log(`🔥 ${this.monster.name} が「${sk.name}」を使った！ ${dmg} ダメージ！`);
+      // スキル攻撃命中時もジョブ / 属性ベースで付与（チャンスは ranged 扱いで増幅）
+      this._inflictOnPlayer(rollInflictOnHit(this.monster, { ranged: true }));
       showFloatingDamage(dmg);
       playSfx('damage');
       // 敵スキル: 敵側に魔法陣 → 攻撃方向ストリーク → プレイヤー側に爆発

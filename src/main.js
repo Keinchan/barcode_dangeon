@@ -3907,6 +3907,10 @@ function _runEnemyTurn() {
         const matchup = elementMatchup(ev.mob.element, player.armor?.element);
         if (matchup >= 1.5) _showWeaknessBanner('弱点ヒット!!');
         dungeonLog(`✨ ${ev.mob.name} の魔法攻撃！ ${ev.dmg} ダメージ${matchup >= 1.5 ? '　弱点!!' : ''}`);
+        // 命中時の状態異常付与（dungeon.tickEnemies が ev.inflict に乗せた）。
+        if (ev.inflict && player.hp > 0) {
+          _applyStatusToPlayer(ev.inflict.kind, { turns: ev.inflict.turns, stacks: ev.inflict.stacks });
+        }
         refreshHUD();
         if (player.hp <= 0) {
           setTimeout(() => showResult(false), 350);
