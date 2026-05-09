@@ -3521,14 +3521,30 @@ function gainXp(amount) {
   autoSave();
 }
 
-// モンスター撃破時のXP量
+// モンスター撃破時のXP量。旧仕様は固定値だったので、低 Lv プレイヤーが格上を
+// 倒しても全然レベルが上がらず作業感が強かった。
+//   - 基礎値: レアリティで決まる（旧仕様より気持ち多め）
+//   - レベル差補正: 敵 Lv > 自 Lv で指数的にブースト（最大 ×3.0）。
+//     具体的には diff > 0 の時 mult = 1 + 0.18 * diff（diff の上限 11 で頭打ち）
+//   - 格下: 敵 Lv < 自 Lv で穏やかに減衰（最大半減）。0 にはしない（見つけたら倒す）
+//   - ボス: 最後に ×3 を乗せる（仕様変更前後で同じ）
 function _xpFromMonster(mob) {
   const base =
-    mob.rarity === 'レジェンド' ? 200 :
-    mob.rarity === 'エピック'   ? 70  :
-    mob.rarity === 'レア'       ? 25  :
-    10;
-  return mob.isBoss ? base * 3 : base;
+    mob.rarity === 'レジェンド' ? 240 :
+    mob.rarity === 'エピック'   ? 90  :
+    mob.rarity === 'レア'       ? 32  :
+    14;
+  const diff = (mob.level ?? 1) - (player?.level ?? 1);
+  let mult = 1;
+  if (diff > 0) {
+    // 格上: +18% per Lv（11 段差で約 ×3.0）
+    mult = 1 + 0.18 * Math.min(11, diff);
+  } else if (diff < 0) {
+    // 格下: -8% per Lv（最低 ×0.5 で頭打ち）
+    mult = Math.max(0.5, 1 + 0.08 * diff);
+  }
+  const total = Math.floor(base * mult);
+  return mob.isBoss ? total * 3 : Math.max(1, total);
 }
 
 // ダンジョンログを 1 行追加。新規行を最前列に挿入し、古い行から消していく。
