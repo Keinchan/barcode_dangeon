@@ -105,6 +105,10 @@ import {
   transferHost as pvpTransferHost,
   handleHostLeave as pvpHandleHostLeave,
   handleGuestLeave as pvpHandleGuestLeave,
+  setRoomMode as pvpSetRoomMode,
+  setRoomPvpFormat as pvpSetRoomPvpFormat,
+  setRoomBoss as pvpSetRoomBoss,
+  COOP_BOSSES as PVP_COOP_BOSSES,
 } from './multiplayer.js';
 import { MINION_LIBRARY, makeMinion, findMinionTemplate, rehydrateMinion } from './minions.js';
 import {
@@ -4398,6 +4402,25 @@ function _maybeMapBattleClear() {
   return true;
 }
 
+// 装備形式変更時に自分の atk/def を再計算する（ロビー waiting 中のみ呼ばれる）。
+//   pvp + set    → atkBase + 25, defBase + 15（公平戦の固定補正）
+//   それ以外     → 現在の player.atk / player.def をそのまま
+// 数値は multiplayer.PVP_SET_PRESET と一致させる必要がある（重複定義のため要保守）。
+async function _pvpReapplyOwnEquip(mode, format) {
+  if (!_pvpCode || !_pvpRole) return;
+  let atk, def;
+  if (mode === 'pvp' && format === 'set') {
+    atk = (player.atkBase ?? 0) + 25;
+    def = (player.defBase ?? 0) + 15;
+  } else {
+    atk = player.atk;
+    def = player.def;
+  }
+  try {
+    await pvpSubmitOwnState(_pvpCode, _pvpRole, { atk, def });
+  } catch (err) { console.warn('reapply equip failed:', err); }
+}
+
 // PvP アリーナ: 移動完了を Firestore に通知して相手側にターンを渡す。
 function _pvpSendMoveAction() {
   if (!_pvpCode || !_pvpRole || !_pvpData || !dungeon) return;
@@ -6425,12 +6448,13 @@ function _leavePvpRoom() {
 async function _pvpCreate() {
   const u = getCurrentAuthUser();
   if (!u) { _showPvpError('ログインが必要です'); return; }
-  const profile = buildPvpProfile(u.uid, u.displayName ?? u.email ?? 'プレイヤー', player, 'host');
   // ロビーのモードラジオから 'pvp' / 'coop' を取得
   const modeInput = document.querySelector('input[name="pvp-mode"]:checked');
   const mode = modeInput?.value === 'coop' ? 'coop' : 'pvp';
+  const profile = buildPvpProfile(u.uid, u.displayName ?? u.email ?? 'プレイヤー', player, 'host', { mode });
   try {
-    const code = await pvpCreateRoom(profile, { mode });
+    // 初期ボス: 先頭の候補。装備フォーマット: current（あとから host が変えられる）
+    const code = await pvpCreateRoom(profile, { mode, pvpFormat: 'current', bossId: PVP_COOP_BOSSES[0].id });
     _pvpCode = code;
     _pvpRole = 'host';
     _pvpUnsub = pvpWatchRoom(code, _onPvpUpdate);
@@ -6448,9 +6472,11 @@ async function _pvpJoin() {
   const inp = document.getElementById('pvp-join-code');
   const code = (inp?.value ?? '').trim();
   if (!/^\d{6}$/.test(code)) { _showPvpError('6 桁の数字を入力してください'); return; }
+  // 参加時はまずベース profile を作る。joinRoom 側で部屋の mode/pvpFormat に合わせて
+  // 位置や装備値を上書きする（player の生スナップショットも一緒に渡す）。
   const profile = buildPvpProfile(u.uid, u.displayName ?? u.email ?? 'プレイヤー', player, 'guest');
   try {
-    await pvpJoinRoom(code, profile);
+    await pvpJoinRoom(code, profile, { player });
     _pvpCode = code;
     _pvpRole = 'guest';
     _pvpUnsub = pvpWatchRoom(code, _onPvpUpdate);
@@ -6499,6 +6525,15 @@ function _onPvpUpdate(data) {
   }
   const prev = _pvpData;
   _pvpData = data;
+  // モード・装備形式の変更を検知して、自分の atk/def を再計算して Firestore へ反映。
+  // 両クライアントがそれぞれ自分のぶんを書き戻すので idempotent。
+  if (_pvpRole && data.state === 'waiting') {
+    const modeChanged   = prev?.mode      !== data.mode;
+    const formatChanged = prev?.pvpFormat !== data.pvpFormat;
+    if (modeChanged || formatChanged) {
+      _pvpReapplyOwnEquip(data.mode, data.pvpFormat).catch(() => {});
+    }
+  }
   if (data.state === 'waiting') {
     _renderPvpLobbyRoom(data);
   } else if (data.state === 'battle') {
@@ -6756,15 +6791,62 @@ function _refreshPvpTurnUI(data) {
 }
 
 function _renderPvpLobbyRoom(data) {
+  // ── モード切替ボタン群（host だけ操作可能、guest は disabled で表示のみ）──
+  const modeRow = document.getElementById('pvp-room-mode-row');
+  if (modeRow) {
+    modeRow.classList.remove('hidden');
+    modeRow.querySelectorAll('.pvp-room-btn').forEach(btn => {
+      const isActive = btn.dataset.mode === (data.mode ?? 'pvp');
+      btn.classList.toggle('active', isActive);
+      btn.disabled = _pvpRole !== 'host' || data.state !== 'waiting';
+    });
+  }
+  // ── 装備形式（pvp の時のみ表示）──
+  const formatRow = document.getElementById('pvp-room-format-row');
+  if (formatRow) {
+    if (data.mode === 'pvp') {
+      formatRow.classList.remove('hidden');
+      formatRow.querySelectorAll('.pvp-room-btn').forEach(btn => {
+        const isActive = btn.dataset.format === (data.pvpFormat ?? 'current');
+        btn.classList.toggle('active', isActive);
+        btn.disabled = _pvpRole !== 'host' || data.state !== 'waiting';
+      });
+    } else {
+      formatRow.classList.add('hidden');
+    }
+  }
+  // ── 協力ボス選択 ──
+  const bossRow = document.getElementById('pvp-room-boss-row');
+  const bossSel = document.getElementById('pvp-boss-select');
+  if (bossRow && bossSel) {
+    if (data.mode === 'coop') {
+      bossRow.classList.remove('hidden');
+      // option を再構築（毎回するが軽量なので OK）
+      bossSel.innerHTML = PVP_COOP_BOSSES.map(b =>
+        `<option value="${b.id}">${b.name}（HP ${b.maxHp} / ATK ${b.atk} / DEF ${b.def} / ${b.element}属性）</option>`
+      ).join('');
+      bossSel.value = data.boss?.bossId ?? PVP_COOP_BOSSES[0].id;
+      bossSel.disabled = _pvpRole !== 'host' || data.state !== 'waiting';
+    } else {
+      bossRow.classList.add('hidden');
+    }
+  }
+  // ── サマリ（モード + 形式 / ボス。ゲスト視点でも一目で分かる）──
+  const summary = document.getElementById('pvp-room-summary');
+  if (summary) {
+    if (data.mode === 'coop') {
+      const b = data.boss;
+      summary.textContent = b
+        ? `🤝 協力 / 対象: ${b.name}（HP ${b.maxHp}・${b.element}属性）`
+        : '🤝 協力 / 対象未選択';
+    } else {
+      const fmtLabel = data.pvpFormat === 'set' ? 'セット装備（公平戦）' : '現在の装備';
+      summary.textContent = `⚔️ 対戦 / 装備: ${fmtLabel}`;
+    }
+  }
+  // ── プレイヤー行 ──
   const wrap = document.getElementById('pvp-lobby-players');
   wrap.innerHTML = '';
-  // モード表示行（対戦 / 協力 を分かりやすく）
-  const modeLabel = data.mode === 'coop' ? '🤝 協力モード（NPC ボス討伐）' : '⚔️ タイマン対戦';
-  const modeRow = document.createElement('div');
-  modeRow.className = 'pvp-row';
-  modeRow.style.opacity = '0.85';
-  modeRow.innerHTML = `<span>${modeLabel}</span><span></span>`;
-  wrap.appendChild(modeRow);
   const rows = [];
   if (data.host) rows.push({ p: data.host, role: 'host', tag: 'ホスト' });
   if (data.guest) rows.push({ p: data.guest, role: 'guest', tag: 'ゲスト' });
@@ -6793,6 +6875,41 @@ function _renderPvpLobbyRoom(data) {
     pvpStartBattle(_pvpCode).catch(err => console.warn(err));
   }
 }
+
+// ── ロビー部屋画面の設定変更ハンドラ ──
+// モード切替（host のみ・waiting 中のみ）
+document.getElementById('pvp-room-mode-row')?.addEventListener('click', async (e) => {
+  const btn = e.target.closest('.pvp-room-btn');
+  if (!btn || btn.disabled) return;
+  if (_pvpRole !== 'host' || !_pvpCode) return;
+  const newMode = btn.dataset.mode === 'coop' ? 'coop' : 'pvp';
+  if ((_pvpData?.mode ?? 'pvp') === newMode) return;
+  try {
+    await pvpSetRoomMode(_pvpCode, newMode);
+    playSfx('click');
+  } catch (err) { showAlert(err?.message ?? 'モード切替に失敗'); }
+});
+// 装備形式切替（PvP 時・host のみ）
+document.getElementById('pvp-room-format-row')?.addEventListener('click', async (e) => {
+  const btn = e.target.closest('.pvp-room-btn');
+  if (!btn || btn.disabled) return;
+  if (_pvpRole !== 'host' || !_pvpCode) return;
+  const fmt = btn.dataset.format === 'set' ? 'set' : 'current';
+  if ((_pvpData?.pvpFormat ?? 'current') === fmt) return;
+  try {
+    await pvpSetRoomPvpFormat(_pvpCode, fmt);
+    playSfx('click');
+  } catch (err) { showAlert(err?.message ?? '装備形式切替に失敗'); }
+});
+// 協力ボス選択（coop 時・host のみ）
+document.getElementById('pvp-boss-select')?.addEventListener('change', async (e) => {
+  if (_pvpRole !== 'host' || !_pvpCode) return;
+  const bossId = e.target.value;
+  try {
+    await pvpSetRoomBoss(_pvpCode, bossId);
+    playSfx('click');
+  } catch (err) { showAlert(err?.message ?? 'ボス変更に失敗'); }
+});
 
 // 手動ホスト譲渡ボタン
 document.getElementById('btn-pvp-transfer-host')?.addEventListener('click', async () => {
