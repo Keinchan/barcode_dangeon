@@ -98,6 +98,8 @@ import {
   submitMove as pvpSubmitMove,
   submitArenaAttack as pvpSubmitArenaAttack,
   submitFlee as pvpSubmitFlee,
+  submitOwnState as pvpSubmitOwnState,
+  pingHeartbeat as pvpPingHeartbeat,
 } from './multiplayer.js';
 import { MINION_LIBRARY, makeMinion, findMinionTemplate, rehydrateMinion } from './minions.js';
 import {
@@ -2278,7 +2280,13 @@ async function _executeSkill(skill) {
       }
       dungeonLog(`✨ 技「${skill.name}」を発動！（${skill.desc}）${buffMsg}／ MP -${skill.mpCost}`, { rarity: skill.rarity });
       playSfx('crit');
-      refreshHUD();
+      refreshHUD();   // ここで player.atk/def がバフ込みに再計算される
+      // PvP: 自己バフ + MP 消費 + ターン交代をまとめて Firestore に流す
+      if (dungeonData?.isPvpArena) {
+        _pvpSendSelfBuff();
+        autoSave();
+        return;
+      }
       _runEnemyTurn();
       autoSave();
       return;
@@ -4391,10 +4399,11 @@ function _pvpSendMoveAction() {
     });
 }
 
-// PvP アリーナ: 技を撃った結果を Firestore に通知。MP コストも送る。
+// PvP アリーナ: 技を撃った結果を Firestore に通知。MP コストや状態異常付与も送る。
 // バンプ攻撃と同じく submitArenaAttack を使うが、kind='skill' で区別する。
 function _pvpSendSkillAction(args) {
   if (!_pvpCode || !_pvpRole || !_pvpData) return;
+  const opp = (dungeon?.monsters ?? []).find(m => m?.isPvpOpponent);
   _turnBusy = true;
   pvpSubmitArenaAttack(_pvpCode, _pvpRole, {
     kind: 'skill',
@@ -4402,9 +4411,36 @@ function _pvpSendSkillAction(args) {
     targetHpAfter: args.hpAfter ?? 0,
     attackerUid: _pvpData[_pvpRole]?.uid,
     attackerMpAfter: args.attackerMpAfter,
+    attackerStatuses: Array.isArray(player.statuses) ? player.statuses : null,
+    attackerAtk: player.atk,
+    attackerDef: player.def,
+    targetStatuses: Array.isArray(opp?.statuses) ? opp.statuses : null,
     turnNo: _pvpData.turnNo ?? 0,
   })
     .catch(err => console.warn('PvP skill sync failed:', err))
+    .finally(() => {
+      _turnBusy = false;
+      if (dungeon) dungeon.render(document.getElementById('dungeon-canvas'));
+    });
+}
+
+// PvP アリーナ: 自己バフ系 SELF 技を撃った時、own statuses + atk/def + MP +
+// ターン交代をまとめて Firestore に送る。submitOwnState の flipTurn で 1 行で済む。
+function _pvpSendSelfBuff() {
+  if (!_pvpCode || !_pvpRole || !_pvpData) return;
+  _turnBusy = true;
+  const otherRole = _pvpRole === 'host' ? 'guest' : 'host';
+  pvpSubmitOwnState(_pvpCode, _pvpRole, {
+    hp:       player.hp,
+    mp:       player.mp,
+    atk:      player.atk,
+    def:      player.def,
+    statuses: Array.isArray(player.statuses) ? player.statuses : [],
+    flipTurn: true,
+    turnNo:   _pvpData.turnNo ?? 0,
+    otherUid: _pvpData[otherRole]?.uid,
+  })
+    .catch(err => console.warn('PvP self-buff sync failed:', err))
     .finally(() => {
       _turnBusy = false;
       if (dungeon) dungeon.render(document.getElementById('dungeon-canvas'));
@@ -6263,6 +6299,7 @@ function _enterPvpLobby() {
 }
 
 function _leavePvpRoom() {
+  _stopPvpHeartbeat();
   if (_pvpUnsub) { try { _pvpUnsub(); } catch {} _pvpUnsub = null; }
   // ホストは部屋を破棄（ゲストは購読解除のみ）
   if (_pvpRole === 'host' && _pvpCode) {
@@ -6328,6 +6365,7 @@ function _onPvpUpdate(data) {
     show('pvp-lobby');
     return;
   }
+  const prev = _pvpData;
   _pvpData = data;
   if (data.state === 'waiting') {
     _renderPvpLobbyRoom(data);
@@ -6338,9 +6376,46 @@ function _onPvpUpdate(data) {
       _enterPvpArena(data);
     }
     _onPvpArenaUpdate(data);
+    // ターン開始検知: 直前のターンが相手で、今回自分になった瞬間にだけ tick を走らせる
+    const becameMine = (prev?.turn !== _pvpRole) && (data.turn === _pvpRole);
+    if (becameMine) _onPvpMyTurnStart();
   } else if (data.state === 'finished') {
     _onPvpArenaUpdate(data);
     _showPvpFinished(data);
+  }
+}
+
+// 自分のターンが開始されたタイミングで状態異常をひとつ進める。
+// DoT (毒/熱傷) ダメージと持続ターンの減少が起こり、HP 0 になったら相手勝利。
+// バフの残ターンも 1 減るので「3T で切れる atkUp」が正しく短くなる。
+async function _onPvpMyTurnStart() {
+  if (!Array.isArray(player.statuses) || player.statuses.length === 0) return;
+  const tick = tickStatuses(player);
+  if (tick.dotDamage > 0) {
+    player.hp = Math.max(0, player.hp - tick.dotDamage);
+    dungeonLog(`💥 状態異常で ${tick.dotDamage} ダメージ`);
+    showFloatingDamage(tick.dotDamage);
+    const playerAt = playerVfxAnchor();
+    if (playerAt) shockwave(playerAt, { color: 'rgba(176,112,221,0.55)' });
+  }
+  for (const ex of tick.expired) {
+    const def = STATUS_DEFS[ex.kind];
+    if (def) dungeonLog(`✨ ${def.label} が解除された`);
+  }
+  refreshHUD();
+  _refreshStatusOverlay();
+  // tick 後の自分の状態を Firestore に反映
+  try {
+    const otherRole = _pvpRole === 'host' ? 'guest' : 'host';
+    await pvpSubmitOwnState(_pvpCode, _pvpRole, {
+      hp:       player.hp,
+      atk:      player.atk,
+      def:      player.def,
+      statuses: player.statuses ?? [],
+      otherUid: _pvpData?.[otherRole]?.uid,
+    });
+  } catch (err) {
+    console.warn('PvP own-state sync (tick) failed:', err);
   }
 }
 
@@ -6348,13 +6423,34 @@ function _onPvpUpdate(data) {
 // 「リモート操作のモンスター」として配置する。tickEnemies は isPvpOpponent を
 // 行動対象から除外しているので、相手側は AI ではなく Firestore のスナップショット
 // 経由で位置 / HP が更新される。
+// PvP 接続生存通知。8 秒ごとに自分の lastSeen を更新して、相手が長時間沈黙
+// したら検知できるようにする。アリーナ突入で開始、退室で停止。
+let _pvpHeartbeatTimer = null;
+function _startPvpHeartbeat() {
+  _stopPvpHeartbeat();
+  if (!_pvpCode || !_pvpRole) return;
+  pvpPingHeartbeat(_pvpCode, _pvpRole);
+  _pvpHeartbeatTimer = setInterval(() => {
+    if (!_pvpCode || !_pvpRole) { _stopPvpHeartbeat(); return; }
+    pvpPingHeartbeat(_pvpCode, _pvpRole);
+  }, 8000);
+}
+function _stopPvpHeartbeat() {
+  if (_pvpHeartbeatTimer) clearInterval(_pvpHeartbeatTimer);
+  _pvpHeartbeatTimer = null;
+}
+
 function _enterPvpArena(data) {
   const me  = data[_pvpRole];
   const foe = data[_pvpRole === 'host' ? 'guest' : 'host'];
   if (!me || !foe) return;
   _pvpLastMyHp = me.hp ?? null;     // 差分検知の初期値（最初は被弾扱いしない）
+  _startPvpHeartbeat();
   // 相手プレイヤーをモンスターオブジェクトに変換（既存の dungeon 描画と
   // _bumpMeleeAttack を再利用するため、最小限のフィールドを揃える）
+  // element = 相手の防具属性（こちらの攻撃の matchup 計算に使う）。
+  // 武器属性で計算してしまうと「火属性の人が火属性の鎧を着ても自分が苦手な
+  // 属性扱いになる」ような違和感が出るので、armor を採用する。
   const opponentMob = {
     base:  '対戦相手',
     emoji: foe.emoji ?? '🧙',
@@ -6363,12 +6459,13 @@ function _enterPvpArena(data) {
     isPvpOpponent: true,           // tickEnemies のスキップ対象
     rarity: 'レジェンド',
     rarityColor: '#ffd54f',
-    element: foe.weaponElement ?? '火',
+    element: foe.armorElement ?? foe.weaponElement ?? '火',
     skillCharge: 0,
     hp: foe.hp ?? foe.maxHp ?? 1,
     maxHp: foe.maxHp ?? 1,
     atk: foe.atk ?? 1,
     def: foe.def ?? 0,
+    statuses: Array.isArray(foe.statuses) ? foe.statuses.map(s => ({ ...s })) : [],
     floor: 1,
     job: { id: 'pvp', label: 'PvP', aiHint: 'rush', preferredRange: 'ADJ', chargeBonus: 0 },
   };
@@ -6406,7 +6503,7 @@ function _enterPvpArena(data) {
   if (dungeon) dungeon.render(document.getElementById('dungeon-canvas'));
 }
 
-// 相手プレイヤーの位置 / HP を最新スナップショットに合わせて適用する。
+// 相手プレイヤーの位置 / HP / atk / def / statuses を最新スナップショットに合わせて適用。
 // 移動 / 攻撃 を受けるたびに呼ばれる。被弾検知して視覚フィードバックを出す。
 let _pvpLastMyHp = null;     // 前回の自分 HP（差分検知でフラッシュ）
 function _syncPvpOpponentToData(data) {
@@ -6418,7 +6515,12 @@ function _syncPvpOpponentToData(data) {
   opp.x = foe.x ?? opp.x;
   opp.y = foe.y ?? opp.y;
   opp.hp = foe.hp ?? opp.hp;
-  // 自分の HP / MP も最新化（相手が攻撃した結果が来るので必須）
+  // バフ込みの atk/def を相手側から共有（自分の攻撃ダメージ計算にも使われる）
+  if (typeof foe.atk === 'number') opp.atk = foe.atk;
+  if (typeof foe.def === 'number') opp.def = foe.def;
+  // 状態異常 / バフを共有（dungeon.render が m.statuses を読んでアイコンを出す）
+  if (Array.isArray(foe.statuses)) opp.statuses = foe.statuses.map(s => ({ ...s }));
+  // 自分の HP / MP / 状態異常も最新化（相手が攻撃した結果が来るので必須）
   const me = data[_pvpRole];
   if (me) {
     if (typeof me.hp === 'number') {
@@ -6440,6 +6542,20 @@ function _syncPvpOpponentToData(data) {
       _pvpLastMyHp = me.hp;
     }
     if (typeof me.mp === 'number') player.mp = me.mp;
+    // 自分の statuses は基本的にローカルが正だが、相手が状態異常を付与したケースは
+    // Firestore 経由で初めて来るので merge しておく。タイミング差で被ることはあるが
+    // applyStatus が「同じ kind は turns max + stacks 加算」で吸収するので大事故は無し。
+    if (Array.isArray(me.statuses)) {
+      // 既存に無い kind を追加するだけ。ローカルの方が新しい場合は維持。
+      const existing = new Set((player.statuses ?? []).map(s => s.kind));
+      for (const s of me.statuses) {
+        if (!existing.has(s.kind)) {
+          if (!Array.isArray(player.statuses)) player.statuses = [];
+          player.statuses.push({ ...s });
+        }
+      }
+      _refreshStatusOverlay();
+    }
   }
 }
 
