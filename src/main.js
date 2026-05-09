@@ -102,6 +102,9 @@ import {
   pingHeartbeat as pvpPingHeartbeat,
   resetForRematch as pvpResetForRematch,
   submitBossUpdate as pvpSubmitBossUpdate,
+  transferHost as pvpTransferHost,
+  handleHostLeave as pvpHandleHostLeave,
+  handleGuestLeave as pvpHandleGuestLeave,
 } from './multiplayer.js';
 import { MINION_LIBRARY, makeMinion, findMinionTemplate, rehydrateMinion } from './minions.js';
 import {
@@ -2391,6 +2394,12 @@ async function _executeSkill(skill) {
     }
   }
 
+  // 協力モード: 仲間プレイヤー (isPvpOpponent) は技の対象から外す。
+  // 上のループで targets[] に含まれていた場合だけ filter で取り除く。
+  if (dungeonData?.isPvpArena && _pvpData?.mode === 'coop') {
+    targets = targets.filter(t => !t.m?.isPvpOpponent);
+  }
+
   for (const t of targets) {
     if (Math.random() < whiffP) {
       // すかし: ダメージは入らないが、技自体は発動済み（MP は消費したまま）。
@@ -4407,8 +4416,25 @@ function _pvpSendMoveAction() {
 
 // PvP アリーナ: 技を撃った結果を Firestore に通知。MP コストや状態異常付与も送る。
 // バンプ攻撃と同じく submitArenaAttack を使うが、kind='skill' で区別する。
+//   協力モードで技がボスに当たった場合は boss 用同期に振り替える（_pvpSendBossDamage 経由で
+//   反撃も入る）。仲間プレイヤーは技の対象外なので opp.hp は変動しない前提。
 function _pvpSendSkillAction(args) {
   if (!_pvpCode || !_pvpRole || !_pvpData) return;
+  // 協力モード: 技がボスを攻撃したら boss 同期側（反撃含む）に切替
+  if (_pvpData.mode === 'coop') {
+    const localBoss = (dungeon?.monsters ?? []).find(m => m?.isCoopBoss);
+    if (localBoss) {
+      _pvpSendBossDamage(Math.max(0, localBoss.hp), args.totalDmg ?? 0);
+      // MP コストだけは別途同期（submitOwnState で送る）
+      pvpSubmitOwnState(_pvpCode, _pvpRole, {
+        mp: player.mp,
+        atk: player.atk,
+        def: player.def,
+        statuses: Array.isArray(player.statuses) ? player.statuses : [],
+      }).catch(() => {});
+      return;
+    }
+  }
   const opp = (dungeon?.monsters ?? []).find(m => m?.isPvpOpponent);
   _turnBusy = true;
   pvpSubmitArenaAttack(_pvpCode, _pvpRole, {
@@ -4454,16 +4480,42 @@ function _pvpSendSelfBuff() {
 }
 
 // 協力モード: 共有ボスにダメージを与えた結果を Firestore に同期。
-// ボス HP/位置 の更新 + ターン交代を一発で行う。撃破なら state=finished+cause=bossKilled。
+// ボス HP/位置 の更新 + 反撃 + ターン交代を一発で行う。
+// 撃破なら state=finished+cause=bossKilled、反撃で自分が死ねば cause=playerDied。
 function _pvpSendBossDamage(bossHpAfter, dmg) {
+  if (!_pvpCode || !_pvpRole || !_pvpData) {
+    // typo guard: _pvpCode 大文字小文字に注意
+  }
   if (!_pvpCode || !_pvpRole || !_pvpData) return;
   _turnBusy = true;
   const otherRole = _pvpRole === 'host' ? 'guest' : 'host';
+  // ボスがまだ生きていれば反撃: boss.atk - 自分の def を最低 1 で適用。
+  // 反撃命中演出（フローティングダメージ + ヒットフラッシュ + シェイク）を即時にローカルでも出す。
+  let counter = null;
+  if (bossHpAfter > 0 && _pvpData.boss) {
+    const counterDmg = Math.max(1, (_pvpData.boss.atk ?? 0) - (player.def ?? 0));
+    const myHpAfter  = Math.max(0, (player.hp ?? 0) - counterDmg);
+    counter = { role: _pvpRole, hpAfter: myHpAfter, dmg: counterDmg };
+    // ローカル反映（演出 + HP 表示）
+    player.hp = myHpAfter;
+    dungeonLog(`💥 ボスの反撃！ ${counterDmg} ダメージ`, { rarity: 'レア' });
+    showFloatingDamage(counterDmg);
+    const playerAt = playerVfxAnchor();
+    if (playerAt) shockwave(playerAt, { color: 'rgba(255,82,82,0.65)' });
+    screenShake(counterDmg > 20 ? 8 : 4, counterDmg > 20 ? 280 : 160);
+    hitFlash({ color: 'rgba(255,82,82,0.30)' });
+    playSfx('damage');
+    refreshHUD();
+    // _pvpLastMyHp も更新しておかないと、次の watcher snapshot で「相手の攻撃」と
+    // 誤判定されてダメージ表示が二重になる
+    _pvpLastMyHp = myHpAfter;
+  }
   pvpSubmitBossUpdate(_pvpCode, {
     hp:       bossHpAfter,
     flipTurn: true,
     nextTurn: otherRole,
     turnNo:   _pvpData.turnNo ?? 0,
+    counter,
   })
     .catch(err => console.warn('PvP boss update failed:', err))
     .finally(() => {
@@ -6339,16 +6391,24 @@ function _enterPvpLobby() {
 function _leavePvpRoom() {
   _stopPvpHeartbeat();
   if (_pvpUnsub) { try { _pvpUnsub(); } catch {} _pvpUnsub = null; }
-  // ホストは部屋を破棄するが、すでに finished 状態なら 30 秒遅延させる。
-  // 勝者側が即時 destroy すると、敗者側の勝敗ダイアログが「相手が離脱しました」
-  // に上書きされてしまうので、相手が結果を読む時間を確保してから破棄する。
-  // 戦闘中（waiting/battle）の自発的退室では従来通り即破棄する。
-  if (_pvpRole === 'host' && _pvpCode) {
+  if (_pvpCode) {
     const code = _pvpCode;
-    if (_pvpData?.state === 'finished' || _pvpFinishShown) {
-      setTimeout(() => { pvpDestroyRoom(code).catch(() => {}); }, 30000);
-    } else {
-      pvpDestroyRoom(code).catch(() => {});
+    if (_pvpRole === 'host') {
+      // 退室時の挙動を状態別に分岐:
+      //   finished → 30s 遅延 destroy（相手が結果を読む時間を確保）
+      //   waiting+guestあり → ゲストを新ホストへ昇格（部屋は残す）
+      //   battle → ゲスト不戦勝として finished に
+      //   waiting+guestなし → 即 destroy
+      if (_pvpData?.state === 'finished' || _pvpFinishShown) {
+        setTimeout(() => { pvpDestroyRoom(code).catch(() => {}); }, 30000);
+      } else if (_pvpData?.state === 'waiting' || _pvpData?.state === 'battle') {
+        pvpHandleHostLeave(code).catch(err => console.warn('host leave failed:', err));
+      } else {
+        pvpDestroyRoom(code).catch(() => {});
+      }
+    } else if (_pvpRole === 'guest') {
+      // ゲスト退室: 待機中なら guest 欄を空にする / 戦闘中ならホスト不戦勝
+      pvpHandleGuestLeave(code).catch(err => console.warn('guest leave failed:', err));
     }
   }
   _pvpCode = null;
@@ -6417,6 +6477,25 @@ function _onPvpUpdate(data) {
     _leavePvpRoom();
     show(wasFinished ? 'map' : 'pvp-lobby');
     return;
+  }
+  // 役割昇格 / 譲渡の検知。自分の uid がどちらの slot に居るかで _pvpRole を更新。
+  // 旧 host が離脱して自分（guest）が昇格、または手動譲渡で host/guest が入れ替わった場合に適用。
+  const myUid = getCurrentAuthUser()?.uid;
+  if (myUid && _pvpRole) {
+    let newRole = null;
+    if (data.host?.uid === myUid)        newRole = 'host';
+    else if (data.guest?.uid === myUid)  newRole = 'guest';
+    if (newRole && newRole !== _pvpRole) {
+      const promoted = (newRole === 'host' && _pvpRole === 'guest');
+      _pvpRole = newRole;
+      // 昇格時のみ通知（譲渡された側にも譲渡した側にも分かりやすく）
+      if (promoted) {
+        dungeonLog?.('👑 ホスト権限を引き継ぎました');
+        showAlert('👑 ホスト権限を引き継ぎました');
+      } else {
+        dungeonLog?.('👤 ホスト権限を譲渡しました（あなたはゲストです）');
+      }
+    }
   }
   const prev = _pvpData;
   _pvpData = data;
@@ -6699,12 +6778,37 @@ function _renderPvpLobbyRoom(data) {
   if (!data.guest) {
     wrap.innerHTML += '<div class="pvp-row" style="opacity:0.6">ゲスト: 参加待ち…</div>';
   }
+  // ホスト譲渡ボタンの活性: ホスト権限を持っていて、ゲストが居る時だけ表示
+  const transferBtn = document.getElementById('btn-pvp-transfer-host');
+  if (transferBtn) {
+    if (_pvpRole === 'host' && data.guest && data.state === 'waiting') {
+      transferBtn.classList.remove('hidden');
+    } else {
+      transferBtn.classList.add('hidden');
+    }
+  }
   // 両者 ready ならホストがバトル開始
   const bothReady = data.host?.ready && data.guest?.ready;
   if (bothReady && _pvpRole === 'host') {
     pvpStartBattle(_pvpCode).catch(err => console.warn(err));
   }
 }
+
+// 手動ホスト譲渡ボタン
+document.getElementById('btn-pvp-transfer-host')?.addEventListener('click', async () => {
+  if (!_pvpCode || _pvpRole !== 'host') return;
+  const ok = await showConfirm(
+    '👑 ホスト権限を相手に譲渡しますか？\n\n譲渡後はあなたがゲストになり、相手が部屋を仕切ります。',
+    { okLabel: '譲渡する', cancelLabel: 'やめる' },
+  );
+  if (!ok) return;
+  try {
+    await pvpTransferHost(_pvpCode);
+    playSfx('confirm');
+  } catch (err) {
+    showAlert(err?.message ?? '譲渡に失敗しました');
+  }
+});
 
 document.getElementById('btn-pvp')?.addEventListener('click', () => {
   if (!getCurrentAuthUser()) {
@@ -6839,10 +6943,39 @@ document.getElementById('btn-pvp-flee')  ?.addEventListener('click', async () =>
   _pvpDoAction('flee');
 });
 
+// 協力モードでボスを撃破した時のローカル報酬。両クライアントがそれぞれ
+// 「自分のレベルで」アイテムをロールするので、host / guest で違う品が出ることがある
+// （仕様。決定論的にする必要があれば host が seed を書いて両者が読む方式に変更可能）。
+function _grantCoopBossReward() {
+  // 高レアリティ（エピック）の装備を 1 個 + 経験値 + ゴールド + 鍵 1 本
+  const seed = String((Date.now() ^ Math.floor(Math.random() * 1e6)) % 1e13).padStart(13, '0');
+  const epicRarity = RARITIES.find(r => r.name === 'エピック') ?? RARITIES[2];
+  const reward = generateItemFromBarcode(seed, epicRarity, player.level ?? 1);
+  if (reward) {
+    if (canAddToInventory(reward)) addToInventory({ ...reward });
+    else addToStorage({ ...reward });
+    showItemBanner(reward, { action: 'ボス討伐報酬', force: true });
+  }
+  // ゴールド
+  const gold = 300 + (player.level ?? 1) * 12;
+  player.gold = (player.gold ?? 0) + gold;
+  // 鍵 1 本（宝箱があれば即開けられるようにご褒美）
+  addToInventory(makeKey());
+  // 経験値
+  const xp = 80 + (player.level ?? 1) * 10;
+  gainXp(xp);
+  refreshHUD();
+  autoSave();
+}
+
 let _pvpFinishShown = false;
 function _showPvpFinished(data) {
   if (_pvpFinishShown) return;
   _pvpFinishShown = true;
+  // 協力モードでボス討伐成功なら、ダイアログを出す前に報酬を与える
+  if (data?.mode === 'coop' && data?.cause === 'bossKilled') {
+    try { _grantCoopBossReward(); } catch (err) { console.warn('coop reward failed:', err); }
+  }
   const me = data[_pvpRole];
   // PvP: winnerUid が自分なら勝利。
   // 協力モード: winnerUid='coop' なら両者勝利、cause=playerDied なら両者敗北。
