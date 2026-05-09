@@ -100,6 +100,7 @@ import {
   submitFlee as pvpSubmitFlee,
   submitOwnState as pvpSubmitOwnState,
   pingHeartbeat as pvpPingHeartbeat,
+  resetForRematch as pvpResetForRematch,
 } from './multiplayer.js';
 import { MINION_LIBRARY, makeMinion, findMinionTemplate, rehydrateMinion } from './minions.js';
 import {
@@ -6457,6 +6458,9 @@ function _enterPvpArena(data) {
   const foe = data[_pvpRole === 'host' ? 'guest' : 'host'];
   if (!me || !foe) return;
   _pvpLastMyHp = me.hp ?? null;     // 差分検知の初期値（最初は被弾扱いしない）
+  // リマッチに備えて自分の状態異常 / バフを必ず初期化（前マッチの残骸を持ち越さない）
+  player.statuses = [];
+  _refreshStatusOverlay();
   _startPvpHeartbeat();
   // 相手プレイヤーをモンスターオブジェクトに変換（既存の dungeon 描画と
   // _bumpMeleeAttack を再利用するため、最小限のフィールドを揃える）
@@ -6763,9 +6767,31 @@ function _showPvpFinished(data) {
   const me = data[_pvpRole];
   const win = data.winnerUid === me?.uid;
   setTimeout(async () => {
-    await showAlert(win ? '🎉 勝利！' : '💀 敗北…');
+    // 勝敗ダイアログは confirm 形式で「もう一度」「退室」を選べる。
+    //   OK   = 同じ部屋でリマッチ（state を waiting にリセットしてロビー待機画面へ）
+    //   Cancel = 部屋を出てマップへ戻る
+    const ok = await showConfirm(
+      (win ? '🎉 勝利！\n\n' : '💀 敗北…\n\n') + '同じ部屋でもう一度戦いますか？',
+      { okLabel: 'もう一度', cancelLabel: '退室する' },
+    );
     _pvpFinishShown = false;
-    _leavePvpRoom();
-    show('map');
+    if (ok) {
+      // リマッチ: state を waiting に戻して両者を待機画面に戻す
+      try { await pvpResetForRematch(_pvpCode); } catch (err) { console.warn(err); }
+      // 次の battle で _enterPvpArena が再実行されるよう entered フラグも降ろす
+      _pvpEntered = false;
+      _pvpLastMyHp = null;
+      // ロビー画面のルーム表示部を見せる（actions は隠す）
+      show('pvp-lobby');
+      document.getElementById('pvp-lobby-actions')?.classList.add('hidden');
+      document.getElementById('pvp-lobby-room')?.classList.remove('hidden');
+      // ターンバナー / フッター暗転は降ろす（次戦に備えて）
+      document.getElementById('pvp-turn-banner')?.classList.add('hidden');
+      document.getElementById('dungeon-footer')?.classList.remove('pvp-foe-turn');
+    } else {
+      // 退室: 部屋を出てマップに戻る（host は 30s 遅延 destroy で相手の動作を妨げない）
+      _leavePvpRoom();
+      show('map');
+    }
   }, 600);
 }
