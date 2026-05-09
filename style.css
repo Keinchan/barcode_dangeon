@@ -1169,7 +1169,7 @@ input, textarea {
 }
 #result-icon  { font-size: 64px; }
 #result-title { font-size: 28px; font-weight: bold; }
-#result-body  { font-size: 15px; color: var(--muted); line-height: 1.6; }
+#result-body  { font-size: 15px; color: var(--muted); line-height: 1.6; white-space: pre-line; }
 
 /* ── 入場前確認モーダル ── */
 .pre-dungeon-modal {
