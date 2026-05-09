@@ -173,6 +173,19 @@
 
   </div>
 
+  <!-- 宝箱開封結果モーダル。レア度別の縁色 + 大きめアイコンで「初公開」感を作る。
+       メニューモーダル(z=5500)より上に出すため z-index は CSS 側で 6000 にする。 -->
+  <div id="chest-result-modal" class="chest-result-modal hidden">
+    <div class="chest-result-box" id="chest-result-box">
+      <div class="chest-result-tag" id="chest-result-tag"></div>
+      <div class="chest-result-icon" id="chest-result-icon"></div>
+      <div class="chest-result-name" id="chest-result-name"></div>
+      <div class="chest-result-meta" id="chest-result-meta"></div>
+      <div class="chest-result-stat" id="chest-result-stat"></div>
+      <button id="btn-chest-result-ok" class="btn-primary">受け取る</button>
+    </div>
+  </div>
+
   <!-- ショップモーダル（商人と接触時）。地図上の行商人からも開くため
        screen-dungeon の外に置いて、どの画面でも上に重ねて表示できるようにする。 -->
   <div id="shop-modal" class="modal hidden">

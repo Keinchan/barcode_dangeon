@@ -2473,6 +2473,89 @@ input, textarea {
   color: #e0e0e0;
   box-shadow: 0 0 12px rgba(180,180,180,0.30);
 }
+
+/* ── 宝箱開封結果モーダル ──
+   メニュー(z=5500) より上に出す必要があるので z-index 6000。
+   クリックしないと閉じない明示モーダル。レア度ごとに縁色を変える。 */
+.chest-result-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 6000;
+  background: rgba(0,0,0,0.78);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: chestResultIn 0.25s ease-out;
+}
+.chest-result-modal.hidden { display: none; }
+.chest-result-box {
+  background: linear-gradient(180deg, #1f1f2c 0%, #14141c 100%);
+  border: 2px solid rgba(255,255,255,0.18);
+  border-radius: 16px;
+  padding: 24px 28px;
+  max-width: 360px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+  position: relative;
+}
+.chest-result-tag {
+  font-size: 12px;
+  font-weight: bold;
+  letter-spacing: 2px;
+  opacity: 0.9;
+  margin-bottom: 4px;
+}
+.chest-result-icon {
+  font-size: 12px;     /* iconImg のサイズは JS 側で指定 */
+  margin: 4px 0 8px;
+}
+.chest-result-icon img { width: 80px; height: 80px; }
+.chest-result-name { font-size: 20px; font-weight: bold; line-height: 1.3; }
+.chest-result-meta { font-size: 13px; color: #aaa; margin-top: -2px; }
+.chest-result-stat { font-size: 14px; color: #e0e0e0; margin: 6px 0 12px; }
+.chest-result-box .btn-primary { width: 100%; margin-top: 4px; }
+
+/* レア度別ボックス装飾（item-banner と同じ色系統で統一） */
+.chest-result-box.rarity-common {
+  border-color: #888;
+  box-shadow: 0 0 18px rgba(180,180,180,0.30);
+}
+.chest-result-box.rarity-common .chest-result-tag { color: #bbb; }
+.chest-result-box.rarity-rare {
+  border-color: #4fc3f7;
+  box-shadow: 0 0 22px rgba(79,195,247,0.45);
+}
+.chest-result-box.rarity-rare .chest-result-tag { color: #4fc3f7; }
+.chest-result-box.rarity-epic {
+  border-color: #ce93d8;
+  box-shadow: 0 0 30px rgba(206,147,216,0.55), 0 0 60px rgba(171,71,188,0.35);
+}
+.chest-result-box.rarity-epic .chest-result-tag { color: #ce93d8; }
+.chest-result-box.rarity-legendary {
+  border-color: #ffd54f;
+  background: radial-gradient(ellipse at top, #3a2a08 0%, #1a1100 70%, #14141c 100%);
+  box-shadow:
+    0 0 36px rgba(255,213,79,0.7),
+    0 0 90px rgba(255,179,0,0.45),
+    inset 0 0 30px rgba(255,213,79,0.15);
+}
+.chest-result-box.rarity-legendary .chest-result-tag {
+  color: #ffd54f;
+  text-shadow: 0 0 8px rgba(255,213,79,0.85);
+}
+.chest-result-box.rarity-legendary .chest-result-name {
+  color: #ffe082;
+  text-shadow: 0 0 8px rgba(255,213,79,0.6);
+}
+@keyframes chestResultIn {
+  0%   { opacity: 0; }
+  100% { opacity: 1; }
+}
 .item-banner.rarity-rare {
   background: linear-gradient(135deg, #1e3c5c 0%, #14283c 100%);
   border: 1.5px solid #4fc3f7;
