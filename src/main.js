@@ -36,6 +36,7 @@ import { Dungeon } from './dungeon.js';
 import {
   STATUS_DEFS, applyStatus, hasStatus, removeStatus, tickStatuses,
   accuracyMultiplier, shockSkipChance, fractureSelfHurtChance, dominantStatus,
+  attackBuffMult, defenseBuffMult, activeBuffs,
 } from './status.js';
 import {
   showFloatingDamage, showItemBanner, shockwave, magicCircle, playerVfxAnchor,
@@ -1913,9 +1914,9 @@ async function _executeSkill(skill) {
   let targets = [];   // { m, dx, dy } の配列
   switch (r?.kind) {
     case 'self': {
-      // バフ・回復・召喚等の支援系: 命中対象は無し。VFX とログを出して敵ターンへ。
-      // 効果（バフ持続・召喚・反射バリア etc）は未実装のため、視覚的演出と
-      // 「使用感」だけ提供する。MP は既に消費済み。
+      // バフ・回復・召喚等の支援系。skill.selfBuff があれば対応する status を
+      // applyStatus 経由でプレイヤーに付与し、refreshHUD で player.atk/def に
+      // 即時反映させる。selfBuff が無い SELF 技は VFX のみ（旧仕様互換）。
       const elColor = SKILL_ELEMENT_COLOR[skill.element] ?? '#b070dd';
       hitFlash({ color: _alphaize(elColor, 0.35) });
       magicCircle(playerVfxAnchor(), skill.element);
@@ -1930,7 +1931,14 @@ async function _executeSkill(skill) {
         };
         showSkillPatternVfx(rangeId, playerScreen, ts, elColor, { facing });
       }
-      dungeonLog(`✨ 技「${skill.name}」を発動！（${skill.desc}）／ MP -${skill.mpCost}`, { rarity: skill.rarity });
+      let buffMsg = '';
+      if (skill.selfBuff?.kind && STATUS_DEFS[skill.selfBuff.kind]?.isBuff) {
+        const turns = skill.selfBuff.turns ?? 5;
+        applyStatus(player, skill.selfBuff.kind, { turns, stacks: 1 });
+        const def = STATUS_DEFS[skill.selfBuff.kind];
+        buffMsg = `／ ${def.emoji} ${def.label}（${turns}T）`;
+      }
+      dungeonLog(`✨ 技「${skill.name}」を発動！（${skill.desc}）${buffMsg}／ MP -${skill.mpCost}`, { rarity: skill.rarity });
       playSfx('crit');
       refreshHUD();
       _runEnemyTurn();
@@ -3099,16 +3107,12 @@ const _MYSTERY_SCROLL_EFFECTS = {
   },
 
   // ── 自己バフ（ATK +30% を 8 ターン）──
+  // 旧仕様は player.atkBase を直接 1.3x して _atkBuff 状態をオブジェクトで持って
+  // いたが、新バフシステム（player.statuses[] + applyStatus + _refreshStatsWithBuffs）
+  // に統合。同じ atkUp 状態を 8 ターン付与し、refreshHUD が atk を再計算する。
   'attack-up': (item) => {
     const turns = 8;
-    const before = player.atkBase;
-    // フロア間で重ねがけしないよう、過去のバフがあれば剥がしてから再付与
-    if (player._atkBuff) {
-      player.atkBase = player._atkBuff.basePrev;
-    }
-    player.atkBase = Math.floor(player.atkBase * 1.3);
-    player.atk = player.atkBase + (player.weapon?.atkBonus ?? 0);
-    player._atkBuff = { turns, basePrev: before };
+    applyStatus(player, 'atkUp', { turns, stacks: 1 });
     dungeonLog(`💪 ${item.name}！ ATK +30%（${turns} ターン持続）`, { rarity: 'エピック' });
     hitFlash({ color: 'rgba(255,213,79,0.30)' });
     sparkSpray(playerVfxAnchor(), { count: 16, color: '#ffd54f' });
@@ -3117,20 +3121,12 @@ const _MYSTERY_SCROLL_EFFECTS = {
   },
 };
 
-// 攻撃バフの残ターン管理（_runEnemyTurn の冒頭で 1 ずつ減らす）。
-// フロアを跨ぐと _resetForFloor 等で _atkBuff がクリアされない可能性があるので、
-// 持続を turns カウントで明示管理する。
+// 旧 _atkBuff（attack-up 巻物の単発バフ）はバフシステム統合に伴い廃止。
+// 今は player.statuses[] にぶら下がる atkUp / atkUpHigh / defUp / defUpHigh が
+// tickStatuses で自動的に減衰し、refreshHUD で player.atk/def に反映される。
+// 旧呼び出し側互換のため空関数を残しておく（_runEnemyTurn から呼ばれている）。
 function _tickAttackBuff() {
-  const buff = player._atkBuff;
-  if (!buff) return;
-  buff.turns -= 1;
-  if (buff.turns <= 0) {
-    player.atkBase = buff.basePrev;
-    player.atk = player.atkBase + (player.weapon?.atkBonus ?? 0);
-    player._atkBuff = null;
-    dungeonLog('💨 ATK バフが切れた');
-    refreshHUD();
-  }
+  // no-op: バフは player.statuses 経由で _tickPlayerStatuses が一括処理する。
 }
 
 // プレイヤーの位置を瞬間移動（巻物の移動効果共通ヘルパ）
@@ -3447,7 +3443,22 @@ function loadFloor(floor) {
   dungeon.render(document.getElementById('dungeon-canvas'));
 }
 
+// バフ status（atkUp / defUp 系）を player.atk / player.def に反映する。
+// 既存の applyLevelStats / 装備変更後でも、この関数が呼ばれれば最終値に補正される。
+// バフ status は player.statuses[] にぶら下がり、tickStatuses でターンごとに減衰。
+function _refreshStatsWithBuffs() {
+  const atkMult = attackBuffMult(player);
+  const defMult = defenseBuffMult(player);
+  // 旧 _atkBuff（attack-up 巻物の単発バフ）は player.atkBase 自体を 1.3x して
+  // いたので、新 status と二重計上される可能性がある。レガシー側はもう使用
+  // しないが念のためここでは player.atkBase / defBase をそのまま base に使う。
+  player.atk = Math.floor((player.atkBase + (player.weapon?.atkBonus ?? 0)) * atkMult);
+  player.def = Math.floor((player.defBase + (player.armor?.defBonus  ?? 0)) * defMult);
+}
+
 function refreshHUD() {
+  // 装備変更・level up・status 変動の度に呼ばれるので、最初に必ずバフ補正を反映。
+  _refreshStatsWithBuffs();
   document.getElementById('player-lv').textContent = `Lv${player.level}`;
   const hpEl = document.getElementById('player-hp');
   hpEl.textContent = `HP: ${player.hp}/${player.maxHp}`;
@@ -3490,6 +3501,24 @@ function refreshHUD() {
   _refreshWazaBar();
   // 状態異常オーバーレイも HUD と同じタイミングで再評価（罹患/解除直後に色が乗る）
   _refreshStatusOverlay();
+  // バフ chip 表示
+  _refreshBuffChips();
+}
+
+// プレイヤーに掛かっているバフ status を chip にして dungeon-right-hud に並べる。
+// ターン経過は tickStatuses で自動減衰、剥がれたら _refreshStatusOverlay と
+// 一緒にこちらも空になる。
+function _refreshBuffChips() {
+  const el = document.getElementById('player-buffs');
+  if (!el) return;
+  const buffs = activeBuffs(player);
+  if (buffs.length === 0) {
+    el.innerHTML = '';
+    return;
+  }
+  el.innerHTML = buffs.map(b =>
+    `<span class="buff-chip" style="--c:${b.def.color}">${b.def.emoji}${b.turns}T</span>`
+  ).join('');
 }
 
 // XP獲得＆レベルアップ

@@ -17,6 +17,40 @@
 // ─────────────────────────────────────────────
 
 export const STATUS_DEFS = {
+  // ── 攻防バフ（ポジティブ） ──
+  // 持続中はプレイヤーの atk / def を加算倍率で底上げする。statuses[] に乗せて
+  // tickStatuses でターンごとに残りターンを減らす（既存のデバフと同じ仕組み）。
+  // 表示色は warm gold 系（バフ）/ cool blue 系（防御）にして、デバフと混同しない。
+  atkUp: {
+    label: '攻撃力アップ', emoji: '💪', color: '#ffb74d',
+    desc: '攻撃力 +30%（戦闘の与ダメージが伸びる）。',
+    overlay: 'rgba(255,183,77,0.10)',
+    isBlock: false, isMod: false, isDot: false, isBuff: true,
+    atkAdd: 0.30,
+  },
+  atkUpHigh: {
+    label: '攻撃力アップ・強', emoji: '🔥', color: '#ff7043',
+    desc: '攻撃力 +60%（強化版・短時間で大火力）。',
+    overlay: 'rgba(255,112,67,0.12)',
+    isBlock: false, isMod: false, isDot: false, isBuff: true,
+    atkAdd: 0.60,
+  },
+  defUp: {
+    label: '防御力アップ', emoji: '🛡️', color: '#64b5f6',
+    desc: '防御力 +30%（被ダメージが減る）。',
+    overlay: 'rgba(100,181,246,0.10)',
+    isBlock: false, isMod: false, isDot: false, isBuff: true,
+    defAdd: 0.30,
+  },
+  defUpHigh: {
+    label: '防御力アップ・強', emoji: '🏰', color: '#1e88e5',
+    desc: '防御力 +60%（強化版・短時間で固くなる）。',
+    overlay: 'rgba(30,136,229,0.12)',
+    isBlock: false, isMod: false, isDot: false, isBuff: true,
+    defAdd: 0.60,
+  },
+
+  // ── デバフ（ネガティブ） ──
   poison: {
     label: '毒', emoji: '☠', color: '#9c27b0',
     desc: '毎ターン HP が減少し、ターンを重ねるごとに減少量が増す。',
@@ -149,6 +183,8 @@ export function fractureSelfHurtChance(target) {
 }
 
 // 罹患中の最も派手な status を 1 個返す（オーバーレイ色決定用）。
+// バフ（atkUp / defUp 等）はオーバーレイには使わない（重ねがけ前提なので、
+// 「いま何かが起きている」より「個別の chip 表示」の方が読みやすい）。
 export function dominantStatus(target) {
   if (!Array.isArray(target?.statuses) || target.statuses.length === 0) return null;
   // 優先度: sleep > confuse > shock > burn > poison > fracture > spasm
@@ -158,4 +194,41 @@ export function dominantStatus(target) {
     if (s) return s;
   }
   return null;
+}
+
+// ── バフ累積倍率 ──
+// statuses[] にぶら下がっている atkUp / defUp 系を集計し、加算倍率
+// （atkAdd / defAdd の合計を 1 + Σ で返す）を返す。同種の重ねがけは
+// applyStatus 側で turns 上書き + stacks 加算されるため、原則 1 個ずつ。
+// 異なる強度（atkUp + atkUpHigh）が同時にぶら下がった時は両方加算するので
+// 1.0 + 0.30 + 0.60 = 1.90 になる（仕様上は撃つ側がそうしたいなら可）。
+export function attackBuffMult(target) {
+  let mult = 1;
+  for (const s of target?.statuses ?? []) {
+    if ((s.turns ?? 0) <= 0) continue;
+    const def = STATUS_DEFS[s.kind];
+    if (def?.atkAdd) mult += def.atkAdd;
+  }
+  return mult;
+}
+
+export function defenseBuffMult(target) {
+  let mult = 1;
+  for (const s of target?.statuses ?? []) {
+    if ((s.turns ?? 0) <= 0) continue;
+    const def = STATUS_DEFS[s.kind];
+    if (def?.defAdd) mult += def.defAdd;
+  }
+  return mult;
+}
+
+// 表示用: いま付いているバフ（statuses[].isBuff=true なエントリ）の一覧
+export function activeBuffs(target) {
+  const out = [];
+  for (const s of target?.statuses ?? []) {
+    if ((s.turns ?? 0) <= 0) continue;
+    const def = STATUS_DEFS[s.kind];
+    if (def?.isBuff) out.push({ kind: s.kind, turns: s.turns, def });
+  }
+  return out;
 }

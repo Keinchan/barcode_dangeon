@@ -81,7 +81,28 @@ function W(element, lv, name, range, pp, desc, opts = {}) {
   };
   if (opts.status)    skill.status    = opts.status;
   if (opts.knockback) skill.knockback = opts.knockback;
+  if (opts.selfBuff)  skill.selfBuff  = opts.selfBuff;
   return skill;
+}
+
+// SELF 技の自己バフ自動アサイン。学習レベルでバフ強度を決める。
+//   Lv7  ルーンよみ系     → 攻撃力アップ（atkUp,    6T）
+//   Lv13 まりょくチャージ → 攻撃力アップ・強（atkUpHigh, 3T）
+//   Lv20 シールド/ベール  → 防御力アップ（defUp,    5T）
+//   Lv35 高位シールド     → 防御力アップ・強（defUpHigh, 3T）
+// 既存スキル定義に手作業で書き足すのは 24 行になるので、ID パターンで一括付与する。
+function _autoAssignSelfBuffs(list) {
+  for (const sk of list) {
+    if (sk.pattern !== 'SELF') continue;
+    if (sk.selfBuff) continue;        // 既に手動指定があればそれを尊重
+    const m = (sk.id || '').match(/^wiz_\w+_(\d+)$/);
+    if (!m) continue;
+    const lv = parseInt(m[1], 10);
+    if      (lv === 7)  sk.selfBuff = { kind: 'atkUp',     turns: 6 };
+    else if (lv === 13) sk.selfBuff = { kind: 'atkUpHigh', turns: 3 };
+    else if (lv === 20) sk.selfBuff = { kind: 'defUp',     turns: 5 };
+    else if (lv === 35) sk.selfBuff = { kind: 'defUpHigh', turns: 3 };
+  }
 }
 
 // ── 火タイプ ──
@@ -279,6 +300,7 @@ export const WIZARD_SKILL_LIBRARY = [
   ...FIRE_SKILLS, ...LEAF_SKILLS, ...WATER_SKILLS,
   ...LIGHT_SKILLS, ...DARK_SKILLS, ...SPARK_SKILLS,
 ];
+_autoAssignSelfBuffs(WIZARD_SKILL_LIBRARY);
 
 // 指定タイプ + プレイヤーレベルで「習得済みであるべき技」を列挙
 export function wizardSkillsLearnableAt(element, level) {
