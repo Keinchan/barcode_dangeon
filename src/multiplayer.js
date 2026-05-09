@@ -296,6 +296,48 @@ export async function submitOwnState(code, role, args) {
   await updateDoc(ref, updates);
 }
 
+// 勝敗確定後の「再戦準備」: 部屋の state を waiting に戻し、両者の HP/MP/statuses
+// を満タンに戻す。位置・向き・ready フラグも初期化。両方のクライアントが
+// 結果ダイアログ OK 後に呼ぶ前提だが、idempotent（同じ値で last-write-wins）なので
+// 競合しても安全。state が既に waiting / battle / null ならスキップする。
+export async function resetForRematch(code) {
+  const db = _getDb();
+  if (!db) return;
+  const ref  = doc(db, ROOMS, code);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return;
+  const data = snap.data();
+  if (data.state !== 'finished') return;     // 既にリセット済 / 進行中ならスキップ
+  const host  = data.host;
+  const guest = data.guest;
+  if (!host) return;
+  const cx = Math.floor(ARENA_W / 2);
+  const updates = {
+    state:     'waiting',
+    turn:      'host',
+    turnNo:    0,
+    actions:   [],
+    winnerUid: null,
+    'host.hp':       host.maxHp ?? host.hp ?? 1,
+    'host.mp':       host.maxMp ?? 0,
+    'host.statuses': [],
+    'host.x':        cx,
+    'host.y':        ARENA_H - 5,
+    'host.facing':   [0, -1],
+    'host.ready':    false,
+  };
+  if (guest) {
+    updates['guest.hp']       = guest.maxHp ?? guest.hp ?? 1;
+    updates['guest.mp']       = guest.maxMp ?? 0;
+    updates['guest.statuses'] = [];
+    updates['guest.x']        = cx;
+    updates['guest.y']        = 4;
+    updates['guest.facing']   = [0, 1];
+    updates['guest.ready']    = false;
+  }
+  await updateDoc(ref, updates);
+}
+
 // ハートビート（接続生存通知）。長期間更新が無ければ「相手が落ちた」とみなす。
 // 値は serverTimestamp で書き込むため、両クライアントの時計ズレに強い。
 export async function pingHeartbeat(code, role) {
