@@ -469,7 +469,9 @@ export class Dungeon {
     // 行動対象（生存・除外外・非商人）を距離昇順で並べる：近い mob が先にスロットを
     // 取れる方が「囲み」が自然に成立する。商人は攻撃されない限りその場でじっとしている
     const actors = this.monsters
-      .filter(m => m.hp > 0 && m !== exclude && !m.isShopkeeper)
+      // PvP アリーナの「相手プレイヤー」(isPvpOpponent) は AI 駆動ではなく
+      // Firestore 経由のリモート入力で動くので tickEnemies の対象から外す。
+      .filter(m => m.hp > 0 && m !== exclude && !m.isShopkeeper && !m.isPvpOpponent)
       .map(m => ({
         m,
         dist: Math.abs(m.x - this.playerPos.x) + Math.abs(m.y - this.playerPos.y),

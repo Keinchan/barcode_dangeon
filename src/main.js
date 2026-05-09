@@ -94,8 +94,10 @@ import {
   watchRoom as pvpWatchRoom,
   setReady as pvpSetReady,
   startBattle as pvpStartBattle,
-  submitAction as pvpSubmitAction,
   destroyRoom as pvpDestroyRoom,
+  submitMove as pvpSubmitMove,
+  submitArenaAttack as pvpSubmitArenaAttack,
+  submitFlee as pvpSubmitFlee,
 } from './multiplayer.js';
 import { MINION_LIBRARY, makeMinion, findMinionTemplate, rehydrateMinion } from './minions.js';
 import {
@@ -2184,6 +2186,11 @@ async function _executeSkill(skill) {
     showAlert('技はダンジョン探索中にだけ使えます');
     return;
   }
+  // PvP アリーナでは技は Phase 1 では未対応（同期実装が増えるため）
+  if (dungeonData?.isPvpArena) {
+    showAlert('PvP では技はまだ使えません（Phase 2 で対応予定）');
+    return;
+  }
   // 状態異常で技使用が制限される: sleep=封じ / shock=確率封じ / burn=MP+1
   if (hasStatus(player, 'sleep')) {
     dungeonLog('😴 睡眠中で技を使えない！'); _runEnemyTurn(); return;
@@ -4235,6 +4242,8 @@ let _actionsLeftThisTurn = 1;
 function move(dx, dy) {
   if (!dungeon || screen !== 'dungeon') return;
   if (_turnBusy) return;   // ターン進行中の入力は捨てる（長押しの暴発防止）
+  // PvP アリーナでは「自分のターン」じゃなければ全入力を捨てる。
+  if (dungeonData?.isPvpArena && _pvpData?.turn !== _pvpRole) return;
 
   // 状態異常で入力が変質する: sleep=必ず待機 / shock=確率で待機 / confuse=方向ランダム
   if (dx !== 0 || dy !== 0) {
@@ -4251,6 +4260,11 @@ function move(dx, dy) {
 
   // 待機: その場で敵ターンを進める
   if (dx === 0 && dy === 0) {
+    // PvP アリーナでも待機を有効に（移動と同じ「ターン終了」扱いで Firestore 通知）
+    if (dungeonData?.isPvpArena) {
+      _pvpSendMoveAction();
+      return;
+    }
     _runEnemyTurn();
     return;
   }
@@ -4326,6 +4340,11 @@ function move(dx, dy) {
     return;
   }
 
+  // PvP アリーナ: 移動結果を Firestore に送ってターン終了
+  if (dungeonData?.isPvpArena) {
+    _pvpSendMoveAction();
+    return;
+  }
   _runEnemyTurn();
 }
 
@@ -4344,7 +4363,45 @@ function _maybeMapBattleClear() {
   return true;
 }
 
+// PvP アリーナ: 移動完了を Firestore に通知して相手側にターンを渡す。
+function _pvpSendMoveAction() {
+  if (!_pvpCode || !_pvpRole || !_pvpData || !dungeon) return;
+  _turnBusy = true;     // 相手の応答が来るまで自分の入力を弾く
+  pvpSubmitMove(_pvpCode, _pvpRole, {
+    x:      dungeon.playerPos.x,
+    y:      dungeon.playerPos.y,
+    facing: dungeon.playerPos.facing.slice(),
+  }, _pvpData?.turnNo ?? 0)
+    .catch(err => console.warn('PvP move sync failed:', err))
+    .finally(() => {
+      _turnBusy = false;
+      if (dungeon) dungeon.render(document.getElementById('dungeon-canvas'));
+    });
+}
+
+// PvP アリーナ: バンプ攻撃で相手プレイヤーにダメージを与えた結果を通知。
+function _pvpSendAttackAction(dmg, targetHpAfter) {
+  if (!_pvpCode || !_pvpRole || !_pvpData) return;
+  _turnBusy = true;
+  pvpSubmitArenaAttack(_pvpCode, _pvpRole, {
+    kind: 'attack',
+    dmg,
+    targetHpAfter,
+    attackerUid: _pvpData[_pvpRole]?.uid,
+    turnNo: _pvpData.turnNo ?? 0,
+  })
+    .catch(err => console.warn('PvP attack sync failed:', err))
+    .finally(() => {
+      _turnBusy = false;
+      if (dungeon) dungeon.render(document.getElementById('dungeon-canvas'));
+    });
+}
+
 function _runEnemyTurn() {
+  // PvP アリーナでは AI を走らせず、相手の入力を Firestore 経由で待つ。
+  // 自分のターン終了の通知は move() / 攻撃ハンドラ側で submitMove/Attack 済。
+  if (dungeonData?.isPvpArena) return;
+
   // 瞬発力バフ中は 1 ターンに複数回行動できる。
   // _actionsLeftThisTurn が 1 より多ければ、これは「同じターン内の追加行動」なので
   // 敵ターンや status tick を走らせず、すぐに次の入力を許可して return する。
@@ -4892,6 +4949,12 @@ function _maybeRecruitMinion(mob) {
 
 // 共通：撃破処理（XP・ドロップ・ボスならクリア）。Battle.onEnd の win 分岐の流用
 function _handleMonsterDefeated(mob) {
+  // PvP アリーナで相手プレイヤーを倒した場合は通常のドロップ等は出さず、
+  // Firestore 側の state=finished に任せる（既に submitArenaAttack 内で更新済）。
+  if (mob?.isPvpOpponent) {
+    dungeon.removeMonster(mob);
+    return;
+  }
   _maybeRecruitMinion(mob);
   dungeon.removeMonster(mob);
 
@@ -4997,6 +5060,10 @@ function _bumpMeleeAttack(mob) {
 
   if (mob.hp <= 0) {
     if (enemyAt) deathBurst(enemyAt, { color: mob.rarityColor ?? '#ff7043' });
+    if (mob.isPvpOpponent) {
+      // PvP: 致命傷を相手側に通知。state=finished に切り替わる
+      _pvpSendAttackAction(dmg, 0);
+    }
     _handleMonsterDefeated(mob);
     refreshHUD();
     if (!mob.isBoss) requestAnimationFrame(() => dungeon.render(document.getElementById('dungeon-canvas')));
@@ -5005,6 +5072,11 @@ function _bumpMeleeAttack(mob) {
 
   refreshHUD();
   dungeon.render(document.getElementById('dungeon-canvas'));
+  // PvP アリーナ: ダメージを相手側に通知してターン交代
+  if (mob.isPvpOpponent) {
+    _pvpSendAttackAction(dmg, mob.hp);
+    return;
+  }
   // 1 呼吸の間（演出が見える時間を確保）→ 敵ターン
   setTimeout(() => _runEnemyTurn(), 220);
 }
@@ -6174,7 +6246,7 @@ function _leavePvpRoom() {
 async function _pvpCreate() {
   const u = getCurrentAuthUser();
   if (!u) { _showPvpError('ログインが必要です'); return; }
-  const profile = buildPvpProfile(u.uid, u.displayName ?? u.email ?? 'プレイヤー', player);
+  const profile = buildPvpProfile(u.uid, u.displayName ?? u.email ?? 'プレイヤー', player, 'host');
   try {
     const code = await pvpCreateRoom(profile);
     _pvpCode = code;
@@ -6194,7 +6266,7 @@ async function _pvpJoin() {
   const inp = document.getElementById('pvp-join-code');
   const code = (inp?.value ?? '').trim();
   if (!/^\d{6}$/.test(code)) { _showPvpError('6 桁の数字を入力してください'); return; }
-  const profile = buildPvpProfile(u.uid, u.displayName ?? u.email ?? 'プレイヤー', player);
+  const profile = buildPvpProfile(u.uid, u.displayName ?? u.email ?? 'プレイヤー', player, 'guest');
   try {
     await pvpJoinRoom(code, profile);
     _pvpCode = code;
@@ -6209,7 +6281,7 @@ async function _pvpJoin() {
 }
 
 // 部屋スナップショットを受け取って UI を更新する。state に応じて
-// 待機画面 / バトル画面 / 結果 を出し分ける。
+// 待機画面 / アリーナ突入 / 結果 を出し分ける。
 function _onPvpUpdate(data) {
   if (!data) {
     // 部屋が削除された（相手が離脱した等）
@@ -6224,15 +6296,103 @@ function _onPvpUpdate(data) {
   if (data.state === 'waiting') {
     _renderPvpLobbyRoom(data);
   } else if (data.state === 'battle') {
+    // 1 ルームアリーナへ突入。両者の初期位置はプロファイルに含まれている。
     if (!_pvpEntered) {
       _pvpEntered = true;
-      show('pvp-battle');
+      _enterPvpArena(data);
     }
-    _renderPvpBattle(data);
+    _onPvpArenaUpdate(data);
   } else if (data.state === 'finished') {
-    _renderPvpBattle(data);
+    _onPvpArenaUpdate(data);
     _showPvpFinished(data);
   }
+}
+
+// PvP アリーナへ突入: 既存の 1 ルーム戦闘ステージを使って、相手プレイヤーを
+// 「リモート操作のモンスター」として配置する。tickEnemies は isPvpOpponent を
+// 行動対象から除外しているので、相手側は AI ではなく Firestore のスナップショット
+// 経由で位置 / HP が更新される。
+function _enterPvpArena(data) {
+  const me  = data[_pvpRole];
+  const foe = data[_pvpRole === 'host' ? 'guest' : 'host'];
+  if (!me || !foe) return;
+  // 相手プレイヤーをモンスターオブジェクトに変換（既存の dungeon 描画と
+  // _bumpMeleeAttack を再利用するため、最小限のフィールドを揃える）
+  const opponentMob = {
+    base:  '対戦相手',
+    emoji: foe.emoji ?? '🧙',
+    name:  `${foe.name} Lv${foe.level}`,
+    isBoss: true,                  // 撃破でクリア処理が走る
+    isPvpOpponent: true,           // tickEnemies のスキップ対象
+    rarity: 'レジェンド',
+    rarityColor: '#ffd54f',
+    element: foe.weaponElement ?? '火',
+    skillCharge: 0,
+    hp: foe.hp ?? foe.maxHp ?? 1,
+    maxHp: foe.maxHp ?? 1,
+    atk: foe.atk ?? 1,
+    def: foe.def ?? 0,
+    floor: 1,
+    job: { id: 'pvp', label: 'PvP', aiHint: 'rush', preferredRange: 'ADJ', chargeBonus: 0 },
+  };
+  // 自分の現在 HP / MP を Firestore の最新値で同期
+  player.hp = me.hp ?? player.maxHp;
+  player.mp = me.mp ?? player.maxMp;
+  // dungeon データを組み立て：1 ルーム + isMapBattle 互換 + PvP 専用フラグ
+  const arena = {
+    seed: 'pvp:' + (_pvpCode ?? Date.now()),
+    barcode: '0000000000000',
+    name: '🌐 タイマンアリーナ',
+    theme: { name: 'アリーナ', wallColor: '#34344a', floorColor: '#14141c' },
+    floors: 1,
+    difficulty: 1,
+    monsterTypeIdx: 0,
+    elementIdx: 0,
+    element: foe.weaponElement ?? '火',
+    rarityBase: { name: 'レジェンド', color: '#ffd54f', mult: 4.2 },
+    isMapBattle:   true,
+    isSingleRoom:  true,
+    isPvpArena:    true,
+    encounterMonster: opponentMob,
+    pvpRole: _pvpRole,
+  };
+  enterDungeon(arena);
+  // 自分の初期向きを Firestore の値に合わせる
+  if (dungeon?.playerPos && me.facing) {
+    dungeon.playerPos.facing = me.facing.slice();
+    dungeon.playerPos.x = me.x;
+    dungeon.playerPos.y = me.y;
+  }
+  // 相手モンスターの初期位置も同期
+  _syncPvpOpponentToData(data);
+  refreshHUD();
+  if (dungeon) dungeon.render(document.getElementById('dungeon-canvas'));
+}
+
+// 相手プレイヤーの位置 / HP を最新スナップショットに合わせて適用する。
+// 移動 / 攻撃 を受けるたびに呼ばれる。
+function _syncPvpOpponentToData(data) {
+  if (!dungeon || !data) return;
+  const foe = data[_pvpRole === 'host' ? 'guest' : 'host'];
+  if (!foe) return;
+  const opp = (dungeon.monsters ?? []).find(m => m?.isPvpOpponent);
+  if (!opp) return;
+  opp.x = foe.x ?? opp.x;
+  opp.y = foe.y ?? opp.y;
+  opp.hp = foe.hp ?? opp.hp;
+  // 自分の HP / MP も最新化（相手が攻撃した結果が来るので必須）
+  const me = data[_pvpRole];
+  if (me) {
+    if (typeof me.hp === 'number') player.hp = me.hp;
+    if (typeof me.mp === 'number') player.mp = me.mp;
+  }
+}
+
+function _onPvpArenaUpdate(data) {
+  if (!_pvpEntered) return;
+  _syncPvpOpponentToData(data);
+  refreshHUD();
+  if (dungeon) dungeon.render(document.getElementById('dungeon-canvas'));
 }
 
 function _renderPvpLobbyRoom(data) {
