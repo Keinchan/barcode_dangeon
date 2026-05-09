@@ -845,6 +845,34 @@ input, textarea {
   font-weight: bold;
 }
 
+/* HP / MP 棒グラフ。文字の数値表示と並べることで、被弾の度に「あとどれくらい？」
+   が一目で分かるように。バー高さは細めにして equip-display と並んでも縦が膨らまない。
+   width は refreshHUD で % 設定する。色は HP=緑→黄→赤、MP=水色固定。 */
+.dungeon-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  align-items: stretch;
+}
+.dungeon-bar {
+  position: relative;
+  width: 140px;
+  height: 6px;
+  background: rgba(255,255,255,0.10);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-left: auto;     /* 右寄せ HUD に揃える */
+}
+.dungeon-bar-fill {
+  height: 100%;
+  width: 100%;
+  border-radius: 3px;
+  transition: width .18s ease-out, background .18s ease-out;
+}
+.dungeon-bar-hp .dungeon-bar-fill { background: var(--success); }
+.dungeon-bar-mp .dungeon-bar-fill { background: #4dc4ff; }
+
 /* スマホ等の狭い画面では HP/MP の文字をやや小さく + ヘッダのパディングも縮める */
 @media (max-width: 420px) {
   .dungeon-header { padding: 8px 10px; }
@@ -854,6 +882,7 @@ input, textarea {
   .hp-text, .mp-text { font-size: 12px; }
   .gold-text      { font-size: 12px; }
   .equip-display  { font-size: 10px; }
+  .dungeon-bar    { width: 110px; height: 5px; }
 }
 
 .btn-icon-menu {
