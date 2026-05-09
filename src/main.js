@@ -1864,6 +1864,99 @@ async function _tryQuickMpRecover(mpNeeded) {
   return true;
 }
 
+// 向き ベクトルを「ひがし／にし／きた／みなみ／北西…」風の人間向けラベルに。
+// 8 方向 + 自分（[0,0]）に対応。確認モーダルで「どっちに撃つか」を分かりやすく。
+function _facingName([fx, fy]) {
+  if (fx === 0 && fy === 0) return '自分';
+  const ns = fy < 0 ? '北' : fy > 0 ? '南' : '';
+  const ew = fx < 0 ? '西' : fx > 0 ? '東' : '';
+  return ns + ew;
+}
+
+// 広範囲・遠距離技を撃つ前の「どこを攻撃しますか？」確認モーダル。
+// 戻り値: true = 続行（MP 消費して発動）/ false = キャンセル（無消費で何もしない）
+// 範囲種別ごとに対象スコープと命中見込み数を計算して人間向けの文面にする。
+async function _confirmBigSkillTarget(skill, rangeId, r) {
+  if (!r) return true;
+  const needsConfirm = ['room','room_all','floor','floor_all','line_inf','pierce','ranged','around_target'].includes(r.kind);
+  if (!needsConfirm) return true;
+
+  const facing = dungeon.playerPos.facing ?? [0, 1];
+  const px = dungeon.playerPos.x;
+  const py = dungeon.playerPos.y;
+
+  let scope = '';
+  let hitCount = 0;
+  switch (r.kind) {
+    case 'room':
+    case 'room_all': {
+      const room = dungeon.roomAt?.(px, py);
+      if (room) {
+        const inRoom = (dungeon.monstersInRoom?.(room) ?? []).filter(m => m.hp > 0 && !m.isShopkeeper);
+        hitCount = inRoom.length;
+        scope = `今いる部屋全体（${room.w}×${room.h}）`;
+      } else {
+        scope = '通路（部屋に入っていないため不発）';
+      }
+      break;
+    }
+    case 'floor':
+    case 'floor_all': {
+      const all = (dungeon.allLivingMonsters?.() ?? []).filter(m => !m.isShopkeeper);
+      hitCount = all.length;
+      scope = 'フロア全体';
+      break;
+    }
+    case 'line_inf':
+    case 'pierce': {
+      const cells = _resolveLineSkillCells(rangeId, facing, px, py);
+      hitCount = cells.filter(([dx, dy]) => dungeon.monsterAt(px + dx, py + dy)).length;
+      scope = `${_facingName(facing)}方向に最大 ${cells.length} マス`;
+      break;
+    }
+    case 'ranged': {
+      const dist = r.distance ?? 3;
+      const [fx, fy] = _rotateOffsetByFacing([0, 1], facing);
+      hitCount = dungeon.monsterAt(px + fx * dist, py + fy * dist) ? 1 : 0;
+      scope = `${_facingName(facing)}方向 ${dist} マス先の 1 点`;
+      break;
+    }
+    case 'around_target': {
+      const max = r.maxRange ?? 5;
+      const [fx, fy] = _rotateOffsetByFacing([0, 1], facing);
+      let anchor = null;
+      for (let i = 1; i <= max; i++) {
+        const ax = px + fx * i, ay = py + fy * i;
+        if (!dungeon.canWalk(ax, ay)) break;
+        const mob = dungeon.monsterAt(ax, ay);
+        if (mob) { anchor = { x: ax, y: ay }; break; }
+      }
+      if (anchor) {
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (dungeon.monsterAt(anchor.x + dx, anchor.y + dy)) hitCount += 1;
+          }
+        }
+        scope = `${_facingName(facing)}方向最寄り敵 + 周囲 8 マス`;
+      } else {
+        scope = `${_facingName(facing)}方向に対象敵なし（不発）`;
+      }
+      break;
+    }
+  }
+
+  const elBadge = SKILL_ELEMENT_EMOJI[skill.element] ?? '✨';
+  const burnExtra = hasStatus(player, 'burn') ? 1 : 0;
+  const mpDisplay = skill.mpCost + (burnExtra ? ` (+${burnExtra} 熱傷)` : '');
+  const msg =
+    `どこを攻撃しますか？\n\n` +
+    `${elBadge} 技「${skill.name}」\n` +
+    `対象: ${scope}\n` +
+    `対象敵数: ${hitCount} 体${hitCount === 0 ? '（空振りに注意）' : ''}\n` +
+    `MP -${mpDisplay}`;
+  return await showConfirm(msg, { okLabel: '撃つ', cancelLabel: 'やめる' });
+}
+
 // 技を発動（ダンジョン探索中。向きに合わせてパターンを回転して発射）
 async function _executeSkill(skill) {
   if (!dungeon || screen !== 'dungeon') {
@@ -1893,6 +1986,18 @@ async function _executeSkill(skill) {
       return;
     }
   }
+  // 範囲タイプを正規化（旧 A〜F のセーブからもこの段で新名称になる）
+  const rangeId = normalizeRangeType(skill.pattern);
+  const r       = RANGE_TYPES[rangeId];
+
+  // 広範囲・遠距離・部屋/フロア技は誤発射のコストが大きい（MP 高め＋ターン消費）。
+  // 発射前に「どこを攻撃しますか？」モーダルで対象範囲と命中見込み数を見せて確認。
+  // 小さな範囲（ADJ / CROSS / DIAG / MELEE / LINE3 / LINE5 / TERRAIN）は確認しない。
+  if (!(await _confirmBigSkillTarget(skill, rangeId, r))) {
+    // キャンセル: MP 消費もターン経過も無し（移動と等価で気軽にキャンセルできる）
+    return;
+  }
+
   player.mp = Math.max(0, (player.mp ?? 0) - mpNeeded);
   // 骨折で行動時に自傷判定
   _maybeFractureSelfHurt();
@@ -1905,10 +2010,6 @@ async function _executeSkill(skill) {
   // 痙攣で命中率が下がるので whiff が増える
   const baseWhiff = _WHIFF_CHANCE[skill.rarity] ?? 0.20;
   const whiffP    = Math.min(0.85, baseWhiff / accuracyMultiplier(player));
-
-  // 範囲タイプを正規化（旧 A〜F のセーブからもこの段で新名称になる）
-  const rangeId = normalizeRangeType(skill.pattern);
-  const r       = RANGE_TYPES[rangeId];
 
   // 対象敵を {m, dx, dy} の形で集める（dx, dy はプレイヤー基準のオフセット）。
   // 範囲タイプの kind ごとに走査方法を変える:
