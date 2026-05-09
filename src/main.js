@@ -2186,11 +2186,8 @@ async function _executeSkill(skill) {
     showAlert('技はダンジョン探索中にだけ使えます');
     return;
   }
-  // PvP アリーナでは技は Phase 1 では未対応（同期実装が増えるため）
-  if (dungeonData?.isPvpArena) {
-    showAlert('PvP では技はまだ使えません（Phase 2 で対応予定）');
-    return;
-  }
+  // PvP アリーナ: 自分のターンじゃなければ技も封じる
+  if (dungeonData?.isPvpArena && _pvpData?.turn !== _pvpRole) return;
   // 状態異常で技使用が制限される: sleep=封じ / shock=確率封じ / burn=MP+1
   if (hasStatus(player, 'sleep')) {
     dungeonLog('😴 睡眠中で技を使えない！'); _runEnemyTurn(); return;
@@ -2548,7 +2545,22 @@ async function _executeSkill(skill) {
 
   refreshHUD();
   dungeon.render(document.getElementById('dungeon-canvas'));
-  // 行動後の敵ターン
+  // 行動後の敵ターン（PvP では Firestore に技ダメージを送って相手にターンを渡す）
+  if (dungeonData?.isPvpArena) {
+    // hits 配列から相手プレイヤーへの最終 HP を抜き出して送る
+    const opp = (dungeon.monsters ?? []).find(m => m?.isPvpOpponent);
+    const totalDmg = hits.reduce((s, h) => s + (h.dmg ?? 0), 0);
+    const hpAfter  = opp ? Math.max(0, opp.hp) : 0;
+    _pvpSendSkillAction({
+      skillName: skill.name,
+      element:   skill.element,
+      totalDmg,
+      hpAfter,
+      attackerMpAfter: player.mp,
+    });
+    autoSave();
+    return;
+  }
   _runEnemyTurn();
   autoSave();
 }
@@ -4373,6 +4385,26 @@ function _pvpSendMoveAction() {
     facing: dungeon.playerPos.facing.slice(),
   }, _pvpData?.turnNo ?? 0)
     .catch(err => console.warn('PvP move sync failed:', err))
+    .finally(() => {
+      _turnBusy = false;
+      if (dungeon) dungeon.render(document.getElementById('dungeon-canvas'));
+    });
+}
+
+// PvP アリーナ: 技を撃った結果を Firestore に通知。MP コストも送る。
+// バンプ攻撃と同じく submitArenaAttack を使うが、kind='skill' で区別する。
+function _pvpSendSkillAction(args) {
+  if (!_pvpCode || !_pvpRole || !_pvpData) return;
+  _turnBusy = true;
+  pvpSubmitArenaAttack(_pvpCode, _pvpRole, {
+    kind: 'skill',
+    dmg: args.totalDmg ?? 0,
+    targetHpAfter: args.hpAfter ?? 0,
+    attackerUid: _pvpData[_pvpRole]?.uid,
+    attackerMpAfter: args.attackerMpAfter,
+    turnNo: _pvpData.turnNo ?? 0,
+  })
+    .catch(err => console.warn('PvP skill sync failed:', err))
     .finally(() => {
       _turnBusy = false;
       if (dungeon) dungeon.render(document.getElementById('dungeon-canvas'));
@@ -6240,7 +6272,11 @@ function _leavePvpRoom() {
   _pvpRole = null;
   _pvpData = null;
   _pvpEntered = false;
+  _pvpLastMyHp = null;
   _resetPvpLobbyUI();
+  // ターン UI の後始末
+  document.getElementById('pvp-turn-banner')?.classList.add('hidden');
+  document.getElementById('dungeon-footer')?.classList.remove('pvp-foe-turn');
 }
 
 async function _pvpCreate() {
@@ -6316,6 +6352,7 @@ function _enterPvpArena(data) {
   const me  = data[_pvpRole];
   const foe = data[_pvpRole === 'host' ? 'guest' : 'host'];
   if (!me || !foe) return;
+  _pvpLastMyHp = me.hp ?? null;     // 差分検知の初期値（最初は被弾扱いしない）
   // 相手プレイヤーをモンスターオブジェクトに変換（既存の dungeon 描画と
   // _bumpMeleeAttack を再利用するため、最小限のフィールドを揃える）
   const opponentMob = {
@@ -6370,7 +6407,8 @@ function _enterPvpArena(data) {
 }
 
 // 相手プレイヤーの位置 / HP を最新スナップショットに合わせて適用する。
-// 移動 / 攻撃 を受けるたびに呼ばれる。
+// 移動 / 攻撃 を受けるたびに呼ばれる。被弾検知して視覚フィードバックを出す。
+let _pvpLastMyHp = null;     // 前回の自分 HP（差分検知でフラッシュ）
 function _syncPvpOpponentToData(data) {
   if (!dungeon || !data) return;
   const foe = data[_pvpRole === 'host' ? 'guest' : 'host'];
@@ -6383,7 +6421,24 @@ function _syncPvpOpponentToData(data) {
   // 自分の HP / MP も最新化（相手が攻撃した結果が来るので必須）
   const me = data[_pvpRole];
   if (me) {
-    if (typeof me.hp === 'number') player.hp = me.hp;
+    if (typeof me.hp === 'number') {
+      // 相手の攻撃で HP が下がった瞬間に視覚フィードバック
+      if (_pvpLastMyHp != null && me.hp < _pvpLastMyHp) {
+        const taken = _pvpLastMyHp - me.hp;
+        const acts = data.actions ?? [];
+        const last = acts.length > 0 ? acts[acts.length - 1] : null;
+        const kindLabel = last?.kind === 'skill' ? '技' : 'こうげき';
+        dungeonLog(`💥 相手の${kindLabel}！ ${taken} ダメージ`, { rarity: 'レア' });
+        showFloatingDamage(taken);
+        const playerAt = playerVfxAnchor();
+        if (playerAt) shockwave(playerAt, { color: 'rgba(255,82,82,0.65)' });
+        screenShake(taken > 20 ? 8 : 4, taken > 20 ? 280 : 160);
+        hitFlash({ color: 'rgba(255,82,82,0.30)' });
+        playSfx('damage');
+      }
+      player.hp = me.hp;
+      _pvpLastMyHp = me.hp;
+    }
     if (typeof me.mp === 'number') player.mp = me.mp;
   }
 }
@@ -6391,8 +6446,30 @@ function _syncPvpOpponentToData(data) {
 function _onPvpArenaUpdate(data) {
   if (!_pvpEntered) return;
   _syncPvpOpponentToData(data);
+  _refreshPvpTurnUI(data);
   refreshHUD();
   if (dungeon) dungeon.render(document.getElementById('dungeon-canvas'));
+}
+
+// PvP のターン表示・入力封鎖を更新する。自分のターンの時は緑バナーで脈動、
+// 相手のターンの時はグレーバナー＋フッターを暗くしてタップ封鎖。
+function _refreshPvpTurnUI(data) {
+  const banner = document.getElementById('pvp-turn-banner');
+  const text   = document.getElementById('pvp-turn-banner-text');
+  const footer = document.getElementById('dungeon-footer');
+  if (!banner || !text || !footer) return;
+  if (!data || data.state !== 'battle') {
+    banner.classList.add('hidden');
+    footer.classList.remove('pvp-foe-turn');
+    return;
+  }
+  const myTurn = data.turn === _pvpRole;
+  banner.classList.remove('hidden');
+  banner.classList.toggle('my-turn',  myTurn);
+  banner.classList.toggle('foe-turn', !myTurn);
+  text.textContent = myTurn ? '🟢 あなたのターン' : '⌛ 相手のターン…';
+  // フッターの D-pad / 技バー / ログを暗くしてタップ無効に
+  footer.classList.toggle('pvp-foe-turn', !myTurn);
 }
 
 function _renderPvpLobbyRoom(data) {
