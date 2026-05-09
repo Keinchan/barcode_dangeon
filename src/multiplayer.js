@@ -59,60 +59,191 @@ function _genCode() {
 // 装備の中身など重いフィールドを送ると Firestore のドキュメントサイズ上限に
 // 当たるので、ステータスとレア度ぐらいに絞る。
 //
-// 1 ルームアリーナ（21x19）で host=下中央 / guest=上中央スタートにするので
-// 初期座標もここで決め打ちで載せる。実際のセル数は dungeon.js の W/H と一致させる。
+// 1 ルームアリーナ（21x19）。host/guest のスタート座標と装備設定はモード次第:
+//   pvp  current → host=下中央, guest=上中央, 武器/防具属性あり
+//   pvp  set     → 同上、装備属性は無効（ATK/DEF も均等化された preset 値）
+//   coop         → host=下左, guest=下右（横並び）、装備は current 装備
 const ARENA_W = 21;
 const ARENA_H = 19;
-export function buildPvpProfile(uid, displayName, player, role) {
+
+// セット装備（PvP の公平戦用）。装備差を均すため固定値で補正する。
+// 自分の atkBase / defBase に preset の bonus を足した値を atk/def として送る。
+const PVP_SET_PRESET = { atkBonus: 25, defBonus: 15 };
+
+// 初期座標を mode + role から決定する純粋関数。
+function _arenaStartPos(mode, role) {
   const cx = Math.floor(ARENA_W / 2);
-  const isHost = role === 'host';
+  if (mode === 'coop') {
+    // 協力: 両者下端に横並び（ボスは上方 y=9 付近）
+    return role === 'host'
+      ? { x: cx - 2, y: ARENA_H - 5, facing: [0, -1] }
+      : { x: cx + 2, y: ARENA_H - 5, facing: [0, -1] };
+  }
+  // 対戦: ホスト下、ゲスト上で向き合う
+  return role === 'host'
+    ? { x: cx, y: ARENA_H - 5, facing: [0, -1] }
+    : { x: cx, y: 4,           facing: [0,  1] };
+}
+
+// 装備フォーマット (set/current) に応じて atk/def/element を導出する。
+function _applyEquipFormat(player, equipFormat) {
+  if (equipFormat === 'set') {
+    // 公平戦: ベース + preset bonus、装備属性は無効
+    return {
+      atk:           (player.atkBase ?? player.atk ?? 0) + PVP_SET_PRESET.atkBonus,
+      def:           (player.defBase ?? player.def ?? 0) + PVP_SET_PRESET.defBonus,
+      weaponName:    'セット武器',
+      weaponElement: null,
+      armorName:     'セット防具',
+      armorElement:  null,
+    };
+  }
+  // current: 持ち物の装備をそのまま
+  return {
+    atk:           player.atk ?? 0,
+    def:           player.def ?? 0,
+    weaponName:    player.weapon?.name ?? null,
+    weaponElement: player.weapon?.element ?? null,
+    armorName:     player.armor?.name ?? null,
+    armorElement:  player.armor?.element ?? null,
+  };
+}
+
+export function buildPvpProfile(uid, displayName, player, role, opts = {}) {
+  const mode        = opts.mode === 'coop' ? 'coop' : 'pvp';
+  const equipFormat = opts.equipFormat === 'set' ? 'set' : 'current';
+  const startPos    = _arenaStartPos(mode, role);
+  const equip       = _applyEquipFormat(player, mode === 'pvp' ? equipFormat : 'current');
   return {
     uid,
     role,                    // 'host' | 'guest' — 自分の役割を埋め込んで再描画しやすくする
     name:    (displayName || 'プレイヤー').slice(0, 20),
     level:   player.level ?? 1,
-    atk:     player.atk ?? 0,
-    def:     player.def ?? 0,
+    atk:     equip.atk,
+    def:     equip.def,
     maxHp:   player.maxHp ?? 1,
     maxMp:   player.maxMp ?? 0,
     hp:      player.maxHp ?? 1,    // バトル開始時は満タン
     mp:      player.maxMp ?? 0,
-    weaponName:    player.weapon?.name ?? null,
-    weaponElement: player.weapon?.element ?? null,
-    armorName:     player.armor?.name ?? null,
-    armorElement:  player.armor?.element ?? null,
+    weaponName:    equip.weaponName,
+    weaponElement: equip.weaponElement,
+    armorName:     equip.armorName,
+    armorElement:  equip.armorElement,
     emoji:         player.emoji ?? '🧙',
-    // アリーナ内の初期位置: ホストは下、ゲストは上。互いに距離をとってスタート。
-    x:       cx,
-    y:       isHost ? (ARENA_H - 5) : 4,
-    facing:  isHost ? [0, -1] : [0, 1],
-    statuses: [],            // 罹患中の状態異常 / バフを 1 配列で管理（PvP同期）
-    ready:   false,
+    x:             startPos.x,
+    y:             startPos.y,
+    facing:        startPos.facing,
+    statuses:      [],
+    ready:         false,
   };
 }
 
-// 協力モード用のボス NPC 初期スペック。プレイヤーの平均レベル想定で固定値。
-// Phase 3 の MVP では 1 体の固定ボスのみ。レベル別調整は将来。
-function _buildInitialCoopBoss() {
+// 協力モード用のボス候補リスト。ロビーでホストが選択してメンバーに同期する。
+// id をキーに Firestore へ書き込み、両クライアントが同じスペックでアリーナを組む。
+export const COOP_BOSSES = [
+  { id: 'fire-drake',   name: '🔥 火竜',       emoji: '🐉', element: '火', hp: 280, maxHp: 280, atk: 16, def: 6  },
+  { id: 'water-spirit', name: '💧 水妖',       emoji: '🐳', element: '水', hp: 360, maxHp: 360, atk:  9, def: 12 },
+  { id: 'thunder-lord', name: '⚡ 雷神',       emoji: '⚡', element: '雷', hp: 300, maxHp: 300, atk: 14, def:  8 },
+  { id: 'earth-titan',  name: '🪨 大地の巨人', emoji: '🗿', element: '草', hp: 420, maxHp: 420, atk: 11, def: 10 },
+  { id: 'shadow-king',  name: '🌑 影の王',     emoji: '👤', element: '闇', hp: 260, maxHp: 260, atk: 18, def:  5 },
+  { id: 'angel',        name: '✨ 天使',       emoji: '😇', element: '光', hp: 320, maxHp: 320, atk: 13, def:  9 },
+];
+
+function _bossSpecById(id) {
+  return COOP_BOSSES.find(b => b.id === id) ?? COOP_BOSSES[0];
+}
+
+// 協力モード用のボス NPC 初期スペック。Lobby でホストが選んだ id から組み立てる。
+// id 未指定なら先頭のボス（火竜）。アリーナ中央上方に配置。
+function _buildInitialCoopBoss(bossId) {
+  const spec = _bossSpecById(bossId);
   return {
-    name:    '🐉 古竜',
-    emoji:   '🐉',
-    element: '火',
-    hp:      300,
-    maxHp:   300,
-    atk:     14,
-    def:     6,
+    bossId:  spec.id,
+    name:    spec.name,
+    emoji:   spec.emoji,
+    element: spec.element,
+    hp:      spec.hp,
+    maxHp:   spec.maxHp,
+    atk:     spec.atk,
+    def:     spec.def,
     x:       Math.floor(ARENA_W / 2),
-    y:       9,                          // アリーナ中央付近
+    y:       9,
   };
+}
+
+// ホストが部屋のモード（pvp/coop）を waiting 中に切り替える。
+//   - 関連フィールド（boss / pvpFormat / 両者の位置・装備値）を一括で更新
+//   - ready フラグはリセットして「準備し直し」にする
+//   - state==='waiting' でなければ何もしない
+export async function setRoomMode(code, newMode, opts = {}) {
+  const db = _getDb();
+  if (!db) return;
+  const ref  = doc(db, ROOMS, code);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return;
+  const data = snap.data();
+  if (data.state !== 'waiting') return;
+  const mode = newMode === 'coop' ? 'coop' : 'pvp';
+  const updates = { mode };
+  // 開始位置: 既存プロファイルから x/y/facing だけ書き換え
+  const hostPos = _arenaStartPos(mode, 'host');
+  updates['host.x']      = hostPos.x;
+  updates['host.y']      = hostPos.y;
+  updates['host.facing'] = hostPos.facing;
+  updates['host.ready']  = false;
+  if (data.guest) {
+    const guestPos = _arenaStartPos(mode, 'guest');
+    updates['guest.x']      = guestPos.x;
+    updates['guest.y']      = guestPos.y;
+    updates['guest.facing'] = guestPos.facing;
+    updates['guest.ready']  = false;
+  }
+  if (mode === 'coop') {
+    // ボスを初期化（指定があればそれを使う）
+    updates.boss      = _buildInitialCoopBoss(opts.bossId ?? data.bossId);
+    updates.pvpFormat = null;
+  } else {
+    updates.boss      = null;
+    // 装備フォーマットを保持（指定があれば更新、無ければ既存値、無ければ default 'current'）
+    updates.pvpFormat = opts.pvpFormat ?? data.pvpFormat ?? 'current';
+  }
+  await updateDoc(ref, updates);
+}
+
+// ホストが PvP の装備フォーマットを切り替える。pvp モード時のみ意味がある。
+export async function setRoomPvpFormat(code, format) {
+  const db = _getDb();
+  if (!db) return;
+  const ref  = doc(db, ROOMS, code);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return;
+  const data = snap.data();
+  if (data.state !== 'waiting' || data.mode !== 'pvp') return;
+  const newFormat = format === 'set' ? 'set' : 'current';
+  await updateDoc(ref, { pvpFormat: newFormat });
+}
+
+// ホストが協力ボスを切り替える。coop モード時のみ意味がある。
+export async function setRoomBoss(code, bossId) {
+  const db = _getDb();
+  if (!db) return;
+  const ref  = doc(db, ROOMS, code);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return;
+  const data = snap.data();
+  if (data.state !== 'waiting' || data.mode !== 'coop') return;
+  await updateDoc(ref, { boss: _buildInitialCoopBoss(bossId) });
 }
 
 // ホスト: 部屋を作って code を返す。コリジョン時は最大 5 回まで再試行。
-//   opts.mode = 'pvp' | 'coop'  デフォルト 'pvp'
+//   opts.mode       = 'pvp' | 'coop'   デフォルト 'pvp'
+//   opts.pvpFormat  = 'current' | 'set' （pvp 時のみ。デフォルト 'current'）
+//   opts.bossId     = COOP_BOSSES[i].id （coop 時のみ。デフォルト先頭）
 export async function createRoom(profile, opts = {}) {
   const db = _getDb();
   if (!db) throw new Error('Firestore 未初期化');
-  const mode = opts.mode === 'coop' ? 'coop' : 'pvp';
+  const mode       = opts.mode === 'coop' ? 'coop' : 'pvp';
+  const pvpFormat  = opts.pvpFormat === 'set' ? 'set' : 'current';
   for (let attempt = 0; attempt < 5; attempt++) {
     const code = _genCode();
     const ref  = doc(db, ROOMS, code);
@@ -121,6 +252,7 @@ export async function createRoom(profile, opts = {}) {
     await setDoc(ref, {
       state:     'waiting',
       mode,
+      pvpFormat: mode === 'pvp' ? pvpFormat : null,
       host:      profile,
       guest:     null,
       turn:      'host',
@@ -128,7 +260,7 @@ export async function createRoom(profile, opts = {}) {
       actions:   [],
       winnerUid: null,
       cause:     null,                    // 'bossKilled' | 'playerDied' | null
-      boss:      mode === 'coop' ? _buildInitialCoopBoss() : null,
+      boss:      mode === 'coop' ? _buildInitialCoopBoss(opts.bossId) : null,
       createdAt: serverTimestamp(),
     });
     return code;
@@ -137,7 +269,9 @@ export async function createRoom(profile, opts = {}) {
 }
 
 // ゲスト: 既存部屋に参加。waiting 状態でなければエラー。
-export async function joinRoom(code, profile) {
+// 部屋のモード/装備フォーマットに合わせて profile の x/y/atk/def 等を再計算する
+// ため、ゲスト側は player スナップショットも opts で渡してもらう。
+export async function joinRoom(code, profile, opts = {}) {
   const db = _getDb();
   if (!db) throw new Error('Firestore 未初期化');
   const ref  = doc(db, ROOMS, code);
@@ -146,8 +280,23 @@ export async function joinRoom(code, profile) {
   const data = snap.data();
   if (data.state !== 'waiting') throw new Error('この部屋には参加できません（既に開始 or 終了）');
   if (data.host?.uid === profile.uid) throw new Error('自分の部屋には参加できません');
+  // 部屋のモード・装備フォーマットに合わせて開始位置と装備を上書き
+  const startPos = _arenaStartPos(data.mode ?? 'pvp', 'guest');
+  let finalProfile = { ...profile, ...startPos, role: 'guest' };
+  if (opts.player && data.mode === 'pvp') {
+    const equip = _applyEquipFormat(opts.player, data.pvpFormat ?? 'current');
+    finalProfile = {
+      ...finalProfile,
+      atk:           equip.atk,
+      def:           equip.def,
+      weaponName:    equip.weaponName,
+      weaponElement: equip.weaponElement,
+      armorName:     equip.armorName,
+      armorElement:  equip.armorElement,
+    };
+  }
   await updateDoc(ref, {
-    guest: profile,
+    guest: finalProfile,
   });
   return code;
 }
@@ -332,7 +481,8 @@ export async function resetForRematch(code) {
   const host  = data.host;
   const guest = data.guest;
   if (!host) return;
-  const cx = Math.floor(ARENA_W / 2);
+  // 開始位置はモードに応じて決定（協力なら横並び、対戦なら向かい合う）
+  const hostPos = _arenaStartPos(data.mode === 'coop' ? 'coop' : 'pvp', 'host');
   const updates = {
     state:     'waiting',
     turn:      'host',
@@ -343,23 +493,24 @@ export async function resetForRematch(code) {
     'host.hp':       host.maxHp ?? host.hp ?? 1,
     'host.mp':       host.maxMp ?? 0,
     'host.statuses': [],
-    'host.x':        cx,
-    'host.y':        ARENA_H - 5,
-    'host.facing':   [0, -1],
+    'host.x':        hostPos.x,
+    'host.y':        hostPos.y,
+    'host.facing':   hostPos.facing,
     'host.ready':    false,
   };
   if (guest) {
+    const guestPos = _arenaStartPos(data.mode === 'coop' ? 'coop' : 'pvp', 'guest');
     updates['guest.hp']       = guest.maxHp ?? guest.hp ?? 1;
     updates['guest.mp']       = guest.maxMp ?? 0;
     updates['guest.statuses'] = [];
-    updates['guest.x']        = cx;
-    updates['guest.y']        = 4;
-    updates['guest.facing']   = [0, 1];
+    updates['guest.x']        = guestPos.x;
+    updates['guest.y']        = guestPos.y;
+    updates['guest.facing']   = guestPos.facing;
     updates['guest.ready']    = false;
   }
-  // 協力モードならボスも HP/位置をリセットして再戦可能にする
+  // 協力モードならボスも HP/位置をリセットして再戦可能にする（同じ id を維持）
   if (data.mode === 'coop') {
-    updates.boss = _buildInitialCoopBoss();
+    updates.boss = _buildInitialCoopBoss(data.boss?.bossId);
   }
   await updateDoc(ref, updates);
 }
@@ -434,25 +585,12 @@ export async function transferHost(code) {
   if (!snap.exists()) return;
   const data = snap.data();
   if (!data.guest) throw new Error('参加者がいないので譲渡できません');
-  const cx = Math.floor(ARENA_W / 2);
-  // 新ホスト = 旧ゲスト
-  const newHost = {
-    ...data.guest,
-    role:    'host',
-    x:       cx,
-    y:       ARENA_H - 5,
-    facing:  [0, -1],
-    ready:   false,
-  };
-  // 新ゲスト = 旧ホスト
-  const newGuest = {
-    ...data.host,
-    role:    'guest',
-    x:       cx,
-    y:       4,
-    facing:  [0, 1],
-    ready:   false,
-  };
+  const mode = data.mode === 'coop' ? 'coop' : 'pvp';
+  const hostPos  = _arenaStartPos(mode, 'host');
+  const guestPos = _arenaStartPos(mode, 'guest');
+  // 新ホスト = 旧ゲスト / 新ゲスト = 旧ホスト
+  const newHost  = { ...data.guest, role: 'host',  ...hostPos,  ready: false };
+  const newGuest = { ...data.host,  role: 'guest', ...guestPos, ready: false };
   await updateDoc(ref, { host: newHost, guest: newGuest });
 }
 
@@ -470,14 +608,12 @@ export async function handleHostLeave(code) {
   const data = snap.data();
   if (data.state === 'waiting') {
     if (data.guest) {
-      const cx = Math.floor(ARENA_W / 2);
+      const hostPos = _arenaStartPos(data.mode === 'coop' ? 'coop' : 'pvp', 'host');
       const promoted = {
         ...data.guest,
-        role:    'host',
-        x:       cx,
-        y:       ARENA_H - 5,
-        facing:  [0, -1],
-        ready:   false,
+        role:   'host',
+        ...hostPos,
+        ready:  false,
       };
       await updateDoc(ref, { host: promoted, guest: null });
     } else {
@@ -497,6 +633,10 @@ export async function handleHostLeave(code) {
 
 // ゲストが離脱した時の自動処理: guest フィールドを null にして、ホストが
 // 待機画面に戻ったように見せる。
+//   - waiting → guest を null にして待機画面に戻す
+//   - battle  → ホストの不戦勝で finished に
+//   - finished → guest を null（既に勝敗確定後の退室。これが無いとゲストが
+//     部屋に残ったまま雪だるま式に増えるバグになっていた）
 export async function handleGuestLeave(code) {
   const db = _getDb();
   if (!db) return;
@@ -510,7 +650,7 @@ export async function handleGuestLeave(code) {
       winnerUid: data.host.uid,
       cause:     'guestLeft',
     });
-  } else if (data.state === 'waiting') {
+  } else if (data.state === 'waiting' || data.state === 'finished') {
     await updateDoc(ref, { guest: null });
   }
 }

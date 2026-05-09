@@ -76,6 +76,34 @@
       <div id="pvp-lobby-room" class="pvp-lobby-room hidden">
         <div class="pvp-lobby-code-label">招待コード</div>
         <div id="pvp-lobby-code" class="pvp-lobby-code">------</div>
+
+        <!-- ホストのモード切替（待機中のみ表示） -->
+        <div id="pvp-room-mode-row" class="pvp-room-control hidden">
+          <div class="pvp-room-control-label">モード</div>
+          <div class="pvp-room-buttons">
+            <button class="pvp-room-btn" data-mode="pvp">⚔️ 対戦</button>
+            <button class="pvp-room-btn" data-mode="coop">🤝 協力</button>
+          </div>
+        </div>
+
+        <!-- PvP 装備形式 -->
+        <div id="pvp-room-format-row" class="pvp-room-control hidden">
+          <div class="pvp-room-control-label">装備形式</div>
+          <div class="pvp-room-buttons">
+            <button class="pvp-room-btn" data-format="current">🎒 現在の装備</button>
+            <button class="pvp-room-btn" data-format="set">⚖️ セット装備（公平）</button>
+          </div>
+        </div>
+
+        <!-- 協力ボス選択 -->
+        <div id="pvp-room-boss-row" class="pvp-room-control hidden">
+          <div class="pvp-room-control-label">挑むボス</div>
+          <select id="pvp-boss-select" class="pvp-boss-select"></select>
+        </div>
+
+        <!-- 表示専用: ゲスト側でも現在の設定が見えるサマリ -->
+        <div id="pvp-room-summary" class="pvp-room-summary"></div>
+
         <div class="pvp-lobby-players" id="pvp-lobby-players"></div>
         <button id="btn-pvp-ready" class="btn-primary">準備OK</button>
         <button id="btn-pvp-transfer-host" class="btn-secondary hidden">👑 ホスト権限を譲渡</button>
