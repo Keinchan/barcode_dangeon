@@ -51,10 +51,19 @@ const ENTER_RADIUS_M    = 80;         // 入場可能距離（プレイヤー位
 // ──────────────────────────────────────────
 // ダンジョンデータ共通ビルダー
 // ──────────────────────────────────────────
+// レアリティ別の階層数レンジ。難易度（rarityBase）が高いほど深いダンジョン
+// になる：低レア＝サクッと回せる短編、レジェンド＝長丁場のフルダンジョン。
+// 「階層が深いほど敵が強くなる」スケーリングは別途撤廃しているので、長さは
+// 純粋にプレイ時間と探索量の指標になる。
+const _FLOOR_RANGE_BY_RARITY = {
+  'コモン':     [1, 3],
+  'レア':       [2, 5],
+  'エピック':   [4, 7],
+  'レジェンド': [6, 10],
+};
+
 function _buildDungeonFromSeed(seed, lat, lng) {
   const rng = createRNG(seed);
-  const floors     = 3 + Math.floor(rng() * 3);
-  const difficulty = 1 + Math.floor(rng() * 3);
   const theme      = DUNGEON_THEMES[Math.floor(rng() * DUNGEON_THEMES.length)];
 
   const monsterTypeIdx = Math.floor(rng() * MONSTER_POOL.length);
@@ -67,6 +76,14 @@ function _buildDungeonFromSeed(seed, lat, lng) {
   else if (r < 0.80) rarityIdx = 1;
   else if (r < 0.95) rarityIdx = 2;
   else               rarityIdx = 3;
+
+  // 階層数: レアリティで決まるレンジから抽選。1F だけのコモンも、10F まで続く
+  // レジェンドもありうる。難易度＝長さで、敵レベルは階層に依らない。
+  const rarityName = RARITIES[rarityIdx].name;
+  const [floorMin, floorMax] = _FLOOR_RANGE_BY_RARITY[rarityName] ?? [1, 3];
+  const floors     = floorMin + Math.floor(rng() * (floorMax - floorMin + 1));
+  // 旧 difficulty はレアリティと連動しているのでレアリティ index + 1 を使う
+  const difficulty = rarityIdx + 1;
 
   // モンスターステータス算出用の合成「バーコード」
   // generateMonster 側で digits.slice(2,5) 等を使うため数字13桁にする
@@ -144,7 +161,11 @@ const RARITY_LEVEL_BASE = {
   'エピック':   25,
   'レジェンド': 50,
 };
-const LEVEL_PER_FLOOR  = 5;
+// 階層を進んでも敵レベルは上がらない（旧 LEVEL_PER_FLOOR=5 を撤廃）。
+// 「同じダンジョン内なら最初から最後まで同じ強さ」にして、深い階層への
+// 怖さの圧迫感を軽減する。難易度はダンジョンのレアリティで完結し、
+// 「行きたい強さのダンジョンを選ぶ」運用になる。
+const LEVEL_PER_FLOOR  = 0;
 const BOSS_LEVEL_BONUS = 5;
 
 export function enemyLevel(dungeonData, floor, isBoss) {
@@ -455,8 +476,12 @@ export const MP_PER_LEVEL   = 4;
 export const SKILL_MP_COST  = 8;
 
 // 指定レベルへの「次のレベル到達に必要なXP」
+//   旧: level * 20（Lv5 で 100 XP）→ 体感が遅すぎたので緩和。
+//   新: 12 + level * 8（Lv1 で 20 / Lv5 で 52 / Lv50 で 412）。低 Lv はとても早く、
+//   高 Lv では緩やかに伸びるカーブ。「格上撃破ボーナス」（main.js _xpFromMonster）
+//   と組み合わせると、雑魚狩りでも適度に Lv が上がる体感になる。
 export function xpRequiredForLevel(level) {
-  return level * 20;
+  return 12 + level * 8;
 }
 
 // レベル基準のステータス算出
