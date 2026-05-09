@@ -5021,6 +5021,41 @@ async function _openChestAt(src, idx) {
   autoSave();
 }
 
+// 宝箱開封結果モーダル。OK ボタンを押すまで閉じない明示ダイアログ。
+// レア度別の縁色 + アイテム情報（名前・レア度・Lv・基本ステ）を見やすく出す。
+const _RARITY_KEY = { 'コモン':'common', 'レア':'rare', 'エピック':'epic', 'レジェンド':'legendary' };
+const _RARITY_TAG = { 'コモン':'🎁 COMMON', 'レア':'✨ RARE', 'エピック':'💎 EPIC', 'レジェンド':'🏆 LEGENDARY' };
+function _showChestResultModal(inner) {
+  if (!inner) return;
+  const modal = document.getElementById('chest-result-modal');
+  const box   = document.getElementById('chest-result-box');
+  if (!modal || !box) return;
+  const rarityKey = _RARITY_KEY[inner.rarity] ?? 'common';
+  // クラスを差し替え（前回の rarity-* を全部剥がしてから付け直す）
+  box.classList.remove('rarity-common','rarity-rare','rarity-epic','rarity-legendary');
+  box.classList.add('rarity-' + rarityKey);
+  document.getElementById('chest-result-tag').textContent  = _RARITY_TAG[inner.rarity] ?? '🎁 GET';
+  document.getElementById('chest-result-icon').innerHTML   = iconImg(inner, 80);
+  const nameEl = document.getElementById('chest-result-name');
+  nameEl.textContent = inner.name;
+  nameEl.style.color = inner.rarityColor ?? '#fff';
+  const lv = inner.level ? ` / Lv${inner.level}` : '';
+  document.getElementById('chest-result-meta').textContent = `${inner.rarity}${lv}`;
+  document.getElementById('chest-result-stat').textContent = _statLine(inner) || '';
+  modal.classList.remove('hidden');
+}
+document.getElementById('btn-chest-result-ok')?.addEventListener('click', () => {
+  document.getElementById('chest-result-modal')?.classList.add('hidden');
+  playSfx('click');
+});
+// 背景タップでも閉じる（誤爆少なめ）
+document.getElementById('chest-result-modal')?.addEventListener('click', (e) => {
+  if (e.target?.id === 'chest-result-modal') {
+    e.target.classList.add('hidden');
+    playSfx('click');
+  }
+});
+
 // 宝箱開封の専用演出。レア度ごとに派手さを段階的に上げる：
 //   コモン   - 軽いキラキラ + ピックアップ SFX
 //   レア     - フラッシュ + 中量スパーク + crit SFX
@@ -5035,8 +5070,11 @@ function _celebrateChestOpen(inner) {
   const cy = (window.innerHeight ?? 600) / 2;
   const centerAnchor = { left: cx - 12, top: cy - 12, width: 24, height: 24 };
   const playerAt = playerVfxAnchor() ?? centerAnchor;
-  // バナー（既存の入手バナー UI を流用）。chest 開封の「初公開」演出なので、
-  // コモン中身でも force:true で必ず表示する。
+  // 開封結果モーダル: アイテム名・レア度・基本ステータスを「OK 押すまで居座る」
+  // 形でちゃんと見せる。トースト型 banner はメニュー(z=5500) の裏に隠れるケースが
+  // あるので、専用の z=6000 モーダルで確実に通知する。
+  _showChestResultModal(inner);
+  // バナーも併発（ダンジョン中は派手さの足し。force:true でコモンも表示）。
   showItemBanner(inner, { action: '宝箱から', force: true });
 
   if (rarity === 'コモン') {
