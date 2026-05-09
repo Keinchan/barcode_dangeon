@@ -366,6 +366,9 @@ export async function resetForRematch(code) {
 
 // 協力モード: ボスの HP / 位置 を更新する。プレイヤーがボスを攻撃した結果や
 // ホストがボス AI を進めた時に使う。HP が 0 以下なら state=finished + cause=bossKilled。
+//   args.counter = { role, hpAfter, dmg } を渡すと、攻撃したプレイヤーへの反撃を
+//   同じ書き込みでまとめて適用する（ボス HP 更新 + プレイヤー HP 減少 + ターン交代）。
+//   反撃でプレイヤーが HP 0 になったら cause=playerDied で state を終了させる。
 export async function submitBossUpdate(code, args) {
   const db = _getDb();
   if (!db) return;
@@ -379,12 +382,21 @@ export async function submitBossUpdate(code, args) {
     updates.turn   = args.nextTurn ?? 'host';
     updates.turnNo = (args.turnNo ?? 0) + 1;
   }
+  // 反撃: 攻撃したプレイヤーの HP を更新
+  if (args.counter && args.counter.role) {
+    updates[`${args.counter.role}.hp`] = Math.max(0, args.counter.hpAfter ?? 0);
+  }
   // ボス撃破でクリア
   if (typeof args.hp === 'number' && args.hp <= 0) {
     updates.state = 'finished';
     updates.cause = 'bossKilled';
     // 協力勝利は両者勝者扱い: winnerUid を 'coop' のセンチネルにする
     updates.winnerUid = 'coop';
+  } else if (args.counter && args.counter.hpAfter <= 0) {
+    // 反撃でプレイヤーが死亡 → 全滅扱い（協力モードでは個別の勝者は無し）
+    updates.state = 'finished';
+    updates.cause = 'playerDied';
+    updates.winnerUid = null;
   }
   if (Object.keys(updates).length === 0) return;
   await updateDoc(ref, updates);
@@ -408,6 +420,99 @@ export async function submitFlee(code, role, otherUid) {
     winnerUid: otherUid ?? null,
     actions:   arrayUnion({ byRole: role, kind: 'flee', ts: Date.now() }),
   });
+}
+
+// ホストがゲストへ手動で権限を譲渡する。waiting 状態でのみ意味がある操作。
+//   - swap: 旧ゲストが新ホストに、旧ホストが新ゲストになる
+//   - 両者の role / 位置 / 向きも入れ替える（host=下, guest=上 のレイアウト維持）
+//   - ready フラグはリセット（譲渡後に改めて準備し直す）
+export async function transferHost(code) {
+  const db = _getDb();
+  if (!db) return;
+  const ref  = doc(db, ROOMS, code);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return;
+  const data = snap.data();
+  if (!data.guest) throw new Error('参加者がいないので譲渡できません');
+  const cx = Math.floor(ARENA_W / 2);
+  // 新ホスト = 旧ゲスト
+  const newHost = {
+    ...data.guest,
+    role:    'host',
+    x:       cx,
+    y:       ARENA_H - 5,
+    facing:  [0, -1],
+    ready:   false,
+  };
+  // 新ゲスト = 旧ホスト
+  const newGuest = {
+    ...data.host,
+    role:    'guest',
+    x:       cx,
+    y:       4,
+    facing:  [0, 1],
+    ready:   false,
+  };
+  await updateDoc(ref, { host: newHost, guest: newGuest });
+}
+
+// ホスト本人がアプリを離脱した時の自動処理:
+//   - waiting 状態 + ゲストあり → ゲストを新ホストに昇格、guest を空にする
+//   - waiting 状態 + ゲストなし → 部屋を削除
+//   - battle 状態 → ゲストの勝利として state=finished
+//   - finished 状態 → 何もしない（呼び出し側が 30s 遅延 destroy を担当）
+export async function handleHostLeave(code) {
+  const db = _getDb();
+  if (!db) return;
+  const ref  = doc(db, ROOMS, code);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return;
+  const data = snap.data();
+  if (data.state === 'waiting') {
+    if (data.guest) {
+      const cx = Math.floor(ARENA_W / 2);
+      const promoted = {
+        ...data.guest,
+        role:    'host',
+        x:       cx,
+        y:       ARENA_H - 5,
+        facing:  [0, -1],
+        ready:   false,
+      };
+      await updateDoc(ref, { host: promoted, guest: null });
+    } else {
+      await deleteDoc(ref);
+    }
+  } else if (data.state === 'battle' && data.guest) {
+    // 戦闘中の離脱はゲストの不戦勝
+    await updateDoc(ref, {
+      state:     'finished',
+      winnerUid: data.guest.uid,
+      cause:     'hostLeft',
+    });
+  } else {
+    // 想定外の状態（or finished）は何もせず、呼び出し側に任せる
+  }
+}
+
+// ゲストが離脱した時の自動処理: guest フィールドを null にして、ホストが
+// 待機画面に戻ったように見せる。
+export async function handleGuestLeave(code) {
+  const db = _getDb();
+  if (!db) return;
+  const ref  = doc(db, ROOMS, code);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return;
+  const data = snap.data();
+  if (data.state === 'battle' && data.host) {
+    await updateDoc(ref, {
+      state:     'finished',
+      winnerUid: data.host.uid,
+      cause:     'guestLeft',
+    });
+  } else if (data.state === 'waiting') {
+    await updateDoc(ref, { guest: null });
+  }
 }
 
 // 部屋を完全に削除（戦闘終了後の掃除）。ホスト権限のみ。
