@@ -58,9 +58,17 @@ function _genCode() {
 // プレイヤーオブジェクトから「対戦に必要な情報だけ」を抜き出す。
 // 装備の中身など重いフィールドを送ると Firestore のドキュメントサイズ上限に
 // 当たるので、ステータスとレア度ぐらいに絞る。
-export function buildPvpProfile(uid, displayName, player) {
+//
+// 1 ルームアリーナ（21x19）で host=下中央 / guest=上中央スタートにするので
+// 初期座標もここで決め打ちで載せる。実際のセル数は dungeon.js の W/H と一致させる。
+const ARENA_W = 21;
+const ARENA_H = 19;
+export function buildPvpProfile(uid, displayName, player, role) {
+  const cx = Math.floor(ARENA_W / 2);
+  const isHost = role === 'host';
   return {
     uid,
+    role,                    // 'host' | 'guest' — 自分の役割を埋め込んで再描画しやすくする
     name:    (displayName || 'プレイヤー').slice(0, 20),
     level:   player.level ?? 1,
     atk:     player.atk ?? 0,
@@ -69,11 +77,16 @@ export function buildPvpProfile(uid, displayName, player) {
     maxMp:   player.maxMp ?? 0,
     hp:      player.maxHp ?? 1,    // バトル開始時は満タン
     mp:      player.maxMp ?? 0,
-    weaponName: player.weapon?.name ?? null,
+    weaponName:    player.weapon?.name ?? null,
     weaponElement: player.weapon?.element ?? null,
-    armorName:  player.armor?.name ?? null,
-    armorElement: player.armor?.element ?? null,
-    ready: false,
+    armorName:     player.armor?.name ?? null,
+    armorElement:  player.armor?.element ?? null,
+    emoji:         player.emoji ?? '🧙',
+    // アリーナ内の初期位置: ホストは下、ゲストは上。互いに距離をとってスタート。
+    x:       cx,
+    y:       isHost ? (ARENA_H - 5) : 4,
+    facing:  isHost ? [0, -1] : [0, 1],
+    ready:   false,
   };
 }
 
@@ -196,6 +209,62 @@ export async function submitAction(code, args) {
       : (args.hostUid  ?? null);
   }
   await updateDoc(ref, updates);
+}
+
+// アリーナでの「移動」アクション。自身の x/y/facing を更新し、ターンを相手に渡す。
+//   role: 'host' | 'guest'
+//   pos:  { x, y, facing }
+export async function submitMove(code, role, pos, turnNo) {
+  const db = _getDb();
+  if (!db) return;
+  const ref = doc(db, ROOMS, code);
+  const updates = {
+    [`${role}.x`]:      pos.x,
+    [`${role}.y`]:      pos.y,
+    [`${role}.facing`]: pos.facing,
+    turn:   role === 'host' ? 'guest' : 'host',
+    turnNo: (turnNo ?? 0) + 1,
+  };
+  await updateDoc(ref, updates);
+}
+
+// アリーナでの「攻撃」アクション。相手の HP/MP を更新し、ターンを相手に渡す。
+// 結果（hpAfter / mpAfter）はクライアント側で計算済の前提。HP0 なら state 終了。
+export async function submitArenaAttack(code, role, args) {
+  const db = _getDb();
+  if (!db) return;
+  const ref = doc(db, ROOMS, code);
+  const otherRole = role === 'host' ? 'guest' : 'host';
+  const updates = {
+    [`${otherRole}.hp`]: Math.max(0, args.targetHpAfter ?? 0),
+    actions: arrayUnion({
+      byRole: role,
+      kind:   args.kind ?? 'attack',
+      dmg:    args.dmg ?? 0,
+      ts:     Date.now(),
+    }),
+    turn:   otherRole,
+    turnNo: (args.turnNo ?? 0) + 1,
+  };
+  if (args.attackerMpAfter != null) {
+    updates[`${role}.mp`] = args.attackerMpAfter;
+  }
+  if ((args.targetHpAfter ?? 1) <= 0) {
+    updates.state     = 'finished';
+    updates.winnerUid = args.attackerUid ?? null;
+  }
+  await updateDoc(ref, updates);
+}
+
+// 逃走: 相手勝利確定で state=finished
+export async function submitFlee(code, role, otherUid) {
+  const db = _getDb();
+  if (!db) return;
+  await updateDoc(doc(db, ROOMS, code), {
+    state:     'finished',
+    winnerUid: otherUid ?? null,
+    actions:   arrayUnion({ byRole: role, kind: 'flee', ts: Date.now() }),
+  });
 }
 
 // 部屋を完全に削除（戦闘終了後の掃除）。ホスト権限のみ。
