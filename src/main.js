@@ -6301,9 +6301,17 @@ function _enterPvpLobby() {
 function _leavePvpRoom() {
   _stopPvpHeartbeat();
   if (_pvpUnsub) { try { _pvpUnsub(); } catch {} _pvpUnsub = null; }
-  // ホストは部屋を破棄（ゲストは購読解除のみ）
+  // ホストは部屋を破棄するが、すでに finished 状態なら 30 秒遅延させる。
+  // 勝者側が即時 destroy すると、敗者側の勝敗ダイアログが「相手が離脱しました」
+  // に上書きされてしまうので、相手が結果を読む時間を確保してから破棄する。
+  // 戦闘中（waiting/battle）の自発的退室では従来通り即破棄する。
   if (_pvpRole === 'host' && _pvpCode) {
-    pvpDestroyRoom(_pvpCode).catch(() => {});
+    const code = _pvpCode;
+    if (_pvpData?.state === 'finished' || _pvpFinishShown) {
+      setTimeout(() => { pvpDestroyRoom(code).catch(() => {}); }, 30000);
+    } else {
+      pvpDestroyRoom(code).catch(() => {});
+    }
   }
   _pvpCode = null;
   _pvpRole = null;
@@ -6357,12 +6365,16 @@ async function _pvpJoin() {
 // 待機画面 / アリーナ突入 / 結果 を出し分ける。
 function _onPvpUpdate(data) {
   if (!data) {
-    // 部屋が削除された（相手が離脱した等）
-    if (_pvpEntered) {
+    // 部屋が削除された。
+    // すでに勝敗が確定している（state==='finished'）か、こちらの結果ダイアログが
+    // 表示中の場合は「離脱しました」アラートを出さない。勝者側が部屋を破棄した時に
+    // 敗者側の勝敗ダイアログがこのアラートで上書きされて消えてしまう問題への対策。
+    const wasFinished = _pvpData?.state === 'finished' || _pvpFinishShown;
+    if (_pvpEntered && !wasFinished) {
       showAlert('対戦相手が部屋を離脱しました');
     }
     _leavePvpRoom();
-    show('pvp-lobby');
+    show(wasFinished ? 'map' : 'pvp-lobby');
     return;
   }
   const prev = _pvpData;
