@@ -128,20 +128,27 @@ function _refreshDungeons(lat, lng) {
   _refreshEncounters(lat, lng);
 }
 
-// 道端エンカウントの追加描画 + 範囲外の片付け。
-// 消費済みエンカウント（main.js が consumedEncounters セットで管理）はここで弾く。
+// 道端エンカウント（モンスター / 強敵 / 宝箱 / 商人）の表示は ENTER_RADIUS
+// (80m) 以内に絞る。ダンジョンと違い、地図全体に並べないことで「近づいた瞬間に
+// パッと出てくる発見体験」を演出する。GPS の小さな揺らぎでピンが点滅しないよう、
+// 表示判定（出す）を ENTER_RADIUS、撤去判定（消す）を ENTER_RADIUS + 20m と
+// 分けてヒステリシスを入れる。
+const ENCOUNTER_HIDE_RADIUS_M = ENTER_RADIUS + 20;
 function _refreshEncounters(lat, lng) {
   const playerLv = getPlayerLevelCb?.() ?? 1;
+  // 候補は 2km まで生成しておくが、実際にピンを出すのは 80m 以内だけ
   const encs = getMapEncountersNear(lat, lng, playerLv, 2000);
   for (const e of encs) {
     if (renderedEncounters.has(e.seed)) continue;
     if (isEncounterConsumedCb?.(e.seed)) continue;
+    const dist = distanceMeters(lat, lng, e.lat, e.lng);
+    if (dist > ENTER_RADIUS) continue;       // 80m 以内に来た瞬間に出現
     _addEncounterPin(e);
   }
   for (const [seed, entry] of renderedEncounters) {
     const dist = distanceMeters(lat, lng, entry.encounter.lat, entry.encounter.lng);
     const consumed = isEncounterConsumedCb?.(seed);
-    if (dist > PIN_KEEP_RADIUS_M || consumed) {
+    if (dist > ENCOUNTER_HIDE_RADIUS_M || consumed) {
       try { entry.marker.remove(); } catch {}
       renderedEncounters.delete(seed);
     }
@@ -236,8 +243,6 @@ function _encounterPinHtml(encounter) {
 function _encounterPopupHtml(e) {
   const d = _ENCOUNTER_DISPLAY[e.kind];
   if (!playerPos) return `<b>${d.title}</b><br>位置情報を取得中…`;
-  const dist = Math.round(distanceMeters(playerPos.lat, playerPos.lng, e.lat, e.lng));
-  const inRange = (dist <= ENTER_RADIUS) || getDebugState().bypassEnterRadius;
   let body = '';
   let actionLabel = '';
   switch (e.kind) {
@@ -260,15 +265,14 @@ function _encounterPopupHtml(e) {
       actionLabel = '見る';
       break;
   }
+  // エンカウントピンは _refreshEncounters で 80m 以内のときしか出現しないので、
+  // ポップアップが開けた時点で常に「接触可」。距離フォールバックは描かない。
   return (
     `<div><b>${d.label} ${d.title}</b></div>` +
     `<div style="margin-top:4px">${body}</div>` +
-    (inRange
-      ? `<button class="popup-encounter-btn" data-seed="${e.seed}" `
-        + `style="margin-top:8px;padding:6px 14px;background:${d.bg};color:#fff;`
-        + `border:none;border-radius:6px;cursor:pointer;font-weight:bold">${actionLabel}</button>`
-      : `<div style="margin-top:6px;color:#888">🚶 距離 ${dist}m`
-        + `（${ENTER_RADIUS}m以内で接触可）</div>`)
+    `<button class="popup-encounter-btn" data-seed="${e.seed}" ` +
+    `style="margin-top:8px;padding:6px 14px;background:${d.bg};color:#fff;` +
+    `border:none;border-radius:6px;cursor:pointer;font-weight:bold">${actionLabel}</button>`
   );
 }
 
