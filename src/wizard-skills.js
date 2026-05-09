@@ -90,7 +90,9 @@ function W(element, lv, name, range, pp, desc, opts = {}) {
 //   Lv13 まりょくチャージ → 攻撃力アップ・強（atkUpHigh, 3T）
 //   Lv20 シールド/ベール  → 防御力アップ（defUp,    5T）
 //   Lv35 高位シールド     → 防御力アップ・強（defUpHigh, 3T）
-// 既存スキル定義に手作業で書き足すのは 24 行になるので、ID パターンで一括付与する。
+//   Lv43 ステップ系       → 瞬発力アップ（agility,   3T）— 1 ターン 2 回行動
+//   Lv66 タイムディレイ系 → 瞬発力アップ・強（agilityHigh, 2T）— 1 ターン 3 回行動
+// 既存スキル定義に手作業で書き足すのは 36 行になるので、ID パターンで一括付与する。
 function _autoAssignSelfBuffs(list) {
   for (const sk of list) {
     if (sk.pattern !== 'SELF') continue;
@@ -98,10 +100,12 @@ function _autoAssignSelfBuffs(list) {
     const m = (sk.id || '').match(/^wiz_\w+_(\d+)$/);
     if (!m) continue;
     const lv = parseInt(m[1], 10);
-    if      (lv === 7)  sk.selfBuff = { kind: 'atkUp',     turns: 6 };
-    else if (lv === 13) sk.selfBuff = { kind: 'atkUpHigh', turns: 3 };
-    else if (lv === 20) sk.selfBuff = { kind: 'defUp',     turns: 5 };
-    else if (lv === 35) sk.selfBuff = { kind: 'defUpHigh', turns: 3 };
+    if      (lv === 7)  sk.selfBuff = { kind: 'atkUp',       turns: 6 };
+    else if (lv === 13) sk.selfBuff = { kind: 'atkUpHigh',   turns: 3 };
+    else if (lv === 20) sk.selfBuff = { kind: 'defUp',       turns: 5 };
+    else if (lv === 35) sk.selfBuff = { kind: 'defUpHigh',   turns: 3 };
+    else if (lv === 43) sk.selfBuff = { kind: 'agility',     turns: 3 };
+    else if (lv === 66) sk.selfBuff = { kind: 'agilityHigh', turns: 2 };
   }
 }
 

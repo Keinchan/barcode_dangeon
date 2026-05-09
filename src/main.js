@@ -37,7 +37,7 @@ import { Dungeon } from './dungeon.js';
 import {
   STATUS_DEFS, applyStatus, hasStatus, removeStatus, tickStatuses,
   accuracyMultiplier, shockSkipChance, fractureSelfHurtChance, dominantStatus,
-  attackBuffMult, defenseBuffMult, activeBuffs,
+  attackBuffMult, defenseBuffMult, activeBuffs, actionsPerTurn,
 } from './status.js';
 import {
   showFloatingDamage, showItemBanner, shockwave, magicCircle, playerVfxAnchor,
@@ -3808,6 +3808,9 @@ function loadFloor(floor) {
   // フロア進入時に MP 全回復（HP は据え置き）。スキル/技を毎フロアで気軽に振れる
   // よう、ローグライクの「フロア境界＝休憩」の感覚に合わせる
   player.mp = player.maxMp ?? 0;
+  // 行動回数カウンタをフロア境界でリセット（agility は status 経由で持続するので、
+  // 残ターン数があれば次フロアでも 2 回行動が継続する）。
+  _actionsLeftThisTurn = actionsPerTurn(player);
   // ミニオン HP もフロア境界で全回復（休憩感）
   for (const mi of (player.minions ?? [])) {
     mi.hp = mi.maxHp ?? mi.hp ?? 0;
@@ -4204,6 +4207,12 @@ function _celebratePickup(item, action = '入手') {
 // 攻撃演出が重なる/HP 表示がチカチカするバグを防ぐ。
 let _turnBusy = false;
 
+// 瞬発力（agility）バフで「1 ターンに複数回行動」を実現するためのカウンタ。
+// 各ターンの先頭でバフ status から actionsPerTurn を計算してセット。プレイヤーの
+// 行動を 1 つ消化するたびに -1 され、0 になった時点で初めて敵ターンが回る。
+// dungeon 入場時に初期化し、敵ターン完了時に次ターンの値を再計算する。
+let _actionsLeftThisTurn = 1;
+
 // ── 移動（2 段階：向き変更 → 同方向で前進）──
 //   - 待機 (0,0): その場で 1 ターン経過（向きは変えない）
 //   - 入力方向と現在の向きが違う: 向きだけ変更、ターンは経過しない
@@ -4321,11 +4330,30 @@ function _maybeMapBattleClear() {
 }
 
 function _runEnemyTurn() {
+  // 瞬発力バフ中は 1 ターンに複数回行動できる。
+  // _actionsLeftThisTurn が 1 より多ければ、これは「同じターン内の追加行動」なので
+  // 敵ターンや status tick を走らせず、すぐに次の入力を許可して return する。
+  // 0 になった時に初めて本番の敵ターンが回り、最後にカウンタを次ターンぶん再計算。
+  _actionsLeftThisTurn = Math.max(0, _actionsLeftThisTurn - 1);
+  if (_actionsLeftThisTurn > 0) {
+    if (typeof dungeonLog === 'function') {
+      dungeonLog(`💨 瞬発力で追加行動！（残り ${_actionsLeftThisTurn} 回）`);
+    }
+    refreshHUD();
+    if (dungeon) dungeon.render(document.getElementById('dungeon-canvas'));
+    _turnBusy = false;
+    return;
+  }
+
   // ターン進行: アニメーションが終わるまで move() の追加入力を弾く。
   // 完了パスが複数ある（即終了/death/最後の magic 後など）ため、ここで上限の
   // setTimeout も予防的に張って必ずクリアされるようにする。
   _turnBusy = true;
-  const _clearBusy = () => { _turnBusy = false; };
+  const _clearBusy = () => {
+    _turnBusy = false;
+    // 敵ターン完了時点で次ターンの行動回数を再計算（バフ tick 反映後の値）
+    _actionsLeftThisTurn = actionsPerTurn(player);
+  };
   // 上限ガード: 通常はアニメ完了 callback でクリアするが、想定外で漏れた場合の保険
   setTimeout(_clearBusy, 6000);
 

@@ -49,6 +49,20 @@ export const STATUS_DEFS = {
     isBlock: false, isMod: false, isDot: false, isBuff: true,
     defAdd: 0.60,
   },
+  agility: {
+    label: '瞬発力アップ', emoji: '💨', color: '#80deea',
+    desc: '1 ターンに 2 回行動できる（移動・技・通常攻撃いずれも）。',
+    overlay: 'rgba(128,222,234,0.10)',
+    isBlock: false, isMod: false, isDot: false, isBuff: true,
+    extraActions: 1,           // 1 ターンの中で +1 回（合計 2 回行動）
+  },
+  agilityHigh: {
+    label: '瞬発力アップ・強', emoji: '⚡', color: '#26c6da',
+    desc: '1 ターンに 3 回行動できる（強化版・短時間の超機動）。',
+    overlay: 'rgba(38,198,218,0.12)',
+    isBlock: false, isMod: false, isDot: false, isBuff: true,
+    extraActions: 2,           // 合計 3 回行動
+  },
 
   // ── デバフ（ネガティブ） ──
   poison: {
@@ -220,6 +234,18 @@ export function defenseBuffMult(target) {
     if (def?.defAdd) mult += def.defAdd;
   }
   return mult;
+}
+
+// 1 ターンに何回行動できるかを返す（base 1 + agility 系の extraActions の最大）。
+//   agility (+1) と agilityHigh (+2) が両方付いていれば最大値を採用（重複加算しない）。
+export function actionsPerTurn(target) {
+  let extra = 0;
+  for (const s of target?.statuses ?? []) {
+    if ((s.turns ?? 0) <= 0) continue;
+    const def = STATUS_DEFS[s.kind];
+    if (def?.extraActions) extra = Math.max(extra, def.extraActions);
+  }
+  return 1 + extra;
 }
 
 // 表示用: いま付いているバフ（statuses[].isBuff=true なエントリ）の一覧
