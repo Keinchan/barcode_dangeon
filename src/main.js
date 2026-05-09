@@ -3764,7 +3764,12 @@ function _acquireItem(item) {
 function enterDungeon(data) {
   document.getElementById('dungeon-footer').classList.remove('hidden');
 
-  dungeonData  = data;
+  // 入る度ランダム生成: 入場時に runSalt（毎回違う数値）を生成して dungeonData に
+  // 載せ、フロアレイアウト・モンスター配置・床アイテム・ショップ在庫の RNG seed に
+  // 混ぜる。これにより同じダンジョン（場所）に何度入っても毎回別物になる。
+  // 元データを直接書き換えると map.js の renderedPins キャッシュが汚染されるので
+  // 必ず spread でクローンしてから書き加える。
+  dungeonData  = { ...data, runSalt: `${Date.now()}-${Math.floor(Math.random() * 1e9)}` };
   if (!Array.isArray(player.materials))   player.materials   = [];
   if (!Array.isArray(player.consumables)) player.consumables = [];
   if (!Array.isArray(player.statuses))    player.statuses    = [];

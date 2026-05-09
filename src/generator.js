@@ -504,14 +504,16 @@ export function generateShopkeeperFor(dungeonData, floor) {
 
 // ショップ在庫を生成（4 アイテム）。ダンジョンの難易度に応じて構成が変わる
 export function generateShopStock(dungeonData, floor) {
-  const rng       = createRNG(hashString(`shop:${dungeonData.seed}:${floor}`));
+  // ショップ在庫もダンジョン入場ごとに変える（runSalt があれば混ぜる）
+  const _runSalt = dungeonData.runSalt ?? '';
+  const rng       = createRNG(hashString(`shop:${dungeonData.seed}:${floor}:${_runSalt}`));
   const itemLevel = enemyLevel(dungeonData, floor, false);
   const dunRarity = dungeonData.rarityBase.name;
   const stock     = [];
 
   // バーコード基盤の汎用アイテム 2 個（薬・巻物・武器・防具のいずれか）
   for (let i = 0; i < 2; i++) {
-    const seed = hashString(`shop:${dungeonData.seed}:${floor}:slot${i}`);
+    const seed = hashString(`shop:${dungeonData.seed}:${floor}:${_runSalt}:slot${i}`);
     const code = String(seed).padStart(13, '0').slice(0, 13);
     const item = generateItemFromBarcode(code, null, itemLevel);
     stock.push({ item, price: shopPriceFor(item, dunRarity) });
@@ -531,7 +533,9 @@ export function generateShopStock(dungeonData, floor) {
 //   武器ドロップは「敵」からは出さず、フロアの宝箱（chest）かボスドロップに集約。
 //   通常の床落ちは消耗品（薬・巻物）を中心にし、装備偏重を解消。
 export function generateFloorItems(dungeonData, floor, rooms) {
-  const rng       = createRNG(hashString(`floor-items:${dungeonData.seed}:${floor}`));
+  // 床アイテム配置も入場ごとに変える（巻物/技書/宝箱の位置がシャッフルする）
+  const _runSalt2 = dungeonData.runSalt ?? '';
+  const rng       = createRNG(hashString(`floor-items:${dungeonData.seed}:${floor}:${_runSalt2}`));
   const items     = [];
   const itemLevel = enemyLevel(dungeonData, floor, false);
 
