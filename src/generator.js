@@ -309,6 +309,22 @@ function _buildMapMerchant(seed, lat, lng, playerLevel, rng) {
   };
 }
 
+// デバッグ用: 任意の場所・種別でエンカウントを 1 件作る。
+// グリッド由来の決定論には載せない（seed に "debug:" プレフィックス + タイム
+// スタンプ）ので、同じ場所に通常エンカウントが居ても重複表示で並べられる。
+//   kind = 'monster' | 'strong' | 'chest' | 'merchant'
+export function buildDebugEncounter(kind, lat, lng, playerLevel = 1) {
+  const seed = `debug:${kind}:${Date.now()}:${Math.floor(Math.random() * 1e6)}`;
+  const rng  = createRNG(hashString(seed));
+  switch (kind) {
+    case 'monster':  return _buildMapMonster (seed, lat, lng, playerLevel, rng);
+    case 'strong':   return _buildMapStrong  (seed, lat, lng, playerLevel, rng);
+    case 'chest':    return _buildMapChest   (seed, lat, lng, playerLevel, rng);
+    case 'merchant': return _buildMapMerchant(seed, lat, lng, playerLevel, rng);
+  }
+  return null;
+}
+
 // プレイヤー位置からダンジョン入口までの距離（m）
 export function distanceMeters(lat1, lng1, lat2, lng2) {
   // 簡易: 1° ≒ 111.32km、緯度補正なしで近距離なら十分

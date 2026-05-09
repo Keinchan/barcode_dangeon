@@ -5,6 +5,7 @@ import {
   distanceMeters,
   ENTER_RADIUS,
   getMapEncountersNear,
+  buildDebugEncounter,
 } from './generator.js';
 import { getDebugState } from './debug.js';
 
@@ -297,6 +298,21 @@ function _addEncounterPin(encounter) {
     }, { once: true });
   });
   renderedEncounters.set(encounter.seed, { marker, encounter });
+}
+
+// デバッグ用: プレイヤーから 30m 北にエンカウントを 1 件強制スポーン。
+// 距離は 30m にしておけば同じ画面内 (80m 圏内) に必ず収まり、ピンが即タップ可能。
+// kind = 'monster' | 'strong' | 'chest' | 'merchant'
+export function debugSpawnEncounter(kind) {
+  if (!playerPos || !map) return false;
+  const playerLv = getPlayerLevelCb?.() ?? 1;
+  // プレイヤーから北方向に 30m オフセット（緯度 1° = 111,320m）
+  const dLat = 30 / 111320;
+  const enc = buildDebugEncounter(kind, playerPos.lat + dLat, playerPos.lng, playerLv);
+  if (!enc) return false;
+  if (renderedEncounters.has(enc.seed)) return false;
+  _addEncounterPin(enc);
+  return true;
 }
 
 // main.js から消費済みエンカウントのフラグや画面状態の変化に応じて

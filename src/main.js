@@ -1,4 +1,4 @@
-import { initMap, refreshPin, setPlayerPosition, invalidateMapSize, recenterOnPlayer, resumeGeolocation, setEncounterCallbacks, removeEncounterPin } from './map.js';
+import { initMap, refreshPin, setPlayerPosition, invalidateMapSize, recenterOnPlayer, resumeGeolocation, setEncounterCallbacks, removeEncounterPin, debugSpawnEncounter } from './map.js';
 import { startScanner, stopScanner, getPosition, categoryOfFormat } from './scanner.js';
 import {
   createPlayer,
@@ -5495,6 +5495,17 @@ if (DEBUG) {
     }
     dungeon.render(document.getElementById('dungeon-canvas'));
   });
+
+  // 道端エンカウント強制スポーン（プレイヤーから 30m 北にピンを出す）
+  // 4 種類の動作確認用。グリッドの決定論には載らないので、押すたびに別個体になる。
+  const _spawn = (kind) => {
+    const ok = debugSpawnEncounter(kind);
+    if (!ok) showAlert('GPS 位置がまだ取得できていません（数秒後に再試行）');
+  };
+  document.getElementById('debug-spawn-monster')?.addEventListener('click',  () => _spawn('monster'));
+  document.getElementById('debug-spawn-strong')?.addEventListener('click',   () => _spawn('strong'));
+  document.getElementById('debug-spawn-chest')?.addEventListener('click',    () => _spawn('chest'));
+  document.getElementById('debug-spawn-merchant')?.addEventListener('click', () => _spawn('merchant'));
 
   // インベントリ操作（バーコードを type / rarity 確定の組合せで決め打ち）
   const DEBUG_ITEM_CODES = {
