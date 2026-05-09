@@ -137,6 +137,178 @@ export function getDungeonsNear(lat, lng, radiusMeters = 1500) {
   return result;
 }
 
+// ──────────────────────────────────────────
+// 地図エンカウント（ポケGO 風の道端遭遇）
+// ──────────────────────────────────────────
+//   ダンジョンとは独立に、地図の 100m グリッドから決定論的に出現する 4 種類:
+//     monster  - 単体モンスター。タップで 1 ルーム戦闘ステージへ突入
+//     strong   - 強敵イベント。レベル + 5〜+10 / プレイヤー任意で挑戦
+//     chest    - 宝箱（地面に置いてある形）。歩み寄って収集→鍵で開ける
+//     merchant - 商人。タップで商品リストモーダル（ダンジョン内商人と同じ仕様）
+//
+//   グリッドサイズはダンジョンの 200m より細かい 100m にして、2km 圏で
+//   常に 10〜30 件のエンカウントが分布するようにする。出現確率は cell ごとに
+//   抽選し、type ごとに重み付けで分配。座標は cell 内 jitter で重ならないよう散らす。
+//
+//   「消費した」エンカウント（拾った宝箱・倒したモンスター等）は別途
+//   呼び出し側（main.js）の consumedSet で除外することを想定。
+// ──────────────────────────────────────────
+export const MAP_ENCOUNTER_GRID = 0.001;        // 約 100m
+export const MAP_ENCOUNTER_RADIUS = 2000;       // 2 km
+const _ENCOUNTER_WEIGHTS = [
+  { kind: 'monster',  w: 0.30 },
+  { kind: 'chest',    w: 0.08 },
+  { kind: 'merchant', w: 0.04 },
+  { kind: 'strong',   w: 0.03 },
+  // 残り 55% は空セル
+];
+
+// 1 セル → 1 エンカウント（or null）。playerLevel に応じてスケーリング。
+function _gridEncounter(gx, gy, playerLevel) {
+  const seed = hashString(`map-enc:${gx}:${gy}`);
+  const rng  = createRNG(seed);
+  const r    = rng();
+  let acc = 0;
+  let kind = null;
+  for (const { kind: k, w } of _ENCOUNTER_WEIGHTS) {
+    acc += w;
+    if (r < acc) { kind = k; break; }
+  }
+  if (!kind) return null;
+
+  // セル内 jitter（縁を避けて 20〜80%）。lat/lng は決定論的（再描画してもズレない）。
+  const lat = gy * MAP_ENCOUNTER_GRID + MAP_ENCOUNTER_GRID * (0.2 + rng() * 0.6);
+  const lng = gx * MAP_ENCOUNTER_GRID + MAP_ENCOUNTER_GRID * (0.2 + rng() * 0.6);
+
+  switch (kind) {
+    case 'monster':  return _buildMapMonster (seed, lat, lng, playerLevel, rng);
+    case 'strong':   return _buildMapStrong  (seed, lat, lng, playerLevel, rng);
+    case 'chest':    return _buildMapChest   (seed, lat, lng, playerLevel, rng);
+    case 'merchant': return _buildMapMerchant(seed, lat, lng, playerLevel, rng);
+  }
+  return null;
+}
+
+// プレイヤー周囲 radiusMeters のエンカウントを返す（重複しないように grid で dedupe）。
+export function getMapEncountersNear(lat, lng, playerLevel = 1, radiusMeters = MAP_ENCOUNTER_RADIUS) {
+  const radiusDeg  = radiusMeters / 100000;
+  const cellRadius = Math.ceil(radiusDeg / MAP_ENCOUNTER_GRID);
+  const baseGx = Math.floor(lng / MAP_ENCOUNTER_GRID);
+  const baseGy = Math.floor(lat / MAP_ENCOUNTER_GRID);
+  const out = [];
+  for (let dy = -cellRadius; dy <= cellRadius; dy++) {
+    for (let dx = -cellRadius; dx <= cellRadius; dx++) {
+      const e = _gridEncounter(baseGx + dx, baseGy + dy, playerLevel);
+      if (e) out.push(e);
+    }
+  }
+  return out;
+}
+
+// レアリティを weight で抽選するヘルパ（monster / strong / chest 共通）
+function _pickRarityByWeights(rng, weights) {
+  const r = rng();
+  let acc = 0;
+  for (const [name, w] of weights) {
+    acc += w;
+    if (r < acc) return RARITIES.find(x => x.name === name) ?? RARITIES[0];
+  }
+  return RARITIES[0];
+}
+
+// 通常モンスター: 周囲レベルのコモン〜エピックを 1 体。プレイヤー Lv ± 2 で
+// バトル感が常に丁度良いところを目指す（強すぎず弱すぎず）。
+function _buildMapMonster(seed, lat, lng, playerLevel, rng) {
+  const rarity = _pickRarityByWeights(rng, [
+    ['コモン', 0.55], ['レア', 0.30], ['エピック', 0.13], ['レジェンド', 0.02],
+  ]);
+  const elementIdx = Math.floor(rng() * ELEMENTS.length);
+  const element = ELEMENTS[elementIdx];
+  const fakeBarcode = String(seed).padStart(13, '0').slice(0, 13);
+  const job = jobForBarcode(fakeBarcode);
+  // 直接的なレベル指定: プレイヤー Lv を中心に rng で揺らす
+  const lvl = Math.max(1, Math.min(MAX_LEVEL, playerLevel + Math.floor(rng() * 5) - 2));
+  return {
+    kind: 'monster',
+    seed,
+    lat, lng,
+    rarity, element,
+    level: lvl,
+    barcode: fakeBarcode,
+    jobId: job.id,
+    name: `${element}属性の${job.label}`,
+    emoji: job.emoji,
+  };
+}
+
+// 強敵: プレイヤー Lv +5〜+10 / レアリティ +1 段階。「挑戦は任意」UX 想定。
+function _buildMapStrong(seed, lat, lng, playerLevel, rng) {
+  const rarity = _pickRarityByWeights(rng, [
+    ['レア', 0.40], ['エピック', 0.40], ['レジェンド', 0.20],
+  ]);
+  const elementIdx = Math.floor(rng() * ELEMENTS.length);
+  const element = ELEMENTS[elementIdx];
+  const fakeBarcode = String(seed).padStart(13, '0').slice(0, 13);
+  const job = jobForBarcode(fakeBarcode);
+  const lvl = Math.max(1, Math.min(MAX_LEVEL, playerLevel + 5 + Math.floor(rng() * 6)));
+  return {
+    kind: 'strong',
+    seed,
+    lat, lng,
+    rarity, element,
+    level: lvl,
+    barcode: fakeBarcode,
+    jobId: job.id,
+    name: `強敵: ${element}の${job.label}`,
+    emoji: job.emoji,
+  };
+}
+
+// 宝箱: プレイヤー Lv に合わせた装備（武器 75% / 防具 25%）を中身として持つ。
+// 鍵で開けるので、地図上では「拾う」だけ → インベントリに chest として入る。
+function _buildMapChest(seed, lat, lng, playerLevel, rng) {
+  const rarity = _pickRarityByWeights(rng, [
+    ['コモン', 0.50], ['レア', 0.30], ['エピック', 0.15], ['レジェンド', 0.05],
+  ]);
+  const wantWeapon = rng() < 0.75;
+  // バーコードを type 強制で組み立てる（chest 内中身は決定論的にしておく）
+  const code = String(seed).padStart(13, '0').slice(0, 13);
+  const adjusted = _forceTypeBarcode(code, wantWeapon ? 0 : 1);
+  const inner = generateItemFromBarcode(adjusted, rarity, Math.max(1, playerLevel));
+  return {
+    kind: 'chest',
+    seed,
+    lat, lng,
+    rarity,
+    inner,
+  };
+}
+
+// 商人: 4 商品の在庫を持つ（generateShopStock を流用）。
+function _buildMapMerchant(seed, lat, lng, playerLevel, rng) {
+  const rarity = _pickRarityByWeights(rng, [
+    ['コモン', 0.55], ['レア', 0.30], ['エピック', 0.12], ['レジェンド', 0.03],
+  ]);
+  // generateShopStock は dungeonData を要求するので、最低限のフィールドを
+  // 揃えた合成データを渡す。seed と floor=1 で stock を決定論的に。
+  const fakeDungeon = {
+    seed, barcode: String(seed).padStart(13, '0').slice(0, 13),
+    rarityBase: rarity,
+    element: ELEMENTS[Math.floor(rng() * ELEMENTS.length)],
+  };
+  const stock = generateShopStock(fakeDungeon, 1);
+  // ステージ上の商人レベル（戦闘するなら格上）。playerLevel + 25 程度
+  const level = Math.max(1, Math.min(MAX_LEVEL, playerLevel + 25));
+  return {
+    kind: 'merchant',
+    seed,
+    lat, lng,
+    rarity,
+    level,
+    stock,
+  };
+}
+
 // プレイヤー位置からダンジョン入口までの距離（m）
 export function distanceMeters(lat1, lng1, lat2, lng2) {
   // 簡易: 1° ≒ 111.32km、緯度補正なしで近距離なら十分
