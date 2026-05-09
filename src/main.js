@@ -5035,8 +5035,9 @@ function _celebrateChestOpen(inner) {
   const cy = (window.innerHeight ?? 600) / 2;
   const centerAnchor = { left: cx - 12, top: cy - 12, width: 24, height: 24 };
   const playerAt = playerVfxAnchor() ?? centerAnchor;
-  // バナー（既存の入手バナー UI を流用）
-  showItemBanner(inner, { action: '宝箱から' });
+  // バナー（既存の入手バナー UI を流用）。chest 開封の「初公開」演出なので、
+  // コモン中身でも force:true で必ず表示する。
+  showItemBanner(inner, { action: '宝箱から', force: true });
 
   if (rarity === 'コモン') {
     sparkSpray(centerAnchor, { count: 12, color: '#ffd54f' });

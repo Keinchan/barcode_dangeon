@@ -139,7 +139,8 @@ export function deathBurst(target, opts = {}) {
 }
 
 // レア度に応じて取得アイテムを派手に告知。
-//   - コモン: 何もしない（呼び出し側の dungeonLog のみ）
+//   - コモン: 通常は無音（dungeonLog のみ）。opts.force=true で強制表示する
+//             （宝箱開封など「中身を初公開する瞬間」用）。
 //   - レア:   控えめなフチ付きトースト
 //   - エピック: 紫の中央バナー
 //   - レジェンド: 全画面の金色バナー＋星屑
@@ -147,7 +148,9 @@ export function deathBurst(target, opts = {}) {
 export function showItemBanner(item, opts = {}) {
   if (!item || !item.rarity) return;
   const rarity = item.rarity;
-  if (rarity === 'コモン') return;
+  // 通常は コモン だと出さない（取得 SFX 過多になるため）。
+  // opts.force=true なら強制表示する。
+  if (rarity === 'コモン' && !opts.force) return;
 
   const action = opts.action ?? '入手';   // "入手" / "ドロップ" など
   const cls    = `item-banner rarity-${rarityKey(rarity)}`;
@@ -156,7 +159,8 @@ export function showItemBanner(item, opts = {}) {
   const tag    =
     rarity === 'レジェンド' ? '🏆 LEGENDARY' :
     rarity === 'エピック'   ? '💎 EPIC'      :
-                              '✨ RARE';
+    rarity === 'レア'       ? '✨ RARE'      :
+                              '🎁 COMMON';
   const lvHtml = item.level ? `<span class="item-banner-lv">Lv${item.level}</span>` : '';
 
   const div = document.createElement('div');

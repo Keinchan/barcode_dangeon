@@ -2465,6 +2465,14 @@ input, textarea {
   margin-left: 4px;
   font-size: 10px;
 }
+.item-banner.rarity-common {
+  /* コモン用のバナー（宝箱開封など force:true 経由で出す時専用）。
+     地味だが「ちゃんと出ている」分かる程度のグレー系装飾にする。 */
+  background: linear-gradient(135deg, #2c2c34 0%, #1a1a22 100%);
+  border: 1.5px solid #888;
+  color: #e0e0e0;
+  box-shadow: 0 0 12px rgba(180,180,180,0.30);
+}
 .item-banner.rarity-rare {
   background: linear-gradient(135deg, #1e3c5c 0%, #14283c 100%);
   border: 1.5px solid #4fc3f7;
