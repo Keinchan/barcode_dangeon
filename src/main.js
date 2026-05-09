@@ -430,13 +430,14 @@ async function _enterMapBattle(e, isStrong) {
   enterDungeon(dungeonForBattle);
 }
 
-// 宝箱: 拾うか確認してインベントリに格納（dungeon 内の chest 経路と同じ shape）。
+// 宝箱: 拾うか確認してストレージへ自動収納（dungeon 内の chest 経路と同じ）。
+// 持ち物 8 枠を圧迫しないようにストレージ送り、メニューの📦タブから鍵で開ける。
 async function _collectMapChest(e) {
   if (consumedEncounters.has(e.seed)) return;
   if (!e.inner) return;
   const ok = await showConfirm(
     `🎁 宝箱を拾いますか？\n\n中身: ${e.inner.name}（${e.rarity?.name ?? ''}）\n` +
-    `※ 鍵が無いと中身は取り出せません`,
+    `※ 鍵が無いと中身は取り出せません（自動でストレージに収納されます）`,
     { okLabel: '拾う', cancelLabel: 'やめる' },
   );
   if (!ok) return;
@@ -448,15 +449,12 @@ async function _collectMapChest(e) {
     rarityColor: e.rarity?.color ?? e.inner.rarityColor,
     inner: e.inner,
   };
-  if (!canAddToInventory(chestItem)) {
-    showAlert('🎒 持ち物が満杯で宝箱を拾えませんでした');
-    return;
-  }
-  addToInventory(chestItem);
+  addToStorage(chestItem);
   playSfx('pickup', { rarityTier: rarityTier(chestItem.rarity) });
-  showAlert(`🎁 宝箱を拾った！\nメニューから鍵で開けると ${e.inner.name} が手に入ります`);
+  showAlert(`🎁 宝箱をストレージへ収納\nメニュー → 📦ストレージ から鍵で開けると ${e.inner.name} が手に入ります`);
   _markEncounterConsumed(e.seed);
   refreshHUD();
+  refreshMenu();
   autoSave();
 }
 
@@ -1387,6 +1385,10 @@ function _renderStorageRow(item, idx) {
   const lvHtml = item.level ? `<span class="menu-row-lv">Lv${item.level}</span>` : '';
   const countHtml = (isStackable(item) && (item.count ?? 1) > 1)
     ? `<span class="menu-row-count">×${item.count}</span>` : '';
+  // 宝箱はストレージから直接「鍵で開ける」アクションを出す（持ち物に戻す手間を省略）。
+  const isChest = item.type === 'chest';
+  const openBtn = isChest
+    ? `<button class="menu-action-btn open">🗝️ 開ける</button>` : '';
   div.innerHTML = `
     <div class="menu-row-emoji">${iconImg(item, 38)}</div>
     <div class="menu-row-info">
@@ -1395,10 +1397,14 @@ function _renderStorageRow(item, idx) {
       ${skillHtml}
     </div>
     <div class="menu-row-actions">
+      ${openBtn}
       <button class="menu-action-btn move withdraw">→持ち物</button>
       <button class="menu-action-btn danger discard">廃棄</button>
     </div>
   `;
+  if (isChest) {
+    div.querySelector('.open').addEventListener('click', () => _openChestFromStorage(idx));
+  }
   div.querySelector('.withdraw').addEventListener('click', () => {
     // スタック対象なら持ち物の同じスタックに合流できるので満杯でも OK な場合あり
     const probe = player.storage[idx];
@@ -4533,20 +4539,17 @@ function pickupItem(item) {
     return;
   }
 
-  // 宝箱：踏むと「拾う」だけ。中身を取り出すには鍵（🗝️）が必要。
-  // 仕様変更前は踏んだ瞬間に中身が床に出ていたが、敵が落とす鍵を集める意味を
-  // 持たせるため拾い物にした。鍵が無いまま持ち越しても次フロアで開けられる。
+  // 宝箱：踏むと自動でストレージへ。鍵で開けるまで持ち物 8 枠を圧迫しないようにする。
+  // 中身を取り出すにはストレージ側の「鍵で開ける」ボタンから（_openChestFromStorage）。
+  // 仕様変更履歴: 旧 1: 踏んだ瞬間に中身が床に出る → 旧 2: 持ち物枠を消費する → 新: ストレージ直行。
   if (item.type === 'chest') {
-    if (!canAddToInventory(item)) {
-      dungeonLog('🎒 持ち物が満杯で宝箱を拾えなかった');
-      return;
-    }
     dungeon.removeFloorItem(item);
-    const r = addToInventory({ ...item });
-    if (!r.ok) { dungeonLog('🎒 拾えなかった'); return; }
+    const r = addToStorage({ ...item });
+    if (!r.ok) { dungeonLog('📦 ストレージへの収納に失敗'); return; }
     playSfx('pickup', { rarityTier: rarityTier(item.rarity) });
-    dungeonLog(`🎁 宝箱を拾った（鍵で開けられる）`, { rarity: item.rarity });
+    dungeonLog(`🎁 宝箱をストレージへ収納（メニューの📦から鍵で開ける）`, { rarity: item.rarity });
     refreshHUD();
+    refreshMenu();
     dungeon.render(document.getElementById('dungeon-canvas'));
     autoSave();
     return;
@@ -4948,17 +4951,19 @@ window.addEventListener('resize', () => {
   }
 });
 
-// 持ち物の鍵を 1 本消費して、指定 idx の宝箱を開ける。
+// 持ち物 / ストレージの鍵を 1 本消費して、宝箱を開ける共通ヘルパ。
+//   src: 'inv' | 'sto'
 //   - 鍵が無ければ「鍵が必要」ダイアログを出して中断
-//   - 開いたら宝箱を inventory から除去し、中身を addToInventory（装備品なら
-//     即装備チェック、消耗品ならスタック合算）。中身のレア度で fanfare を出す。
-async function _openChestFromInventory(idx) {
-  const item = player.inventory?.[idx];
+//   - 開いたら宝箱を該当 list から除去し、中身を addToInventory
+//     （持ち物が満杯ならストレージに流す）
+async function _openChestAt(src, idx) {
+  const list = src === 'inv' ? player.inventory : player.storage;
+  const item = list?.[idx];
   if (!item || item.type !== 'chest') return;
   const inner = item.inner;
   if (!inner) {
     showAlert('中身が空っぽの宝箱でした…');
-    player.inventory.splice(idx, 1);
+    list.splice(idx, 1);
     refreshMenu();
     autoSave();
     return;
@@ -4982,14 +4987,14 @@ async function _openChestFromInventory(idx) {
   if (!ok) return;
 
   // 鍵 1 本を所定の場所から消費
-  const slot = keyLocations[0];
-  const arr = slot.src === 'inv' ? player.inventory : player.storage;
-  const k = arr[slot.i];
+  const keySlot = keyLocations[0];
+  const keyArr  = keySlot.src === 'inv' ? player.inventory : player.storage;
+  const k = keyArr[keySlot.i];
   if ((k.count ?? 1) > 1) k.count -= 1;
-  else arr.splice(slot.i, 1);
+  else keyArr.splice(keySlot.i, 1);
 
-  // 宝箱を消費して中身を獲得（持ち物枠制約は addToInventory で評価）
-  player.inventory.splice(idx, 1);
+  // 宝箱を消費して中身を獲得
+  list.splice(idx, 1);
   // chest の中身は装備品が中心。持ち物が満杯のときはストレージへ流す。
   let stowed = false;
   if (canAddToInventory(inner)) {
@@ -5009,6 +5014,11 @@ async function _openChestFromInventory(idx) {
   refreshHUD();
   autoSave();
 }
+
+// 旧 API 互換: 持ち物 idx の宝箱を開ける（旧セーブで持ち物に居る宝箱用）
+function _openChestFromInventory(idx) { return _openChestAt('inv', idx); }
+// 新仕様: ストレージ idx の宝箱を開ける（拾い物の宝箱はここから）
+function _openChestFromStorage(idx)   { return _openChestAt('sto', idx); }
 
 // モンスター撃破時の素材ドロップ（装備ドロップと独立）。15% で発生し、
 // モンスターのレアリティに対応した素材 1 個。合成・ショップで使う想定。
