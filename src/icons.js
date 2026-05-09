@@ -120,6 +120,8 @@ function _drawBody(ctx, item, size, rng) {
     case 'mysteryScroll': _drawEmojiOnFrame(ctx, item.emoji ?? '📜', size); break;
     case 'skillBook':     _drawSkillBook(ctx, item, size); break;
     case 'key':           _drawEmojiOnFrame(ctx, '🗝️', size); break;
+    case 'dungeonPortal': _drawEmojiOnFrame(ctx, item.emoji ?? '🌀', size); break;
+    case 'legendaryTome': _drawEmojiOnFrame(ctx, item.emoji ?? '📖', size); break;
     case 'material':      _drawEmojiOnFrame(ctx, item.emoji ?? '⛓️', size); break;
     case 'gold':          _drawGold(ctx, size); break;
     case 'chest':         _drawChest(ctx, size); break;
