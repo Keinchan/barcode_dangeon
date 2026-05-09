@@ -2474,6 +2474,169 @@ input, textarea {
   box-shadow: 0 0 12px rgba(180,180,180,0.30);
 }
 
+/* ── PvP ロビー画面 ── */
+#screen-pvp-lobby {
+  background: var(--bg);
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  overflow-y: auto;
+}
+.pvp-lobby-box {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.pvp-lobby-title { font-size: 22px; font-weight: bold; text-align: center; }
+.pvp-lobby-sub   { font-size: 13px; color: var(--muted); text-align: center; }
+.pvp-lobby-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.pvp-lobby-actions input {
+  font-size: 18px;
+  letter-spacing: 6px;
+  text-align: center;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1.5px solid rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.06);
+  color: #fff;
+}
+.pvp-lobby-hr {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+  color: #777;
+  font-size: 12px;
+}
+.pvp-lobby-hr::before, .pvp-lobby-hr::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(255,255,255,0.12);
+}
+.pvp-lobby-room {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 12px;
+  padding: 16px;
+}
+.pvp-lobby-room.hidden { display: none; }
+.pvp-lobby-code-label { font-size: 11px; color: var(--muted); }
+.pvp-lobby-code {
+  font-size: 32px;
+  font-weight: bold;
+  letter-spacing: 12px;
+  font-family: monospace;
+  text-align: center;
+  background: rgba(124,77,255,0.18);
+  padding: 14px 0;
+  border-radius: 10px;
+  border: 1.5px solid rgba(124,77,255,0.5);
+}
+.pvp-lobby-players {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+.pvp-lobby-players .pvp-row {
+  display: flex; justify-content: space-between;
+  padding: 8px 12px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 8px;
+}
+.pvp-lobby-players .pvp-row.ready { background: rgba(76,175,80,0.18); }
+.pvp-lobby-error {
+  background: rgba(244,67,54,0.15);
+  border: 1px solid rgba(244,67,54,0.45);
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 12px;
+  color: #ffcdd2;
+}
+.pvp-lobby-error.hidden { display: none; }
+
+/* ── PvP バトル画面 ── */
+#screen-pvp-battle {
+  background: var(--bg);
+  display: none;
+}
+#screen-pvp-battle.active { display: flex; }
+.pvp-battle-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  gap: 12px;
+  max-width: 480px;
+  margin: 0 auto;
+  width: 100%;
+}
+.pvp-battle-side {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px;
+  padding: 12px;
+}
+.pvp-opponent { border-left: 3px solid #ef5350; }
+.pvp-self     { border-left: 3px solid #4dc4ff; }
+.pvp-name { font-size: 16px; font-weight: bold; margin-bottom: 6px; }
+.pvp-bars { display: flex; flex-direction: column; gap: 4px; }
+.pvp-bar {
+  position: relative;
+  height: 10px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.pvp-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width .25s ease-out, background .25s ease-out;
+}
+.pvp-hp .pvp-bar-fill { background: var(--success); }
+.pvp-mp .pvp-bar-fill { background: #4dc4ff; }
+.pvp-stats { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+.pvp-battle-mid {
+  flex: 1;
+  min-height: 80px;
+  background: rgba(0,0,0,0.4);
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 13px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.pvp-battle-mid p { padding: 2px 0; line-height: 1.4; }
+
+.pvp-battle-actions {
+  background: rgba(255,255,255,0.04);
+  border-radius: 10px;
+  padding: 10px;
+}
+.pvp-turn-label {
+  text-align: center;
+  font-size: 14px;
+  font-weight: bold;
+  margin-bottom: 8px;
+}
+.pvp-turn-label.my-turn  { color: #ffd54f; }
+.pvp-turn-label.foe-turn { color: #888; }
+.pvp-action-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.pvp-action-row button:disabled { opacity: 0.4; cursor: not-allowed; }
+
 /* ── 宝箱開封結果モーダル ──
    メニュー(z=5500) より上に出す必要があるので z-index 6000。
    クリックしないと閉じない明示モーダル。レア度ごとに縁色を変える。 */

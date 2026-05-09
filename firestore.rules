@@ -1,0 +1,52 @@
+// Firestore Security Rules for barcode-d1c01
+// 適用方法: Firebase Console → Firestore Database → ルール へコピペ、もしくは
+//   firebase deploy --only firestore:rules
+//
+// 既存のセーブシステム (saves/{uid}) と新規 PvP (pvpRooms/{code}) の両方を許可する。
+//
+// 注意:
+//   - PvP の書き込みは「ホストかゲスト本人」のみ許可（参加処理だけ guest=null から
+//     自分の uid に書き換える特例があるので waiting 状態の guest フィールド更新を別枠で許可）。
+//   - このルールはローカル DB（client SDK）からの直接書き込みを前提にしており、
+//     不正対策（HP を負数にして即勝利等）は完全には防げない。Phase 2 以降で
+//     Cloud Functions に判定を移すか、サーバ側 SDK での仲介を検討する。
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 既存のセーブ（自分の uid のドキュメントのみ読み書き可）
+    match /saves/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // PvP ロビー / バトル
+    match /pvpRooms/{code} {
+      // 認証済みなら誰でも読める（招待コード = doc id ベースのフラットな権限）
+      allow read: if request.auth != null;
+
+      // 部屋作成: ホスト本人が host.uid 自分でセットして作る
+      allow create: if request.auth != null
+                    && request.resource.data.host.uid == request.auth.uid
+                    && request.resource.data.state == 'waiting'
+                    && request.resource.data.guest == null;
+
+      // 更新: ホスト or ゲスト or 参加（waiting で guest=null → 自分を guest にする）
+      allow update: if request.auth != null && (
+        // ホスト本人
+        resource.data.host.uid == request.auth.uid
+        // 既存ゲスト本人
+        || (resource.data.guest != null && resource.data.guest.uid == request.auth.uid)
+        // 新規参加: waiting で guest が空の所に自分を入れる（host にはなれない）
+        || (resource.data.state == 'waiting'
+            && resource.data.guest == null
+            && request.resource.data.guest.uid == request.auth.uid
+            && request.resource.data.host.uid == resource.data.host.uid)
+      );
+
+      // 削除: ホストのみ（バトル終了後の掃除）
+      allow delete: if request.auth != null
+                    && resource.data.host.uid == request.auth.uid;
+    }
+  }
+}
