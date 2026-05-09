@@ -51,6 +51,13 @@ export class Dungeon {
   _build() {
     this.grid = Array.from({ length: H }, () => new Uint8Array(W));
 
+    // 地図エンカウントの 1 ルーム戦闘ステージ。階段は無く、
+    // data.encounterMonster をフロアに 1 体だけ置いて全滅したらクリア。
+    if (this.data.isSingleRoom) {
+      this._buildSingleRoom();
+      return;
+    }
+
     const rooms = this._genRooms(4 + Math.floor(this.rng() * 3));
     this.rooms  = rooms;
     rooms.forEach(r => this._carve(r));
@@ -123,6 +130,27 @@ export class Dungeon {
   isShopkeeperMob(m) { return m && m.isShopkeeper; }
   // 商人の在庫を返す（撃破時の落下や購入時の更新に使う）
   getShopStock(mob)  { return this.shopkeeperToStock?.get(mob) ?? []; }
+
+  // 地図エンカウント用の単一部屋ステージ。盤面いっぱいの 1 部屋、
+  // 階段なし。data.encounterMonster をプレイヤーから 5 マス先に配置する。
+  // 撃破時の判定は main.js 側でモンスター数 0 をチェックして dungeonClear を呼ぶ。
+  _buildSingleRoom() {
+    const room = { x: 2, y: 2, w: W - 4, h: H - 4 };
+    this.rooms = [room];
+    this._carve(room);
+    // プレイヤーは下端中央、敵は上端中央（5 マス前進で接触）
+    const cx = Math.floor(W / 2);
+    this.playerPos = { x: cx, y: H - 5, facing: [0, -1] };
+    this.stairsPos = null;     // 階段なし: 撃破クリア
+    const mob = this.data.encounterMonster;
+    if (mob) {
+      mob.x = cx;
+      mob.y = 4;
+      this.monsters.push(mob);
+    }
+    this.shopkeeperToStock = new Map();
+    this._fixOverlaps?.();
+  }
 
   _genRooms(target) {
     const rooms = [];

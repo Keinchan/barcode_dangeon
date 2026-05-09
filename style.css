@@ -2678,6 +2678,28 @@ input, textarea {
   box-shadow: none;
 }
 
+/* 道端エンカウント（モンスター / 強敵 / 宝箱 / 商人）。
+   ダンジョンピン (.dungeon-map-icon) より一回り小さく、絵文字 1 つで表現。
+   shape は丸、影は kind 別に色を出す（hit-test を分かりやすく）。 */
+.encounter-map-icon {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px;
+  border: 2px solid rgba(255,255,255,0.45);
+  box-shadow: 0 0 8px rgba(0,0,0,0.55);
+}
+.encounter-map-icon.strong   { box-shadow: 0 0 12px rgba(255,82,82,0.85); }
+.encounter-map-icon.chest    { box-shadow: 0 0 10px rgba(255,193,7,0.75); }
+.encounter-map-icon.merchant { box-shadow: 0 0 10px rgba(124,77,255,0.75); }
+.encounter-map-icon.monster  { box-shadow: 0 0 8px rgba(229,115,115,0.65); }
+@keyframes _encounter-pulse-strong {
+  0%   { transform: scale(1.0); }
+  50%  { transform: scale(1.08); }
+  100% { transform: scale(1.0); }
+}
+.encounter-map-icon.strong { animation: _encounter-pulse-strong 1.6s ease-in-out infinite; }
+
 /* ─────────────────────────────────────────────
    技 / タイプ設定 UI
    ───────────────────────────────────────────── */

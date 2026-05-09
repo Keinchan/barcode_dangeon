@@ -4,17 +4,23 @@ import {
   isWithinEnterRadius,
   distanceMeters,
   ENTER_RADIUS,
+  getMapEncountersNear,
 } from './generator.js';
 import { getDebugState } from './debug.js';
 
 let map          = null;
 let playerMarker = null;
 let playerPos    = null;                 // { lat, lng }
-const renderedPins = new Map();          // seed -> { marker, dungeon }
+const renderedPins         = new Map();  // seed -> { marker, dungeon } 既存ダンジョン
+const renderedEncounters   = new Map();  // seed -> { marker, encounter } 道端遭遇
 let onEnterCb         = null;
 let isClearedCb       = null;
 let difficultyCb      = null;
 let recommendedLvCb   = null;
+// 道端エンカウントのタップ時コールバック。setEncounterCallbacks で登録。
+let onEncounterCb         = null;
+let isEncounterConsumedCb = null;
+let getPlayerLevelCb      = null;
 // ユーザーが手動でドラッグ／ピンチした最後の時刻。直後 N 秒は GPS 更新で
 // 自動再センタリングしない（離れた場所のピンを見たい時用）。それ以外は
 // 常にプレイヤーが地図の中心に来るよう追従する。
@@ -118,6 +124,28 @@ function _refreshDungeons(lat, lng) {
       renderedPins.delete(seed);
     }
   }
+  // 道端エンカウント（モンスター / 強敵 / 宝箱 / 商人）を 2 km 圏で更新
+  _refreshEncounters(lat, lng);
+}
+
+// 道端エンカウントの追加描画 + 範囲外の片付け。
+// 消費済みエンカウント（main.js が consumedEncounters セットで管理）はここで弾く。
+function _refreshEncounters(lat, lng) {
+  const playerLv = getPlayerLevelCb?.() ?? 1;
+  const encs = getMapEncountersNear(lat, lng, playerLv, 2000);
+  for (const e of encs) {
+    if (renderedEncounters.has(e.seed)) continue;
+    if (isEncounterConsumedCb?.(e.seed)) continue;
+    _addEncounterPin(e);
+  }
+  for (const [seed, entry] of renderedEncounters) {
+    const dist = distanceMeters(lat, lng, entry.encounter.lat, entry.encounter.lng);
+    const consumed = isEncounterConsumedCb?.(seed);
+    if (dist > PIN_KEEP_RADIUS_M || consumed) {
+      try { entry.marker.remove(); } catch {}
+      renderedEncounters.delete(seed);
+    }
+  }
 }
 
 function _pinHtml(dungeon, cleared) {
@@ -187,6 +215,104 @@ function _addDungeonPin(dungeon) {
   });
 
   renderedPins.set(dungeon.seed, { marker, dungeon });
+}
+
+// 道端エンカウントの種別ごとの見た目（emoji + 背景色）。
+// 色は kind 別: モンスター=赤系 / 強敵=濃赤 / 宝箱=金 / 商人=紫
+const _ENCOUNTER_DISPLAY = {
+  monster:  { bg: '#e57373', label: '👾', title: 'モンスター' },
+  strong:   { bg: '#b71c1c', label: '👹', title: '強敵' },
+  chest:    { bg: '#ffc107', label: '🎁', title: '宝箱' },
+  merchant: { bg: '#7c4dff', label: '🧝', title: '商人' },
+};
+
+function _encounterPinHtml(encounter) {
+  const d = _ENCOUNTER_DISPLAY[encounter.kind] ?? _ENCOUNTER_DISPLAY.monster;
+  // ダンジョンピン (.dungeon-map-icon) と区別するため別クラスを当てる
+  return `<div class="encounter-map-icon ${encounter.kind}" `
+       + `style="background:${d.bg}" title="${d.title}">${d.label}</div>`;
+}
+
+function _encounterPopupHtml(e) {
+  const d = _ENCOUNTER_DISPLAY[e.kind];
+  if (!playerPos) return `<b>${d.title}</b><br>位置情報を取得中…`;
+  const dist = Math.round(distanceMeters(playerPos.lat, playerPos.lng, e.lat, e.lng));
+  const inRange = (dist <= ENTER_RADIUS) || getDebugState().bypassEnterRadius;
+  let body = '';
+  let actionLabel = '';
+  switch (e.kind) {
+    case 'monster':
+      body = `Lv${e.level} ${e.element ?? ''}属性 / ${e.rarity?.name ?? ''}`;
+      actionLabel = '戦う';
+      break;
+    case 'strong':
+      body = `<b style="color:#ff5252">Lv${e.level}</b> ${e.element ?? ''}属性 / ${e.rarity?.name ?? ''}<br>` +
+             '<span style="font-size:11px;color:#888">挑戦は任意。倒すと大量経験値</span>';
+      actionLabel = '挑む';
+      break;
+    case 'chest':
+      body = `中身: ${e.inner?.name ?? '—'}（${e.rarity?.name ?? ''}）<br>` +
+             '<span style="font-size:11px;color:#888">拾って鍵で開ける</span>';
+      actionLabel = '拾う';
+      break;
+    case 'merchant':
+      body = `Lv${e.level} の商人 / 在庫 ${e.stock?.length ?? 0} 点`;
+      actionLabel = '見る';
+      break;
+  }
+  return (
+    `<div><b>${d.label} ${d.title}</b></div>` +
+    `<div style="margin-top:4px">${body}</div>` +
+    (inRange
+      ? `<button class="popup-encounter-btn" data-seed="${e.seed}" `
+        + `style="margin-top:8px;padding:6px 14px;background:${d.bg};color:#fff;`
+        + `border:none;border-radius:6px;cursor:pointer;font-weight:bold">${actionLabel}</button>`
+      : `<div style="margin-top:6px;color:#888">🚶 距離 ${dist}m`
+        + `（${ENTER_RADIUS}m以内で接触可）</div>`)
+  );
+}
+
+function _addEncounterPin(encounter) {
+  const icon = L.divIcon({
+    html: _encounterPinHtml(encounter),
+    iconSize: [36, 36],
+    iconAnchor: [18, 18],
+    className: '',
+  });
+  const marker = L.marker([encounter.lat, encounter.lng], { icon }).addTo(map);
+  marker.bindPopup(() => _encounterPopupHtml(encounter));
+  marker.on('popupopen', () => {
+    if (!onEncounterCb) return;
+    const btn = document.querySelector(
+      `button.popup-encounter-btn[data-seed="${encounter.seed}"]`,
+    );
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      marker.closePopup();
+      onEncounterCb(encounter);
+    }, { once: true });
+  });
+  renderedEncounters.set(encounter.seed, { marker, encounter });
+}
+
+// main.js から消費済みエンカウントのフラグや画面状態の変化に応じて
+// 該当ピンを地図から消すための公開 API（拾った宝箱など）。
+export function removeEncounterPin(seed) {
+  const entry = renderedEncounters.get(seed);
+  if (!entry) return;
+  try { entry.marker.remove(); } catch {}
+  renderedEncounters.delete(seed);
+}
+
+// main.js が後付けでコールバックを差し替えるための setter。
+// initMap の引数で渡しても良いが、登録順序が main.js の構造に依存してしまうため
+// 別関数で受けるようにした（Phase C で追加）。
+export function setEncounterCallbacks({ onEncounter, isConsumed, playerLevel } = {}) {
+  if (onEncounter)        onEncounterCb         = onEncounter;
+  if (isConsumed)         isEncounterConsumedCb = isConsumed;
+  if (playerLevel)        getPlayerLevelCb      = playerLevel;
+  // 既に GPS が来ている場合は即時再描画（コールバック切替の反映）
+  if (playerPos) _refreshEncounters(playerPos.lat, playerPos.lng);
 }
 
 // 攻略状態の変化時にピンを再描画

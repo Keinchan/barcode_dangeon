@@ -1,4 +1,4 @@
-import { initMap, refreshPin, setPlayerPosition, invalidateMapSize, recenterOnPlayer, resumeGeolocation } from './map.js';
+import { initMap, refreshPin, setPlayerPosition, invalidateMapSize, recenterOnPlayer, resumeGeolocation, setEncounterCallbacks, removeEncounterPin } from './map.js';
 import { startScanner, stopScanner, getPosition, categoryOfFormat } from './scanner.js';
 import {
   createPlayer,
@@ -16,6 +16,7 @@ import {
   SKILL_SLOTS_MAX,
   buildSpecialDungeonForTome,
 } from './generator.js';
+import { applyJobStats, findJob, monsterDisplayName, jobForBarcode } from './monster-jobs.js';
 import {
   generateItemFromBarcode, rarityFromDigit, bumpRarity, RARITIES, migrateElement,
   isStackable, stackKey, materialForRarity,
@@ -258,6 +259,35 @@ initMap({
   recommendedLv: d => recommendedLevel(d),
 });
 
+// ── 道端エンカウント（地図上のモンスター/強敵/宝箱/商人）──
+//   消費済み（拾った宝箱・倒した強敵）の seed セットは localStorage に保持し、
+//   再描画時に同じピンが再出現しないようにする。商人/雑魚モンスターは消費しない
+//   （Pokemon GO 風に「同じ場所に戻ってきたらまた出会える」体験を維持）。
+const _CONSUMED_KEY = 'real_hide:consumed-encounters:v1';
+const consumedEncounters = new Set();
+try {
+  const raw = localStorage.getItem(_CONSUMED_KEY);
+  if (raw) {
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr)) for (const s of arr) consumedEncounters.add(s);
+  }
+} catch {}
+function _markEncounterConsumed(seed) {
+  consumedEncounters.add(seed);
+  try {
+    localStorage.setItem(_CONSUMED_KEY, JSON.stringify([...consumedEncounters]));
+  } catch {}
+  removeEncounterPin(seed);
+}
+
+// 地図 → main.js のコールバック登録。 GPS が来てから initMap が走る順序の都合で、
+// player はこの時点で createPlayer() 済みなので level 取得も安全。
+setEncounterCallbacks({
+  onEncounter:  e => _handleMapEncounter(e),
+  isConsumed:   seed => consumedEncounters.has(seed),
+  playerLevel:  () => player?.level ?? 1,
+});
+
 // プレイヤーvsダンジョンの難易度評価
 // 最終フロアのボスLvを基準に turnsToKill / turnsToDie の比から5段階のラベルを返す
 // （フロアが深いほどボスLvが高くなる→自動でフロア難易度も加味される）
@@ -296,6 +326,163 @@ function requestEnterDungeon(d) {
   playSfx('select');
   pendingDungeon = d;
   showPreDungeonModal(d);
+}
+
+// ── 道端エンカウント ハンドラ群 ──
+
+// エンカウント kind ごとに処理を振り分ける。タップ時の主入口。
+async function _handleMapEncounter(e) {
+  if (!e) return;
+  switch (e.kind) {
+    case 'monster':  return _enterMapBattle(e, false);
+    case 'strong':   return _enterMapBattle(e, true);
+    case 'chest':    return _collectMapChest(e);
+    case 'merchant': return _openMapMerchant(e);
+  }
+}
+
+// エンカウントの spawn データ（level, rarity, element, jobId 等）から
+// 戦闘可能なモンスターオブジェクトを再構築する。dungeon.js の generateMonster
+// と同じ statsForLevel + applyJobStats を通すので、敵 AI もそのまま動く。
+function _buildEncounterMob(e, isStrong) {
+  const job = findJob(e.jobId) ?? jobForBarcode(e.barcode ?? '0000000000000');
+  const stats   = statsForLevel(e.level);
+  const jobStats = applyJobStats(stats, job);
+  // 強敵は HP/ATK/DEF を更にブースト（boss 級）
+  const hpMult  = isStrong ? 1.5 : 1.0;
+  const atkMult = isStrong ? 1.2 : 1.0;
+  const defMult = isStrong ? 1.2 : 1.0;
+  const hp  = Math.max(1, Math.floor(jobStats.hp  * hpMult));
+  const atk = Math.max(1, Math.floor(jobStats.atk * atkMult));
+  const def = Math.max(0, Math.floor(jobStats.def * defMult));
+  const skill = SKILLS_BY_ELEMENT_FALLBACK[e.element] ?? null;
+  const display = monsterDisplayName(job, e.element);
+  return {
+    base: job.baseName,
+    emoji: job.emoji,
+    isBoss: true,                    // 単独敵: クリア判定で boss 扱いさせる
+    name: isStrong ? `👹 強敵 ${display}` : display,
+    level: e.level,
+    rarity: e.rarity?.name ?? 'コモン',
+    rarityColor: e.rarity?.color ?? '#9e9e9e',
+    element: e.element,
+    skill,
+    skillCharge: 0,
+    hp, maxHp: hp, atk, def, floor: 1,
+    job: {
+      id: job.id, label: job.label,
+      aiHint: job.aiHint, preferredRange: job.preferredRange,
+      chargeBonus: job.chargeBonus ?? 0,
+    },
+  };
+}
+
+// 簡易の属性スキル参照（generator.js SKILLS と同等）。
+// generator.js の SKILLS は export していないため、
+// ここに簡易テーブルを置いて単独敵の特殊技を割り当てる。
+const SKILLS_BY_ELEMENT_FALLBACK = {
+  '火': { name: '火炎放射',     mult: 2.0, healSelf: 0,    poison: false },
+  '水': { name: 'ウォーターバ', mult: 1.8, healSelf: 0,    poison: false },
+  '草': { name: '毒の蔓',       mult: 1.5, healSelf: 0,    poison: true  },
+  '雷': { name: '雷撃',         mult: 2.4, healSelf: 0,    poison: false },
+  '光': { name: '聖なる癒し',   mult: 0,   healSelf: 0.25, poison: false },
+  '闇': { name: '影縫い',       mult: 2.0, healSelf: 0,    poison: true  },
+};
+
+// 1 ルーム戦闘ステージへ突入する。dungeonData は最低限のフィールドだけで
+// dungeon.js の Dungeon クラスを満たし、isSingleRoom + encounterMonster で
+// _buildSingleRoom 経路に入る。
+async function _enterMapBattle(e, isStrong) {
+  // 強敵は明示の確認モーダル（弱いプレイヤーが事故らないように）
+  if (isStrong) {
+    const ok = await showConfirm(
+      `👹 強敵が現れた！\n\nLv${e.level} ${e.element ?? ''}属性 / ${e.rarity?.name ?? ''}\n` +
+      `あなたは Lv${player.level}。挑みますか？\n\n` +
+      `※ 倒すと大量経験値。挑戦は任意です。`,
+      { okLabel: '挑む', cancelLabel: 'やめる', danger: true },
+    );
+    if (!ok) return;
+  }
+  const mob = _buildEncounterMob(e, isStrong);
+  // dungeon.js が期待する最小限の dungeonData を組む。
+  // theme は描画用の壁/床色。汎用の「野外」テーマ風にしておく。
+  const dungeonForBattle = {
+    seed: 'map:' + e.seed,
+    barcode: e.barcode ?? String(e.seed).padStart(13, '0'),
+    name: isStrong ? '強敵との戦い' : '野生の戦闘',
+    theme: { name: '野外', wallColor: '#2a3a2a', floorColor: '#1a2218' },
+    floors: 1,
+    difficulty: 1,
+    monsterTypeIdx: 0,
+    elementIdx: 0,
+    element: e.element,
+    rarityBase: e.rarity ?? RARITIES[0],
+    jobId: e.jobId,
+    isMapBattle:   true,
+    isSingleRoom:  true,
+    encounterMonster: mob,
+    encounterSeed: e.seed,            // クリア時に消費する種別
+    isEncounterStrong: !!isStrong,
+  };
+  // pre-dungeon モーダルはダンジョン用（推奨 Lv やフロア構成を出す）。
+  // 地図エンカウントの 1 ルーム戦闘は内容が固定なので、ポップアップで既に
+  // 確認済み → 直で enterDungeon に進める。
+  enterDungeon(dungeonForBattle);
+}
+
+// 宝箱: 拾うか確認してインベントリに格納（dungeon 内の chest 経路と同じ shape）。
+async function _collectMapChest(e) {
+  if (consumedEncounters.has(e.seed)) return;
+  if (!e.inner) return;
+  const ok = await showConfirm(
+    `🎁 宝箱を拾いますか？\n\n中身: ${e.inner.name}（${e.rarity?.name ?? ''}）\n` +
+    `※ 鍵が無いと中身は取り出せません`,
+    { okLabel: '拾う', cancelLabel: 'やめる' },
+  );
+  if (!ok) return;
+  const chestItem = {
+    type: 'chest',
+    name: '宝箱',
+    emoji: '🎁',
+    rarity: e.rarity?.name ?? e.inner.rarity,
+    rarityColor: e.rarity?.color ?? e.inner.rarityColor,
+    inner: e.inner,
+  };
+  if (!canAddToInventory(chestItem)) {
+    showAlert('🎒 持ち物が満杯で宝箱を拾えませんでした');
+    return;
+  }
+  addToInventory(chestItem);
+  playSfx('pickup', { rarityTier: rarityTier(chestItem.rarity) });
+  showAlert(`🎁 宝箱を拾った！\nメニューから鍵で開けると ${e.inner.name} が手に入ります`);
+  _markEncounterConsumed(e.seed);
+  refreshHUD();
+  autoSave();
+}
+
+// 地図商人セッション: _openShopModal / _buyFromShop は dungeon.getShopStock に依存
+// しているので、地図上から開いている間だけ dungeon を「在庫だけ返す軽量アダプタ」
+// に差し替える。ショップ閉じる時 (btn-shop-close) に元へ戻す。
+let _mapMerchantPrevDungeon = null;
+function _openMapMerchant(e) {
+  const fakeShopkeeper = {
+    name: '行商人',
+    level: e.level,
+    isShopkeeper: true,
+    isBoss: false,
+    isMapMerchant: true,
+    encounterSeed: e.seed,
+  };
+  // dungeon.getShopStock(mob) → e.stock を返すだけのアダプタ。
+  // shopkeeperToStock.has は _handleMonsterDefeated 経路でしか使わないが
+  // 互換のため空 Map を載せておく。
+  const adapter = {
+    getShopStock: (m) => (m === fakeShopkeeper ? e.stock : []),
+    shopkeeperToStock: new Map([[fakeShopkeeper, e.stock]]),
+  };
+  _mapMerchantPrevDungeon = dungeon;
+  dungeon = adapter;
+  _openShopModal(fakeShopkeeper);
 }
 
 function showPreDungeonModal(d) {
@@ -2623,11 +2810,22 @@ async function _buyFromShop(idx) {
 document.getElementById('btn-shop-close').addEventListener('click', () => {
   playSfx('click');
   document.getElementById('shop-modal').classList.add('hidden');
+  // 地図商人モードで dungeon を差し替えていた場合は元に戻す
+  if (_mapMerchantPrevDungeon !== null) {
+    dungeon = _mapMerchantPrevDungeon;
+    _mapMerchantPrevDungeon = null;
+  }
   _currentShopkeeper = null;
 });
 
 document.getElementById('btn-shop-attack').addEventListener('click', async () => {
   if (!_currentShopkeeper) return;
+  // 地図商人を攻撃しようとしても 1 ルーム戦闘ステージへ突入させない
+  // （実装範囲外。普通のダンジョン商人だけ敵対化に進む）。
+  if (_currentShopkeeper.isMapMerchant) {
+    showAlert('地図上の行商人とは戦闘できません。');
+    return;
+  }
   const ok = await showConfirm(
     '本当に商人を攻撃しますか？\n\n' +
     '商人は Lv ' + _currentShopkeeper.level + ' の超強敵です。\n' +
@@ -3286,6 +3484,11 @@ function _scrollAoeDamage(targets, item, dmgMult, fxEmoji, fxColor) {
     if (keyDrop) _autoCollectDrop(keyDrop);
     const drop = _rollMonsterDrop(m);
     if (drop) _placeFloorDrop(drop, m.x, m.y);
+  }
+  // 地図エンカウントの 1 ルーム戦闘で技撃ちで全員倒した場合のクリア。
+  // バンプキルは _handleMonsterDefeated→dungeonClear（boss 経路）でカバーされる。
+  if (dungeonData?.isMapBattle && dungeon.monsters.filter(m => m.hp > 0 && !m.isShopkeeper).length === 0) {
+    dungeonClear();
   }
 }
 
@@ -4850,6 +5053,11 @@ function _rollMonsterDrop(mob) {
 function dungeonClear() {
   clearedSet.add(dungeonData.seed);
   refreshPin(dungeonData.seed);
+  // 地図エンカウント由来の 1 ルーム戦闘なら、エンカウントを消費して
+  // 同じ場所のピンを今後出さない。dungeonData.encounterSeed に元の seed を載せている。
+  if (dungeonData?.isMapBattle && dungeonData.encounterSeed) {
+    _markEncounterConsumed(dungeonData.encounterSeed);
+  }
   showResult(true);
   autoSave();
 }
