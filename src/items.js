@@ -237,7 +237,15 @@ export function generateItemFromBarcode(barcode, rarityOverride = null, levelOve
         ? _buildMpPotion(barcode, rng, rarity, level)
         : _buildPotion   (barcode, rng, rarity, level);
     }
-    default: return _buildScroll(barcode, rng, rarity, element, level);
+    default:
+      // 巻物（type=scroll）は一時的にドロップ無効化。データ・コード（_buildScroll /
+      // SCROLLS / 状態異常付与ロジック）は保持し、決定論的バーコード抽選で 3 が
+      // 出た時だけ薬に振り替える。digits[6] の偶奇で HP/MP のどちらが出るかを
+      // potion ルートと同じ規則で決め、同じバーコードからは常に同じアイテムが
+      // 出る決定論性を保つ。将来的に巻物バランス調整後にこの分岐を外せば復活する。
+      return ((digits[6] % 2) === 1)
+        ? _buildMpPotion(barcode, rng, rarity, level)
+        : _buildPotion(barcode, rng, rarity, level);
   }
 }
 
@@ -719,21 +727,42 @@ export function canLearnSkillForMinion(skill, minion) {
   return aps.includes(skill.element);
 }
 
+// 属性 → 絵文字（書籍タイトルや説明での視覚タグ）。アイコン色とは別物。
+const _ELEMENT_BADGE = {
+  '火': '🔥', '水': '💧', '草': '🌿', '雷': '⚡', '光': '✨', '闇': '🌑',
+};
+
+// 指定属性をプライマリ or セカンダリに持つプレイヤータイプ名を「、」連結で返す。
+// 「その書を読める職業」を skillBook 説明に明記して、適性外でしまい込んでしまう
+// 事故を減らす。
+function _typeNamesForElement(element) {
+  return PLAYER_TYPES
+    .filter(t => t.primary === element || t.secondary === element)
+    .map(t => t.name)
+    .join('、') || '冒険者';
+}
+
 // 技の書アイテム（読むと技を習得）
 export function makeSkillBook(skillId) {
   const skill = findSkillById(skillId);
   if (!skill) return null;
   const rarity = RARITIES.find(r => r.name === skill.rarity) ?? RARITIES[0];
+  const badge  = _ELEMENT_BADGE[skill.element] ?? '';
+  const types  = _typeNamesForElement(skill.element);
   return {
     type:        'skillBook',
     skillId:     skill.id,
-    name:        `${skill.name}の書`,
+    // 名前先頭に属性絵文字を入れる: アイコン一覧でも一目で属性が見分けられる。
+    // 例) 🔥火 火炎の書 / 💧水 タイダル波の書
+    name:        `${badge}${skill.element} ${skill.name}の書`,
     emoji:       '📕',
     rarity:      rarity.name,
     rarityColor: rarity.color,
     element:     skill.element,
     level:       1,
-    desc:        `${PATTERN_DESC[skill.pattern]} / 威力×${skill.dmgMult} / MP -${skill.mpCost}`,
+    // 説明文は「適性属性 ⇒ 覚えられる職業」を最前列に出して、入手画面でも
+    // 「これ自分覚えられるんだっけ？」と迷わない様にする。
+    desc:        `${badge}${skill.element}属性 適性: ${types} / ${PATTERN_DESC[skill.pattern]} / 威力×${skill.dmgMult} / MP -${skill.mpCost}`,
     skillName:   skill.name,
     skillDesc:   skill.desc,
     count:       1,

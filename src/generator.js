@@ -326,8 +326,11 @@ export function generateFloorItems(dungeonData, floor, rooms) {
   const items     = [];
   const itemLevel = enemyLevel(dungeonData, floor, false);
 
-  // 不思議系巻物：このフロアに 1 個（18% 確率）配置
-  if (rng() <= 0.18 && rooms.length > 2) {
+  // 不思議系巻物（mysteryScroll）と通常巻物（type=scroll）は一時的にドロップ無効化。
+  // 巻物のバランス調整（範囲ダメージ・状態異常・攻撃アップ等）が済むまで床落ち
+  // させない。データ・効果ロジックは保持しているため、ここを true に戻すだけで復活する。
+  const _SCROLL_DROPS_ENABLED = false;
+  if (_SCROLL_DROPS_ENABLED && rng() <= 0.18 && rooms.length > 2) {
     const room = rooms[1 + Math.floor(rng() * Math.max(1, rooms.length - 2))];
     const scroll = randomMysteryScroll(rng);
     scroll.x = room.x + 1 + Math.floor(rng() * Math.max(1, room.w - 2));
@@ -371,13 +374,13 @@ export function generateFloorItems(dungeonData, floor, rooms) {
   }
 
   rooms.slice(1, -1).forEach((room, idx) => {
-    // 通常アイテム（出現率 22%）。床落ち消耗品が多すぎたので段階的に削減
+    // 通常アイテム（出現率 22%）。床落ち消耗品が多すぎたので段階的に削減。
+    // 巻物（scroll）は _SCROLL_DROPS_ENABLED = false の間ドロップしない。
+    // バランス調整中は薬のみが床に出る。
     if (rng() <= 0.22) {
       const subHash  = hashString(`${dungeonData.barcode}:${floor}:room${idx}`);
       const subCode  = subHash.toString().padStart(13, '0').slice(0, 13);
-      // 床落ちは consumable（potion/mpPotion/scroll）に限定。
-      // 武器/防具は宝箱経由でしか入手できないようにする。
-      const want = rng() < 0.6 ? 'potion' : 'scroll';
+      const want = (_SCROLL_DROPS_ENABLED && rng() >= 0.6) ? 'scroll' : 'potion';
       const item = _generateConsumableFromBarcode(subCode, null, itemLevel, want);
       if (item) {
         const x = room.x + 1 + Math.floor(rng() * Math.max(1, room.w - 2));
