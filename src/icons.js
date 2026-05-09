@@ -118,7 +118,7 @@ function _drawBody(ctx, item, size, rng) {
     case 'mpPotion':      _drawMpPotion(ctx, item, size, rng); break;
     case 'scroll':        _drawScroll(ctx, item, size, rng); break;
     case 'mysteryScroll': _drawEmojiOnFrame(ctx, item.emoji ?? '📜', size); break;
-    case 'skillBook':     _drawEmojiOnFrame(ctx, '📕', size); break;
+    case 'skillBook':     _drawSkillBook(ctx, item, size); break;
     case 'material':      _drawEmojiOnFrame(ctx, item.emoji ?? '⛓️', size); break;
     case 'gold':          _drawGold(ctx, size); break;
     case 'chest':         _drawChest(ctx, size); break;
@@ -137,6 +137,29 @@ function _drawEmojiOnFrame(ctx, emoji, size) {
   ctx.shadowColor = 'rgba(0,0,0,0.6)';
   ctx.shadowBlur  = 4;
   ctx.fillText(emoji, 0, 0);
+}
+
+// 技の書: 📕 + 属性バッジを左上に重ねて、属性が一目でわかるようにする。
+// 旧実装は 📕 だけだったため「これ何属性の書？」と毎回テキストを読まないと
+// 分からない不便さがあった。
+const _BOOK_ELEMENT_BADGE = {
+  '火': '🔥', '水': '💧', '草': '🌿', '雷': '⚡', '光': '✨', '闇': '🌑',
+};
+function _drawSkillBook(ctx, item, size) {
+  // 本体（書）
+  ctx.font = `${Math.floor(size * 0.6)}px serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(0,0,0,0.6)';
+  ctx.shadowBlur  = 4;
+  ctx.fillText('📕', 0, 0);
+  // 属性バッジ（左上に小さく重ねる。size の 1/4 程度）
+  const badge = _BOOK_ELEMENT_BADGE[item?.element];
+  if (!badge) return;
+  ctx.shadowBlur = 0;
+  ctx.font = `${Math.floor(size * 0.34)}px serif`;
+  ctx.fillStyle = '#fff';
+  ctx.fillText(badge, -size * 0.28, -size * 0.28);
 }
 
 // 宝箱：木製の本体 + 金属ベルト + 鍵。中身レアリティに応じた金縁の輝きで
