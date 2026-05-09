@@ -873,6 +873,32 @@ input, textarea {
 .dungeon-bar-hp .dungeon-bar-fill { background: var(--success); }
 .dungeon-bar-mp .dungeon-bar-fill { background: #4dc4ff; }
 
+/* バフ chip（プレイヤーに掛かっている atkUp/defUp 等を 1 行で並べる） */
+.player-buffs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  justify-content: flex-end;
+  margin-top: 3px;
+  min-height: 0;
+}
+.player-buffs:empty { display: none; }
+.player-buffs .buff-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-weight: bold;
+  color: #fff;
+  border-radius: 8px;
+  background: var(--c, rgba(255,255,255,0.12));
+  text-shadow: 0 0 4px rgba(0,0,0,0.7);
+  /* 残りターンを薄く透けて見せる用に枠を 1px。色は status の color CSS 変数で渡す */
+  border: 1px solid rgba(255,255,255,0.25);
+  line-height: 1.2;
+}
+
 /* スマホ等の狭い画面では HP/MP の文字をやや小さく + ヘッダのパディングも縮める */
 @media (max-width: 420px) {
   .dungeon-header { padding: 8px 10px; }
