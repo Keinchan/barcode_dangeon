@@ -4247,6 +4247,18 @@ function move(dx, dy) {
 // 敵ターン共通処理
 //   ミニオン行動 → 敵行動を 1 件ずつ時間差で演出する（プレイヤーが目で追える速さ）。
 //   各攻撃にはアタックトレイル + ダメージ表示 + 1 呼吸の間（STEP_MS）を入れる。
+// 地図エンカウント由来の 1 ルーム戦闘で、何らかの経路でモンスターが全滅した時に
+// 必ずクリア扱いにして地図に戻すための保険ヘルパ。bump kill / skill kill 経路に
+// 加え、DoT 死亡や minion による撃破でも漏れ無くクリアを検知できるようにする。
+//   戻り値: true = クリア処理を発火した（呼び出し側はそれ以降の処理を打ち切るべき）
+function _maybeMapBattleClear() {
+  if (!dungeonData?.isMapBattle) return false;
+  const alive = (dungeon?.monsters ?? []).filter(m => m.hp > 0 && !m.isShopkeeper);
+  if (alive.length > 0) return false;
+  dungeonClear();
+  return true;
+}
+
 function _runEnemyTurn() {
   // ターン進行: アニメーションが終わるまで move() の追加入力を弾く。
   // 完了パスが複数ある（即終了/death/最後の magic 後など）ため、ここで上限の
@@ -4277,6 +4289,8 @@ function _runEnemyTurn() {
       }
     }
   }
+  // DoT 死亡で地図エンカウントの最後の 1 体が落ちた場合のクリア検知
+  if (_maybeMapBattleClear()) { _clearBusy(); return; }
   // 1) ミニオンのターン: 攻撃と位置交換イベントを同期処理
   const minionRes = dungeon.tickMinions(player);
   const minionAttacks = (minionRes?.events ?? []).filter(e => e.type === 'minion-attack');
@@ -4329,7 +4343,11 @@ function _runEnemyTurn() {
     step();
   };
 
+  // ミニオン攻撃で地図エンカウントの最後の 1 体を倒した場合はここでクリア確定。
+  // playEnemyTurn を進めても残敵が居ないので 0 件 magic で終わる無駄を省きつつ、
+  // 「敵ターン後に画面遷移したい」UX を即座に満たす。
   const playEnemyTurn = () => {
+    if (_maybeMapBattleClear()) { _clearBusy(); return; }
     const result = dungeon.tickEnemies(player);
     const magics = result.events.filter(e => e.type === 'magic');
     dungeon.render(document.getElementById('dungeon-canvas'));
@@ -4826,6 +4844,13 @@ function _handleMonsterDefeated(mob) {
   }
 
   if (mob.isBoss) {
+    dungeonClear();
+    return;
+  }
+  // 防御策: 地図エンカウント由来の 1 ルーム戦闘でフラグだけ消えてしまった場合
+  // （セーブから復元した時等）でも、生存敵 0 なら必ずクリア扱いにして地図に戻す。
+  if (dungeonData?.isMapBattle &&
+      (dungeon.monsters ?? []).filter(m => m.hp > 0 && !m.isShopkeeper).length === 0) {
     dungeonClear();
   }
 }
