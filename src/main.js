@@ -1816,8 +1816,43 @@ const _WHIFF_CHANCE = {
   'レジェンド': 0.06,
 };
 
+// MP 不足時のクイック回復: consumables 内の MP ポーションから「最も必要量を満たす
+// 小さいもの」を選んで使用する。完全に不足を満たせないなら最大の 1 本を使う。
+// 戻り値: true = 1 本消費して MP 回復した（呼び出し側は再度チェック）/ false = 何もしなかった。
+async function _tryQuickMpRecover(mpNeeded) {
+  if (!Array.isArray(player.consumables)) return false;
+  const mps = player.consumables
+    .map((it, i) => ({ it, i }))
+    .filter(({ it }) => it?.type === 'mpPotion');
+  if (mps.length === 0) return false;
+  // 「不足ぶんを満たす最小」を選ぶ。満たすものが無ければ heal 最大を選ぶ。
+  const have = player.mp ?? 0;
+  const lack = Math.max(1, mpNeeded - have);
+  const sufficient = mps
+    .filter(({ it }) => (it.mpHeal ?? 0) >= lack)
+    .sort((a, b) => (a.it.mpHeal ?? 0) - (b.it.mpHeal ?? 0));
+  const chosen = sufficient[0] ?? mps.sort((a, b) => (b.it.mpHeal ?? 0) - (a.it.mpHeal ?? 0))[0];
+  if (!chosen) return false;
+  const total = mps.reduce((s, { it }) => s + (it.count ?? 1), 0);
+  const ok = await showConfirm(
+    `MP が足りません（必要 ${mpNeeded} / 現在 ${have}）。\n\n` +
+    `「${chosen.it.name}」（MP +${chosen.it.mpHeal}）を使って回復しますか？\n` +
+    `（所持 MP 回復薬 計 ${total} 本）`,
+    { okLabel: '使う', cancelLabel: 'やめる' },
+  );
+  if (!ok) return false;
+  // takeOneFromConsumables は count 1 にした個体を返す。 splice/減算は内部で実施
+  const used = takeOneFromConsumables(chosen.i);
+  if (!used) return false;
+  player.mp = (player.mp ?? 0) + (used.mpHeal ?? 0);
+  dungeonLog(`🔵 ${used.name} 使用！ MPが${used.mpHeal}回復した`);
+  playSfx('heal');
+  refreshHUD();
+  return true;
+}
+
 // 技を発動（ダンジョン探索中。向きに合わせてパターンを回転して発射）
-function _executeSkill(skill) {
+async function _executeSkill(skill) {
   if (!dungeon || screen !== 'dungeon') {
     showAlert('技はダンジョン探索中にだけ使えます');
     return;
@@ -1832,8 +1867,18 @@ function _executeSkill(skill) {
   const burnExtra = hasStatus(player, 'burn') ? 1 : 0;
   const mpNeeded  = skill.mpCost + burnExtra;
   if ((player.mp ?? 0) < mpNeeded) {
-    showAlert(`MP が足りません（必要 ${mpNeeded}${burnExtra ? ' / 熱傷で+1' : ''}）`);
-    return;
+    // MP 切れの時は持っている MP 回復薬から自動で 1 本使えるか提案する。
+    // 使ったら今のターンを消費せずに技発動の再判定へ進む（ターン外行動扱い）。
+    const recovered = await _tryQuickMpRecover(mpNeeded);
+    if (!recovered) {
+      showAlert(`MP が足りません（必要 ${mpNeeded}${burnExtra ? ' / 熱傷で+1' : ''}）\nMP 回復薬を持っていません。`);
+      return;
+    }
+    // 再チェック: それでも足りないなら諦め
+    if ((player.mp ?? 0) < mpNeeded) {
+      showAlert(`MP がまだ足りません（必要 ${mpNeeded} / 現在 ${player.mp}）`);
+      return;
+    }
   }
   player.mp = Math.max(0, (player.mp ?? 0) - mpNeeded);
   // 骨折で行動時に自傷判定
@@ -2421,7 +2466,7 @@ function _shopItemDescription(it) {
   return it.rarity ?? '';
 }
 
-function _buyFromShop(idx) {
+async function _buyFromShop(idx) {
   if (!_currentShopkeeper) return;
   const stock = dungeon.getShopStock(_currentShopkeeper);
   const entry = stock[idx];
@@ -2429,6 +2474,18 @@ function _buyFromShop(idx) {
   if ((player.gold ?? 0) < entry.price) { showAlert('ゴールドが足りません'); return; }
   // インベントリ余裕チェック（スタック合算で OK な場合あり）
   if (!canAddToInventory(entry.item)) { showAlert('持ち物が満杯です（先に整理してから）'); return; }
+
+  // 購入前確認: 値段が上がった + 持ち物枠を圧迫するアイテムは「やっぱりやめる」が
+  // 出来ないと所持金が消えて辛い。アイテム名・レア度・残ゴールドを並べて確認する。
+  const remaining = (player.gold ?? 0) - entry.price;
+  const ok = await showConfirm(
+    `「${entry.item.name}」を購入しますか？\n\n` +
+    `価格: 🪙 ${entry.price}\n` +
+    `所持金: 🪙 ${player.gold ?? 0} → 🪙 ${remaining}`,
+    { okLabel: '購入する', cancelLabel: 'やめる' },
+  );
+  if (!ok) return;
+
   player.gold -= entry.price;
   addToInventory({ ...entry.item });   // 同名同レアの新規個体（同じスタックに合流）
   stock.splice(idx, 1);
@@ -3401,6 +3458,22 @@ function refreshHUD() {
     mpEl.textContent = `MP: ${player.mp ?? 0}/${player.maxMp ?? 0}`;
     mpEl.classList.toggle('overcap', (player.mp ?? 0) > (player.maxMp ?? 0));
   }
+  // HP / MP 棒グラフ。HP は残量で緑→黄→赤の 3 段階、MP は水色固定。
+  // overcap 中は 100% に張り付かせて棒が消えないようにする（数値側で金色に切替）
+  const hpBar = document.getElementById('dungeon-hp-bar');
+  if (hpBar) {
+    const ratio = player.maxHp > 0 ? player.hp / player.maxHp : 0;
+    const pct = Math.min(100, Math.max(0, ratio * 100));
+    hpBar.style.width = pct + '%';
+    hpBar.style.background = pct > 50 ? '#4caf50' : pct > 25 ? '#ffc107' : '#f44336';
+  }
+  const mpBar = document.getElementById('dungeon-mp-bar');
+  if (mpBar) {
+    const max = player.maxMp ?? 0;
+    const cur = player.mp ?? 0;
+    const pct = max > 0 ? Math.min(100, (cur / max) * 100) : 0;
+    mpBar.style.width = pct + '%';
+  }
   const wHtml = player.weapon ? `${iconImg(player.weapon, 18)} +${player.weapon.atkBonus}` : '⚔️ ー';
   const aHtml = player.armor  ? `${iconImg(player.armor, 18)} +${player.armor.defBonus}`  : '🛡️ ー';
   document.getElementById('equip-display').innerHTML = `${wHtml}　${aHtml}`;
@@ -3698,12 +3771,19 @@ function _celebratePickup(item, action = '入手') {
   }
 }
 
+// 敵 / ミニオンのアニメーション中はプレイヤーの新しい行動を遮断するためのフラグ。
+// move() の入口でチェックし、_runEnemyTurn の完了コールバックでクリアする。
+// 長押し（ArrowKey 自動リピート）で次のターンが「前のターンの最中」に始まり、
+// 攻撃演出が重なる/HP 表示がチカチカするバグを防ぐ。
+let _turnBusy = false;
+
 // ── 移動（2 段階：向き変更 → 同方向で前進）──
 //   - 待機 (0,0): その場で 1 ターン経過（向きは変えない）
 //   - 入力方向と現在の向きが違う: 向きだけ変更、ターンは経過しない
 //   - 入力方向と現在の向きが同じ: 1 マス前進（敵がいれば近接攻撃、壁越しは魔法）
 function move(dx, dy) {
   if (!dungeon || screen !== 'dungeon') return;
+  if (_turnBusy) return;   // ターン進行中の入力は捨てる（長押しの暴発防止）
 
   // 状態異常で入力が変質する: sleep=必ず待機 / shock=確率で待機 / confuse=方向ランダム
   if (dx !== 0 || dy !== 0) {
@@ -3802,10 +3882,19 @@ function move(dx, dy) {
 //   ミニオン行動 → 敵行動を 1 件ずつ時間差で演出する（プレイヤーが目で追える速さ）。
 //   各攻撃にはアタックトレイル + ダメージ表示 + 1 呼吸の間（STEP_MS）を入れる。
 function _runEnemyTurn() {
+  // ターン進行: アニメーションが終わるまで move() の追加入力を弾く。
+  // 完了パスが複数ある（即終了/death/最後の magic 後など）ため、ここで上限の
+  // setTimeout も予防的に張って必ずクリアされるようにする。
+  _turnBusy = true;
+  const _clearBusy = () => { _turnBusy = false; };
+  // 上限ガード: 通常はアニメ完了 callback でクリアするが、想定外で漏れた場合の保険
+  setTimeout(_clearBusy, 6000);
+
   // ターン進行: 状態異常 (DoT / 期限切れ通知) を最初に処理。
   // 死亡したらリザルトへ。
   if (_tickPlayerStatuses() === 'dead') {
     setTimeout(() => showResult(false), 250);
+    _clearBusy();
     return;
   }
   _tickAttackBuff();
@@ -3878,13 +3967,13 @@ function _runEnemyTurn() {
     const result = dungeon.tickEnemies(player);
     const magics = result.events.filter(e => e.type === 'magic');
     dungeon.render(document.getElementById('dungeon-canvas'));
-    if (magics.length === 0) return;
+    if (magics.length === 0) { _clearBusy(); return; }
 
     let i = 0;
     const apply = () => {
-      if (player.hp <= 0) return;
+      if (player.hp <= 0) { _clearBusy(); return; }
       const ev = magics[i++];
-      if (!ev) return;
+      if (!ev) { _clearBusy(); return; }
 
       const fire = () => {
         // hit=false（外れ）の場合はダメージ無し + MISS フロート + 専用ログ
@@ -3893,6 +3982,7 @@ function _runEnemyTurn() {
           const playerAt = playerVfxAnchor();
           if (playerAt) showMissAt({ left: playerAt.left + 18, top: playerAt.top + 8, width: 0, height: 0 });
           if (i < magics.length) setTimeout(apply, STEP_MS);
+          else _clearBusy();
           return;
         }
         player.hp = Math.max(0, player.hp - ev.dmg);
@@ -3912,9 +4002,11 @@ function _runEnemyTurn() {
         refreshHUD();
         if (player.hp <= 0) {
           setTimeout(() => showResult(false), 350);
+          _clearBusy();
           return;
         }
         if (i < magics.length) setTimeout(apply, STEP_MS);
+        else _clearBusy();
       };
 
       // 低速モードでは攻撃前にテレグラフ + 詳細ログ → PRE_FLASH 後に発動
@@ -4136,14 +4228,63 @@ const DPAD_DIRS = {
   'down':       [ 0,  1],
   'down-right': [ 1,  1],
 };
-document.querySelectorAll('.dpad-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const d = DPAD_DIRS[btn.dataset.dir];
-    if (d) move(...d);
-  });
-});
+// 長押し連続移動: 矢印キー / D-pad ボタンを押し続けると一定間隔で移動を続ける。
+// _turnBusy が立っている間は move() 側で握りつぶされるので、敵ターン中の連打が
+// 演出を破壊することはない。OS の auto-repeat に頼らず JS 側で間隔を制御する
+// ことで、ブラウザ差分（Safari の 30Hz / Chrome の 50Hz）を吸収する。
+const HOLD_DELAY_MS    = 320;    // 押下から自動リピートを始めるまでの待ち
+const HOLD_INTERVAL_MS = 180;    // 自動リピート間隔（_turnBusy 中はスキップ）
+const _hold = { dir: null, startTimer: null, repeatTimer: null };
 
+function _holdStart(dx, dy) {
+  // 既に同じ方向を保持しているなら何もしない（同じ key が連続 keydown する OS の挙動向け）
+  if (_hold.dir && _hold.dir[0] === dx && _hold.dir[1] === dy) return;
+  _holdStop();
+  _hold.dir = [dx, dy];
+  // 起動時は即移動。HOLD_DELAY_MS 経過後にリピート開始。
+  move(dx, dy);
+  _hold.startTimer = setTimeout(() => {
+    _hold.repeatTimer = setInterval(() => {
+      if (!_hold.dir) return;
+      if (screen !== 'dungeon') return;
+      // _turnBusy 中は move() が早期 return するので空打ちでも安全。
+      move(_hold.dir[0], _hold.dir[1]);
+    }, HOLD_INTERVAL_MS);
+  }, HOLD_DELAY_MS);
+}
+
+function _holdStop() {
+  _hold.dir = null;
+  if (_hold.startTimer)  { clearTimeout (_hold.startTimer);  _hold.startTimer  = null; }
+  if (_hold.repeatTimer) { clearInterval(_hold.repeatTimer); _hold.repeatTimer = null; }
+}
+
+// D-pad: pointerdown で長押し開始、pointerup/leave で停止。click は廃止（重複発火を防ぐ）。
+document.querySelectorAll('.dpad-btn').forEach(btn => {
+  const d = DPAD_DIRS[btn.dataset.dir];
+  if (!d) return;
+  // 待機ボタン (0,0) は単発タップのみで OK（長押しで「待機を連打」しても無意味）
+  const isWait = d[0] === 0 && d[1] === 0;
+  if (isWait) {
+    btn.addEventListener('click', () => move(0, 0));
+    return;
+  }
+  btn.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    btn.setPointerCapture?.(e.pointerId);
+    _holdStart(d[0], d[1]);
+  });
+  // pointerup / cancel / leave のいずれでも停止する（指を滑らせて外した場合の保険）
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev =>
+    btn.addEventListener(ev, () => _holdStop()));
+});
 // キーボード（PC確認用、8方向対応 + 技クイックバー 1〜4）
+const _KEY_DIRS = {
+  ArrowUp:[0,-1], ArrowDown:[0,1], ArrowLeft:[-1,0], ArrowRight:[1,0],
+  w:[0,-1], s:[0,1], a:[-1,0], d:[1,0],
+  q:[-1,-1], e:[1,-1], z:[-1,1], c:[1,1],
+  Q:[-1,-1], E:[1,-1], Z:[-1,1], C:[1,1],
+};
 document.addEventListener('keydown', e => {
   if (screen !== 'dungeon') return;
   // 1〜4 で技スロットを発動（PC からのデバッグ動作確認用）
@@ -4153,13 +4294,28 @@ document.addEventListener('keydown', e => {
     if (sk) { e.preventDefault(); _executeSkill(sk); }
     return;
   }
-  const m = {
-    ArrowUp:[0,-1], ArrowDown:[0,1], ArrowLeft:[-1,0], ArrowRight:[1,0],
-    w:[0,-1], s:[0,1], a:[-1,0], d:[1,0], ' ':[0,0],
-    q:[-1,-1], e:[1,-1], z:[-1,1], c:[1,1],
-    Q:[-1,-1], E:[1,-1], Z:[-1,1], C:[1,1],
-  };
-  if (m[e.key]) { e.preventDefault(); move(...m[e.key]); }
+  if (e.key === ' ') { e.preventDefault(); move(0, 0); return; }   // 待機
+  const dir = _KEY_DIRS[e.key];
+  if (!dir) return;
+  e.preventDefault();
+  // OS の auto-repeat（e.repeat）は JS 側のリピートと競合するので無視。
+  // 初回 keydown だけを長押し開始トリガにする。
+  if (e.repeat) return;
+  _holdStart(dir[0], dir[1]);
+});
+document.addEventListener('keyup', e => {
+  const dir = _KEY_DIRS[e.key];
+  if (!dir) return;
+  // 別の方向に切り替え途中で離されるパターンに備え、現在保持している方向と
+  // 一致した時だけ停止（diff キーが残っているなら継続）。
+  if (_hold.dir && _hold.dir[0] === dir[0] && _hold.dir[1] === dir[1]) {
+    _holdStop();
+  }
+});
+// 画面非表示やフォーカスアウトでも止める（タブ切り替え中に動き続けないように）
+window.addEventListener('blur',         () => _holdStop());
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) _holdStop();
 });
 
 // スワイプ（モバイル）

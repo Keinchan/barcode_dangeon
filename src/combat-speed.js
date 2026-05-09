@@ -34,6 +34,15 @@ const PROFILES = {
     preFlashMs: 520,
     showTelegraph: true,
   },
+  // ultra: 「もっと攻撃スピード攻撃演出のスピードを遅く」要望に対応する最遅プロファイル。
+  // テレグラフ → 着弾までを 1 秒以上空け、複数敵の連撃が「順番に」見える速さにする。
+  ultra: {
+    label:    '極遅',
+    desc:     '演出最重視。1 体ずつしっかり追えて何が起きたか必ず把握できる',
+    stepMs:   1700,
+    preFlashMs: 850,
+    showTelegraph: true,
+  },
 };
 
 let _current = 'fast';
