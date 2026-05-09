@@ -217,6 +217,11 @@ const ARMOR_SKILLS = {
 //
 // rarityOverride: レアリティを上書き（モンスターのレアリティに合わせる時など）
 // levelOverride : アイテムLv 1..100。指定時はステータスに level スケーリングが乗る
+//
+// 特殊ルート:
+//   digits[8] % 8 === 0（12.5%）: ダンジョン入口（dungeonPortal アイテム）。
+//   持ち物に格納し、メニューから「突入する」で一回限りの仮想ダンジョンへ。
+//   モンスター・素材・ボス込みのダンジョンが直接生成される。
 export function generateItemFromBarcode(barcode, rarityOverride = null, levelOverride = null) {
   const rng       = createRNG(hashString('item:' + barcode));
   const digits    = barcode.split('').map(Number);
@@ -226,6 +231,12 @@ export function generateItemFromBarcode(barcode, rarityOverride = null, levelOve
   const elemIdx   = parseInt(barcode.slice(3, 5), 10) % ELEMENTS.length;
   const element   = ELEMENTS[elemIdx];
   const level     = Math.max(1, Math.min(100, levelOverride ?? 1));
+
+  // ダンジョンポータル抽選（rarityOverride 指定時はモンスター/ショップドロップ
+  // 経路なのでスキップ — スキャン経由のみ portal を出す）。
+  if (!rarityOverride && (digits[8] % 8) === 0) {
+    return makeBarcodeDungeonPortal(barcode);
+  }
 
   switch (typeIdx) {
     case 0: return _buildWeapon(barcode, rng, rarity, element, level);
@@ -789,6 +800,82 @@ export function makeSkillBook(skillId) {
     desc:        `${badge}${skill.element}属性 適性: ${types} / ${PATTERN_DESC[skill.pattern]} / 威力×${skill.dmgMult} / MP -${skill.mpCost}`,
     skillName:   skill.name,
     skillDesc:   skill.desc,
+    count:       1,
+  };
+}
+
+// ─────────────────────────────────────────────
+// バーコード由来のダンジョン入口（dungeonPortal）
+// ─────────────────────────────────────────────
+//   スキャンしたバーコードから「短くて即興っぽい」一回限りのダンジョンを生成。
+//   伝説の書(legendaryTome)と同じく持ち物アイテムとして扱い、メニューから
+//   「突入する」で enterDungeon。使用すると消費される。
+//
+//   テーマ・属性・レアリティ・階層数はバーコード桁から決定論的に決まるので、
+//   同じ商品を何度スキャンしても同じダンジョンが出る（場所の代わりにバーコードが
+//   ID になる）。一度クリア / 撃破すれば持ち物から消えるので「再挑戦したいなら
+//   もう一度スキャンする」運用。
+const _PORTAL_THEMES = [
+  { name: '幻影の回廊',     wallColor: '#5a3a8b', floorColor: '#1a0e26', tag: '🌀' },
+  { name: '記憶の地下層',   wallColor: '#3a3a5b', floorColor: '#0e0e1a', tag: '🌌' },
+  { name: '商品の墓場',     wallColor: '#6b5a2a', floorColor: '#2a1f0e', tag: '📦' },
+  { name: '電脳のダンジョン', wallColor: '#1a4a6b', floorColor: '#06141a', tag: '⚙' },
+  { name: '夢のはざま',     wallColor: '#6b3a5a', floorColor: '#1a0e1a', tag: '✨' },
+];
+
+export function makeBarcodeDungeonPortal(barcode) {
+  // ダンジョンデータをバーコードから決定論的に組み立てる
+  const seed = hashString('barcode-dungeon:' + barcode);
+  const rng  = createRNG(seed);
+  const digits = barcode.split('').map(Number);
+  const digitSum = digits.reduce((a, b) => a + b, 0);
+
+  // レアリティ（コモン55 / レア30 / エピック12 / レジェンド3 で重み付け）
+  const r = rng();
+  const rarityIdx = r < 0.55 ? 0 : r < 0.85 ? 1 : r < 0.97 ? 2 : 3;
+  const rarity    = RARITIES[rarityIdx];
+
+  // テーマ（バーコード由来の数値で決定的に）
+  const theme = _PORTAL_THEMES[digitSum % _PORTAL_THEMES.length];
+
+  // 階層数: 短い（2〜4）。レア度が高いほど少しだけ深い
+  const floorBase = 2 + Math.floor(rng() * 2);  // 2 or 3
+  const floors = floorBase + (rarityIdx >= 2 ? 1 : 0);
+
+  // 属性（バーコード桁由来）
+  const elementIdx = parseInt(barcode.slice(3, 5), 10) % ELEMENTS.length;
+  const element    = ELEMENTS[elementIdx];
+
+  // モンスター職業
+  const fakeBarcode = String(seed).padStart(13, '0').slice(0, 13);
+  // jobForBarcode は items.js 側で import 済（generator → items の依存関係を避けるため
+  // ここでは jobId だけ算出。実際のジョブ参照は generator.generateMonster で行う）。
+
+  const dungeonData = {
+    seed: 'portal:' + seed,
+    barcode: fakeBarcode,
+    name: `${theme.tag} ${theme.name}`,
+    theme,
+    floors,
+    difficulty: rarityIdx + 1,
+    monsterTypeIdx: digitSum % 10,
+    elementIdx,
+    element,
+    rarityBase: rarity,
+    isBarcodePortal: true,           // ダンジョンクリア時の判定用
+  };
+
+  return {
+    type:        'dungeonPortal',
+    name:        `🌀 ${theme.name}（${rarity.name}）`,
+    emoji:       theme.tag,
+    rarity:      rarity.name,
+    rarityColor: rarity.color,
+    element,
+    level:       1,
+    desc:        `読むと ${theme.name} へ通じる。${rarity.name}・B${floors}F`,
+    dungeonData,                     // 突入時にそのまま enterDungeon へ渡す
+    barcodeOrigin: barcode,
     count:       1,
   };
 }

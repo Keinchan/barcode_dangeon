@@ -860,7 +860,7 @@ function _renderActivePocketTab() {
     switch (_activePocketTab) {
       case 'weapon': return it.type === 'weapon';
       case 'armor':  return it.type === 'armor';
-      case 'scroll': return it.type === 'scroll' || it.type === 'mysteryScroll' || it.type === 'skillBook' || it.type === 'legendaryTome';
+      case 'scroll': return it.type === 'scroll' || it.type === 'mysteryScroll' || it.type === 'skillBook' || it.type === 'legendaryTome' || it.type === 'dungeonPortal';
       case 'key':    return it.type === 'key';
       default:       return true;
     }
@@ -1584,6 +1584,10 @@ function _statLine(item) {
     // 中身は秘密にして、レア度だけ匂わせる（開封時の演出で初公開する設計）
     return `🎁 ${item.rarity ?? ''}の宝箱（鍵で開ける）`;
   }
+  if (item.type === 'dungeonPortal') {
+    const f = item.dungeonData?.floors ?? '?';
+    return `🌀 ${item.element ?? ''}属性 / B${f}F（突入＝入口消費）`;
+  }
   return '';
 }
 
@@ -1728,11 +1732,15 @@ function _renderInventoryRow(item, idx) {
   // 宝箱はダンジョン内で「鍵を消費して開ける」アクションになる。
   // 鍵在庫が無い時はダイアログで案内する（ボタン自体は活性のまま）。
   const isChest = item.type === 'chest';
-  const hasMainAction = isEquippable || isUsableHere || isLearnable || isTomeUsable || isChest;
+  // バーコードダンジョン入口: 伝説の書と同じ「ダンジョン外でだけ使える」運用。
+  // 入ると消費され、もう一度欲しければ同じバーコードをスキャンし直す。
+  const isPortalUsable = item.type === 'dungeonPortal' && screen !== 'dungeon';
+  const hasMainAction = isEquippable || isUsableHere || isLearnable || isTomeUsable || isChest || isPortalUsable;
   const action =
     isEquippable                  ? 'equip'   :
     isLearnable                   ? 'learn'   :
     isTomeUsable                  ? 'tome'    :
+    isPortalUsable                ? 'portal'  :
     isChest                       ? 'open'    :
     item.type === 'mysteryScroll' ? 'mystery' :
     item.type === 'scroll'        ? 'scroll'  :
@@ -1793,6 +1801,13 @@ function _renderInventoryRow(item, idx) {
         showActionConfirm(`${item.name} を読んで試練ダンジョンへ向かいますか？\n（書は使うと消費されます）`, item, '挑む', () => {
           _useLegendaryTomeFromInventory(idx);
         });
+      } else if (action === 'portal') {
+        const floors = item.dungeonData?.floors ?? '?';
+        showActionConfirm(
+          `${item.name} に突入しますか？\n\n${item.rarity}・B${floors}F・${item.element ?? ''}属性\n（突入すると入口は消費されます）`,
+          item, '突入する',
+          () => { _useDungeonPortalFromInventory(idx); },
+        );
       } else if (action === 'open') {
         _openChestFromInventory(idx);
       }
@@ -3163,6 +3178,27 @@ function _useLegendaryTomeFromInventory(idx) {
   enterDungeon(data);
 }
 
+// バーコード由来のダンジョン入口を使用。1 個消費して即時突入。
+// dungeonData は makeBarcodeDungeonPortal が事前に組み立てている。
+function _useDungeonPortalFromInventory(idx) {
+  const item = player.inventory[idx];
+  if (!item || item.type !== 'dungeonPortal') return;
+  if (screen === 'dungeon') {
+    showAlert('ダンジョン入口は外側でしか使えません');
+    return;
+  }
+  const data = item.dungeonData;
+  if (!data) {
+    showAlert('入口データが見つかりません（破棄します）');
+    takeOneFromInventory(idx);
+    return;
+  }
+  // 入口を 1 個消費 → 突入
+  takeOneFromInventory(idx);
+  playSfx('confirm');
+  enterDungeon(data);
+}
+
 // 攻撃巻物（炎/水/草/雷/光/闇 の属性ダメージ）の使用。
 //   旧戦闘パネル時代は単一敵に当てる仕様だったが、現行のダンジョン探索では
 //   「現在のターゲット」が無いので、プレイヤーの向きから正面方向 6 マスを走査して
@@ -3621,7 +3657,9 @@ function _showItemResult(item, scan) {
     item.type === 'potion'   ? `HP +${item.heal} 回復`   :
     item.type === 'mpPotion' ? `MP +${item.mpHeal} 回復` :
     item.type === 'scroll' ? `${item.element}属性 ${item.dmg}ダメージ` :
-    item.type === 'legendaryTome' ? item.desc : '';
+    item.type === 'legendaryTome' ? item.desc :
+    item.type === 'key'    ? '🗝️ 宝箱を 1 つ開けられる' :
+    item.type === 'dungeonPortal' ? `🌀 ${item.dungeonData?.theme?.name ?? ''}・B${item.dungeonData?.floors ?? '?'}F・${item.element ?? ''}属性` : '';
 
   const skillBlock = item.skill?.name
     ? `<div class="item-result-skill">
@@ -3647,6 +3685,12 @@ function _showItemResult(item, scan) {
     ${skillBlock}
     <div class="item-result-meta">${scan.format} / ${scan.text}${categoryLabel}</div>
   `;
+  // ダンジョン入口は「突入する」ボタンに切り替え。それ以外のアイテムは従来通り
+  // 「受け取る」（btn-keep-item の click ハンドラ側で type 分岐する）。
+  const keepBtn = document.getElementById('btn-keep-item');
+  if (keepBtn) {
+    keepBtn.textContent = item.type === 'dungeonPortal' ? '🌀 突入する' : '受け取る';
+  }
   document.getElementById('scan-result').classList.remove('hidden');
   // スキャン → アイテム判明時に取得SFX（レアリティで音色変化）
   playSfx('pickup', { rarityTier: rarityTier(item.rarity) });
@@ -3670,8 +3714,16 @@ document.getElementById('btn-rescan').addEventListener('click', async () => {
 document.getElementById('btn-keep-item').addEventListener('click', () => {
   if (!pendingItem) return;
   const item = pendingItem;
-  const msg = _acquireItem(item);
   pendingItem = null;
+  // ダンジョン入口は「受け取る」ではなく即時突入する。
+  // インベントリ経由をスキップして体験を短くする（持ち物枠も消費しない）。
+  if (item.type === 'dungeonPortal' && item.dungeonData) {
+    playSfx('confirm');
+    enterDungeon(item.dungeonData);
+    autoSave();
+    return;
+  }
+  const msg = _acquireItem(item);
   show('map');
   // レア+はバナーで派手に告知（コモンは軽いアラート）
   if (item.rarity !== 'コモン') {
