@@ -63,6 +63,10 @@
       <div class="pvp-lobby-sub" id="pvp-lobby-sub">部屋を作るか、招待コードで参加</div>
 
       <div id="pvp-lobby-actions" class="pvp-lobby-actions">
+        <div class="pvp-mode-toggle">
+          <label><input type="radio" name="pvp-mode" value="pvp" checked> ⚔️ 対戦（タイマン）</label>
+          <label><input type="radio" name="pvp-mode" value="coop"> 🤝 協力（NPCボス討伐）</label>
+        </div>
         <button id="btn-pvp-create" class="btn-primary">部屋を作る（ホスト）</button>
         <div class="pvp-lobby-hr"><span>または</span></div>
         <input id="pvp-join-code" type="text" inputmode="numeric" maxlength="6" placeholder="6桁の招待コード" />

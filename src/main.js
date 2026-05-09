@@ -101,6 +101,7 @@ import {
   submitOwnState as pvpSubmitOwnState,
   pingHeartbeat as pvpPingHeartbeat,
   resetForRematch as pvpResetForRematch,
+  submitBossUpdate as pvpSubmitBossUpdate,
 } from './multiplayer.js';
 import { MINION_LIBRARY, makeMinion, findMinionTemplate, rehydrateMinion } from './minions.js';
 import {
@@ -4327,6 +4328,10 @@ function move(dx, dy) {
       _openShopModal(mob);
       return;
     }
+    // 協力モード: 仲間プレイヤー (isPvpOpponent) は攻撃対象にせず移動だけブロック
+    if (mob.isPvpOpponent && _pvpData?.mode === 'coop') {
+      return;
+    }
     // バンプ近接攻撃（戦闘パネルは無し）。1 撃で倒せなければ敵ターン
     _bumpMeleeAttack(mob);
     return;
@@ -4442,6 +4447,25 @@ function _pvpSendSelfBuff() {
     otherUid: _pvpData[otherRole]?.uid,
   })
     .catch(err => console.warn('PvP self-buff sync failed:', err))
+    .finally(() => {
+      _turnBusy = false;
+      if (dungeon) dungeon.render(document.getElementById('dungeon-canvas'));
+    });
+}
+
+// 協力モード: 共有ボスにダメージを与えた結果を Firestore に同期。
+// ボス HP/位置 の更新 + ターン交代を一発で行う。撃破なら state=finished+cause=bossKilled。
+function _pvpSendBossDamage(bossHpAfter, dmg) {
+  if (!_pvpCode || !_pvpRole || !_pvpData) return;
+  _turnBusy = true;
+  const otherRole = _pvpRole === 'host' ? 'guest' : 'host';
+  pvpSubmitBossUpdate(_pvpCode, {
+    hp:       bossHpAfter,
+    flipTurn: true,
+    nextTurn: otherRole,
+    turnNo:   _pvpData.turnNo ?? 0,
+  })
+    .catch(err => console.warn('PvP boss update failed:', err))
     .finally(() => {
       _turnBusy = false;
       if (dungeon) dungeon.render(document.getElementById('dungeon-canvas'));
@@ -5024,6 +5048,11 @@ function _handleMonsterDefeated(mob) {
     dungeon.removeMonster(mob);
     return;
   }
+  // 協力モードの共有ボスも同様: Firestore で勝敗が決まるのでドロップ無し
+  if (mob?.isCoopBoss) {
+    dungeon.removeMonster(mob);
+    return;
+  }
   _maybeRecruitMinion(mob);
   dungeon.removeMonster(mob);
 
@@ -5132,6 +5161,9 @@ function _bumpMeleeAttack(mob) {
     if (mob.isPvpOpponent) {
       // PvP: 致命傷を相手側に通知。state=finished に切り替わる
       _pvpSendAttackAction(dmg, 0);
+    } else if (mob.isCoopBoss) {
+      // 協力モード: ボス撃破を Firestore に通知（state=finished + cause=bossKilled）
+      _pvpSendBossDamage(0, dmg);
     }
     _handleMonsterDefeated(mob);
     refreshHUD();
@@ -5144,6 +5176,11 @@ function _bumpMeleeAttack(mob) {
   // PvP アリーナ: ダメージを相手側に通知してターン交代
   if (mob.isPvpOpponent) {
     _pvpSendAttackAction(dmg, mob.hp);
+    return;
+  }
+  // 協力モード: 共有ボスへのダメージを Firestore で同期（ターン交代も）
+  if (mob.isCoopBoss) {
+    _pvpSendBossDamage(mob.hp, dmg);
     return;
   }
   // 1 呼吸の間（演出が見える時間を確保）→ 敵ターン
@@ -6329,8 +6366,11 @@ async function _pvpCreate() {
   const u = getCurrentAuthUser();
   if (!u) { _showPvpError('ログインが必要です'); return; }
   const profile = buildPvpProfile(u.uid, u.displayName ?? u.email ?? 'プレイヤー', player, 'host');
+  // ロビーのモードラジオから 'pvp' / 'coop' を取得
+  const modeInput = document.querySelector('input[name="pvp-mode"]:checked');
+  const mode = modeInput?.value === 'coop' ? 'coop' : 'pvp';
   try {
-    const code = await pvpCreateRoom(profile);
+    const code = await pvpCreateRoom(profile, { mode });
     _pvpCode = code;
     _pvpRole = 'host';
     _pvpUnsub = pvpWatchRoom(code, _onPvpUpdate);
@@ -6513,6 +6553,29 @@ function _enterPvpArena(data) {
     dungeon.playerPos.x = me.x;
     dungeon.playerPos.y = me.y;
   }
+  // 協力モード: 共有ボス NPC を盤面に追加（両プレイヤーから見える）。
+  // isPvpOpponent ではなく isCoopBoss フラグで識別し、両者が攻撃可能にする。
+  if (data.mode === 'coop' && data.boss) {
+    const b = data.boss;
+    dungeon.monsters.push({
+      base: 'ボス',
+      emoji: b.emoji ?? '🐉',
+      name:  b.name ?? 'ボス',
+      isBoss: false,
+      isCoopBoss: true,
+      rarity: 'レジェンド',
+      rarityColor: '#ffd54f',
+      element: b.element ?? '火',
+      skillCharge: 0,
+      hp: b.hp ?? 1,
+      maxHp: b.maxHp ?? 1,
+      atk: b.atk ?? 1,
+      def: b.def ?? 0,
+      x: b.x, y: b.y,
+      floor: 1,
+      job: { id: 'coopboss', label: 'ボス', aiHint: 'rush', preferredRange: 'ADJ', chargeBonus: 0 },
+    });
+  }
   // 相手モンスターの初期位置も同期
   _syncPvpOpponentToData(data);
   refreshHUD();
@@ -6524,6 +6587,15 @@ function _enterPvpArena(data) {
 let _pvpLastMyHp = null;     // 前回の自分 HP（差分検知でフラッシュ）
 function _syncPvpOpponentToData(data) {
   if (!dungeon || !data) return;
+  // 協力モード: 共有ボスの HP/位置 を反映（両者の攻撃が混ざる）
+  if (data.mode === 'coop' && data.boss) {
+    const localBoss = (dungeon.monsters ?? []).find(m => m?.isCoopBoss);
+    if (localBoss) {
+      localBoss.hp = data.boss.hp ?? localBoss.hp;
+      localBoss.x  = data.boss.x  ?? localBoss.x;
+      localBoss.y  = data.boss.y  ?? localBoss.y;
+    }
+  }
   const foe = data[_pvpRole === 'host' ? 'guest' : 'host'];
   if (!foe) return;
   const opp = (dungeon.monsters ?? []).find(m => m?.isPvpOpponent);
@@ -6607,6 +6679,13 @@ function _refreshPvpTurnUI(data) {
 function _renderPvpLobbyRoom(data) {
   const wrap = document.getElementById('pvp-lobby-players');
   wrap.innerHTML = '';
+  // モード表示行（対戦 / 協力 を分かりやすく）
+  const modeLabel = data.mode === 'coop' ? '🤝 協力モード（NPC ボス討伐）' : '⚔️ タイマン対戦';
+  const modeRow = document.createElement('div');
+  modeRow.className = 'pvp-row';
+  modeRow.style.opacity = '0.85';
+  modeRow.innerHTML = `<span>${modeLabel}</span><span></span>`;
+  wrap.appendChild(modeRow);
   const rows = [];
   if (data.host) rows.push({ p: data.host, role: 'host', tag: 'ホスト' });
   if (data.guest) rows.push({ p: data.guest, role: 'guest', tag: 'ゲスト' });
@@ -6765,13 +6844,22 @@ function _showPvpFinished(data) {
   if (_pvpFinishShown) return;
   _pvpFinishShown = true;
   const me = data[_pvpRole];
-  const win = data.winnerUid === me?.uid;
+  // PvP: winnerUid が自分なら勝利。
+  // 協力モード: winnerUid='coop' なら両者勝利、cause=playerDied なら両者敗北。
+  let titleText;
+  if (data.mode === 'coop') {
+    if (data.cause === 'bossKilled') titleText = '🎉 ボス討伐成功！';
+    else                              titleText = '💀 全滅…';
+  } else {
+    const win = data.winnerUid === me?.uid;
+    titleText = win ? '🎉 勝利！' : '💀 敗北…';
+  }
   setTimeout(async () => {
     // 勝敗ダイアログは confirm 形式で「もう一度」「退室」を選べる。
     //   OK   = 同じ部屋でリマッチ（state を waiting にリセットしてロビー待機画面へ）
     //   Cancel = 部屋を出てマップへ戻る
     const ok = await showConfirm(
-      (win ? '🎉 勝利！\n\n' : '💀 敗北…\n\n') + '同じ部屋でもう一度戦いますか？',
+      `${titleText}\n\n同じ部屋でもう一度戦いますか？`,
       { okLabel: 'もう一度', cancelLabel: '退室する' },
     );
     _pvpFinishShown = false;
