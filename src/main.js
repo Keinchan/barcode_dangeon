@@ -5105,11 +5105,20 @@ function showResult(isWin) {
   entrySnapshot = null;
 
   show('result');
+  // 1 ルーム戦闘ステージ（地図エンカウント由来）はダンジョン踏破とは別の文脈なので
+  // 「攻略成功」より「撃破成功」の方が体感に合う。本文も短く倒した相手を讃える。
+  const isMapBattle = !!dungeonData?.isMapBattle;
   document.getElementById('result-icon').textContent  = isWin ? '🎉' : '💀';
-  document.getElementById('result-title').textContent = isWin ? '攻略成功！' : 'ゲームオーバー';
+  document.getElementById('result-title').textContent = isWin
+    ? (isMapBattle ? '撃破成功！' : '攻略成功！')
+    : 'ゲームオーバー';
   document.getElementById('result-body').textContent  = isWin
-    ? `${dungeonData.name} を踏破した！\n（再挑戦可）`
-    : 'ダンジョンで力尽きた...\nこのダンジョンで拾ったものは失われた';
+    ? (isMapBattle
+        ? `${dungeonData.name} に勝利した！`
+        : `${dungeonData.name} を踏破した！\n（再挑戦可）`)
+    : (isMapBattle
+        ? '敗北...\nこの戦闘で拾ったものは失われた'
+        : 'ダンジョンで力尽きた...\nこのダンジョンで拾ったものは失われた');
   playSfx(isWin ? 'victory' : 'defeat');
   autoSave();
 }

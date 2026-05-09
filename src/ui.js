@@ -551,7 +551,10 @@ function _vfxLongBeam(c, ts, color, facing, lengthInTiles = 6.4) {
   el.style.height = (ts * 0.30) + 'px';
   el.style.background = `linear-gradient(90deg, transparent 0%, ${color} 30%, #fff 50%, ${color} 70%, transparent 100%)`;
   el.style.boxShadow = `0 0 18px ${color}, 0 0 36px ${color}`;
-  el.style.transform = `translate(-50%,-50%) rotate(${ang}deg)`;
+  // CSS の vfxBeam keyframes は transform を rotate(var(--r, 0deg)) で参照する。
+  // ここで el.style.transform を直接書くとアニメーション側で上書きされて角度が
+  // 常に 0deg（横向き）になるバグがあったので、CSS 変数経由で角度を渡す。
+  el.style.setProperty('--r', ang + 'deg');
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 560);
 }
@@ -587,7 +590,7 @@ function _vfxDiagSlash(c, ts, color) {
     el.style.height = (ts * 0.18) + 'px';
     el.style.background = `linear-gradient(90deg, transparent 0%, ${color} 30%, #fff 50%, ${color} 70%, transparent 100%)`;
     el.style.boxShadow = `0 0 12px ${color}`;
-    el.style.transform = `translate(-50%,-50%) rotate(${aDeg}deg)`;
+    el.style.setProperty('--r', aDeg + 'deg');
     document.body.appendChild(el);
     setTimeout(() => el.remove(), 480);
   }
@@ -641,7 +644,7 @@ function _vfxFloorBurst(c, ts, color) {
     el.style.height = (ts * 0.22) + 'px';
     el.style.background = `linear-gradient(90deg, transparent 0%, ${color} 50%, transparent 100%)`;
     el.style.boxShadow = `0 0 14px ${color}`;
-    el.style.transform = `translate(-50%,-50%) rotate(${angle}deg)`;
+    el.style.setProperty('--r', angle + 'deg');
     document.body.appendChild(el);
     setTimeout(() => el.remove(), 560);
   }
@@ -665,7 +668,7 @@ function _vfxConeFan(c, ts, color, facing) {
       el.style.height = (ts * 0.22) + 'px';
       el.style.background = `linear-gradient(90deg, transparent 0%, ${color} 40%, #fff 50%, ${color} 60%, transparent 100%)`;
       el.style.boxShadow = `0 0 12px ${color}`;
-      el.style.transform = `translate(-50%,-50%) rotate(${baseAng + da}deg)`;
+      el.style.setProperty('--r', (baseAng + da) + 'deg');
       document.body.appendChild(el);
       setTimeout(() => el.remove(), 520);
     }, i * 60);
@@ -730,7 +733,7 @@ function _vfxCrossSlash(c, ts, color) {
     el.style.height = (ts * 0.18) + 'px';
     el.style.background = `linear-gradient(90deg, transparent 0%, ${color} 30%, #fff 50%, ${color} 70%, transparent 100%)`;
     el.style.boxShadow = `0 0 12px ${color}`;
-    el.style.transform = `translate(-50%,-50%) rotate(${d.rot}deg)`;
+    el.style.setProperty('--r', d.rot + 'deg');
     document.body.appendChild(el);
     setTimeout(() => el.remove(), 480);
   }
@@ -766,7 +769,7 @@ function _vfxFourBeams(c, ts, color) {
     el.style.height = (ts * 0.22) + 'px';
     el.style.background = `linear-gradient(90deg, transparent 0%, ${color} 50%, transparent 100%)`;
     el.style.boxShadow = `0 0 14px ${color}, 0 0 28px ${color}`;
-    el.style.transform = `translate(-50%,-50%) rotate(${d.rot}deg)`;
+    el.style.setProperty('--r', d.rot + 'deg');
     document.body.appendChild(el);
     setTimeout(() => el.remove(), 520);
   }
