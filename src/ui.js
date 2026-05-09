@@ -534,7 +534,11 @@ function _vfxLongBeam(c, ts, color, facing, lengthInTiles = 6.4) {
   const fx = facing[0];
   const fy = facing[1];
   if (fx === 0 && fy === 0) return;
-  const len = ts * lengthInTiles;
+  // 斜め向きは 1 ステップ進むと grid 上 √2 マス分の Euclidean 距離を進む。
+  // ビーム長は「カバーするマス数 × √2」にしないと N 番目の命中マスより手前で
+  // 視覚効果が途切れて、線の方向と着弾点がズレて見える。
+  const isDiag = fx !== 0 && fy !== 0;
+  const len = ts * lengthInTiles * (isDiag ? Math.SQRT2 : 1);
   // 角度: 基準は右方向（rotate 0deg = ベース向き）。faceing [1,0] → 0deg, [0,1] → 90deg
   const ang = Math.atan2(fy, fx) * 180 / Math.PI;
   const offX = Math.cos(ang * Math.PI / 180) * (len / 2 + ts * 0.3);

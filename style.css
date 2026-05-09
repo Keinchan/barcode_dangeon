@@ -2173,19 +2173,52 @@ input, textarea {
   gap: 8px;
   padding: 4px 2px;
   text-align: left;
+  /* 7 種類 + αが modal-box の max-height(70vh) に収まらない時にちゃんと
+     スクロールできるようにする。これが無いと旧 UI では下のエントリが
+     クリップされて「説明が読めない」状態になっていた。 */
+  overflow-y: auto;
+  max-height: calc(70vh - 80px);   /* modal の title/close ボタン分を除く */
+  /* 説明文（日本語）の自動改行を有効化。長い文や記号で破綻しないよう
+     overflow-wrap を anywhere にして強制改行する。 */
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 .status-info-row {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 6px 8px;
-  background: rgba(255,255,255,0.04);
+  padding: 8px 10px;
+  background: rgba(255,255,255,0.06);
   border-radius: 6px;
   border-left: 3px solid var(--c, #888);
+  /* row 自体が縦に伸びても中身が切られないように flex で min-height を 0 解除 */
+  min-height: 0;
 }
-.status-info-emoji { font-size: 22px; line-height: 1; }
-.status-info-text  { font-size: 12px; color: #ddd; line-height: 1.45; }
-.status-info-name  { font-size: 13px; font-weight: bold; color: var(--c, #fff); }
+.status-info-emoji {
+  font-size: 22px;
+  line-height: 1;
+  flex-shrink: 0;
+  width: 28px;
+  text-align: center;
+}
+.status-info-text  {
+  font-size: 13px;
+  color: #f5f5f5;
+  line-height: 1.55;
+  /* 説明文の親 div が flex 子なので、テキストが膨らむと幅を取れずに
+     読めなくなることがあった。明示的に flex: 1 して横幅を確保。 */
+  flex: 1;
+  min-width: 0;
+}
+.status-info-name  {
+  font-size: 14px;
+  font-weight: bold;
+  color: var(--c, #fff);
+  /* 名前テキストはステータス色そのままだと黄色等で背景に負けるので
+     軽い黒シャドウで縁取りして必ず読める色になるようにする。 */
+  text-shadow: 0 0 6px rgba(0,0,0,0.65), 0 1px 0 rgba(0,0,0,0.85);
+  margin-bottom: 3px;
+}
 
 /* 攻撃予告テレグラフ。攻撃発動前にこの枠を 1 周パルスさせて
    「誰がこれから攻撃するか」をプレイヤーに把握させる。
