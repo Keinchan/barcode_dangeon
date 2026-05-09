@@ -86,6 +86,7 @@ export function buildPvpProfile(uid, displayName, player, role) {
     x:       cx,
     y:       isHost ? (ARENA_H - 5) : 4,
     facing:  isHost ? [0, -1] : [0, 1],
+    statuses: [],            // 罹患中の状態異常 / バフを 1 配列で管理（PvP同期）
     ready:   false,
   };
 }
@@ -228,8 +229,8 @@ export async function submitMove(code, role, pos, turnNo) {
   await updateDoc(ref, updates);
 }
 
-// アリーナでの「攻撃」アクション。相手の HP/MP を更新し、ターンを相手に渡す。
-// 結果（hpAfter / mpAfter）はクライアント側で計算済の前提。HP0 なら state 終了。
+// アリーナでの「攻撃」アクション。相手の HP/MP/statuses を更新し、ターンを相手に渡す。
+// 結果（hpAfter / mpAfter / 状態異常付与）はクライアント側で計算済の前提。HP0 なら state 終了。
 export async function submitArenaAttack(code, role, args) {
   const db = _getDb();
   if (!db) return;
@@ -249,11 +250,59 @@ export async function submitArenaAttack(code, role, args) {
   if (args.attackerMpAfter != null) {
     updates[`${role}.mp`] = args.attackerMpAfter;
   }
+  // 攻撃側の atk/def/statuses が変動した場合（バフ込みダメージ計算ベースを共有する用途）
+  if (Array.isArray(args.attackerStatuses)) {
+    updates[`${role}.statuses`] = args.attackerStatuses;
+  }
+  if (typeof args.attackerAtk === 'number') updates[`${role}.atk`] = args.attackerAtk;
+  if (typeof args.attackerDef === 'number') updates[`${role}.def`] = args.attackerDef;
+  // 攻撃で相手に状態異常を付与した場合は statuses 配列ごと更新
+  if (Array.isArray(args.targetStatuses)) {
+    updates[`${otherRole}.statuses`] = args.targetStatuses;
+  }
   if ((args.targetHpAfter ?? 1) <= 0) {
     updates.state     = 'finished';
     updates.winnerUid = args.attackerUid ?? null;
   }
   await updateDoc(ref, updates);
+}
+
+// 自分の状態（HP/MP/atk/def/statuses）だけを更新（攻撃を伴わない自己バフ・状態異常 tick）。
+// hp が 0 以下になった場合は state=finished で相手を勝者にする。
+export async function submitOwnState(code, role, args) {
+  const db = _getDb();
+  if (!db) return;
+  const ref = doc(db, ROOMS, code);
+  const updates = {};
+  if (typeof args.hp === 'number')        updates[`${role}.hp`]       = Math.max(0, args.hp);
+  if (typeof args.mp === 'number')        updates[`${role}.mp`]       = Math.max(0, args.mp);
+  if (typeof args.atk === 'number')       updates[`${role}.atk`]      = args.atk;
+  if (typeof args.def === 'number')       updates[`${role}.def`]      = args.def;
+  if (Array.isArray(args.statuses))       updates[`${role}.statuses`] = args.statuses;
+  if (typeof args.x === 'number')         updates[`${role}.x`]        = args.x;
+  if (typeof args.y === 'number')         updates[`${role}.y`]        = args.y;
+  if (Array.isArray(args.facing))         updates[`${role}.facing`]   = args.facing;
+  // 状態異常等で HP 0 になった場合は相手勝利
+  if (typeof args.hp === 'number' && args.hp <= 0 && args.otherUid) {
+    updates.state     = 'finished';
+    updates.winnerUid = args.otherUid;
+  }
+  // ターン交代も一緒に行う場合（自己バフ系の SELF 技で「ターン消費した」扱いにする等）
+  if (args.flipTurn) {
+    updates.turn   = role === 'host' ? 'guest' : 'host';
+    updates.turnNo = (args.turnNo ?? 0) + 1;
+  }
+  if (Object.keys(updates).length === 0) return;
+  await updateDoc(ref, updates);
+}
+
+// ハートビート（接続生存通知）。長期間更新が無ければ「相手が落ちた」とみなす。
+// 値は serverTimestamp で書き込むため、両クライアントの時計ズレに強い。
+export async function pingHeartbeat(code, role) {
+  const db = _getDb();
+  if (!db) return;
+  const ref = doc(db, ROOMS, code);
+  await updateDoc(ref, { [`${role}.lastSeen`]: serverTimestamp() }).catch(() => {});
 }
 
 // 逃走: 相手勝利確定で state=finished
