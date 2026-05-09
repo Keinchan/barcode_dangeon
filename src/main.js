@@ -24,7 +24,7 @@ import {
   elementMatchupTable, ELEMENTS,
   shopPriceFor,
   ENHANCE_RECIPES, applyEnhanceRecipe, fuseLegendaries, MATERIALS,
-  makeLegendaryTome,
+  makeLegendaryTome, makeKey,
   PLAYER_TYPES, findPlayerType,
   aptitudeElementsForPlayer, aptitudeElementsForMinion,
   canLearnSkillForPlayer, canLearnSkillForMinion,
@@ -1382,6 +1382,12 @@ function _statLine(item) {
   if (item.type === 'skillBook')     return `📕 ${item.skillName} を習得`;
   if (item.type === 'legendaryTome') return item.desc;
   if (item.type === 'scroll') return `${item.element}属性 ${item.dmg}ダメージ`;
+  if (item.type === 'key')    return '🗝️ 宝箱を 1 つ開ける';
+  if (item.type === 'chest')  {
+    const inner = item.inner;
+    if (!inner) return '🎁 中身は空…';
+    return `🎁 中身: ${inner.name}（鍵で開ける）`;
+  }
   return '';
 }
 
@@ -1523,11 +1529,15 @@ function _renderInventoryRow(item, idx) {
   // 伝説の書はダンジョン外でだけ使える（読むと特殊ダンジョンへ突入するため、
   // 別ダンジョン内からは使わせない）
   const isTomeUsable = item.type === 'legendaryTome' && screen !== 'dungeon';
-  const hasMainAction = isEquippable || isUsableHere || isLearnable || isTomeUsable;
+  // 宝箱はダンジョン内で「鍵を消費して開ける」アクションになる。
+  // 鍵在庫が無い時はダイアログで案内する（ボタン自体は活性のまま）。
+  const isChest = item.type === 'chest';
+  const hasMainAction = isEquippable || isUsableHere || isLearnable || isTomeUsable || isChest;
   const action =
     isEquippable                  ? 'equip'   :
     isLearnable                   ? 'learn'   :
     isTomeUsable                  ? 'tome'    :
+    isChest                       ? 'open'    :
     item.type === 'mysteryScroll' ? 'mystery' :
     item.type === 'scroll'        ? 'scroll'  :
     isUsableHere                  ? 'use'     : 'none';
@@ -1587,6 +1597,8 @@ function _renderInventoryRow(item, idx) {
         showActionConfirm(`${item.name} を読んで試練ダンジョンへ向かいますか？\n（書は使うと消費されます）`, item, '挑む', () => {
           _useLegendaryTomeFromInventory(idx);
         });
+      } else if (action === 'open') {
+        _openChestFromInventory(idx);
       }
     });
   }
@@ -2196,6 +2208,8 @@ async function _executeSkill(skill) {
     }
     const matDrop = _rollMaterialDrop(m);
     if (matDrop) _autoCollectDrop(matDrop);
+    const keyDrop = _rollKeyDrop(m);
+    if (keyDrop) _autoCollectDrop(keyDrop);
     const drop = _rollMonsterDrop(m);
     if (drop) {
       _placeFloorDrop(drop, m.x, m.y);
@@ -2471,6 +2485,7 @@ function _shopItemDescription(it) {
   if (it.type === 'material')      return `${it.desc} / ${it.rarity}`;
   if (it.type === 'mysteryScroll') return `${it.desc} / ${it.rarity}`;
   if (it.type === 'skillBook')     return `📕 ${it.skillName} / ${it.rarity}`;
+  if (it.type === 'key')           return '🗝️ 宝箱を 1 つ開ける';
   return it.rarity ?? '';
 }
 
@@ -3166,6 +3181,8 @@ function _scrollAoeDamage(targets, item, dmgMult, fxEmoji, fxColor) {
     if (gold > 0) _placeFloorDrop(makeGoldFloorItem(gold), m.x, m.y);
     const matDrop = _rollMaterialDrop(m);
     if (matDrop) _autoCollectDrop(matDrop);
+    const keyDrop = _rollKeyDrop(m);
+    if (keyDrop) _autoCollectDrop(keyDrop);
     const drop = _rollMonsterDrop(m);
     if (drop) _placeFloorDrop(drop, m.x, m.y);
   }
@@ -4194,17 +4211,19 @@ function pickupItem(item) {
     return;
   }
 
-  // 宝箱：踏むと開けて中身（武器/防具）を出す。中身は床に置き直して「拾うか
-  // どうかをプレイヤーに任せる」UX。装備の主経路をここに集約している。
+  // 宝箱：踏むと「拾う」だけ。中身を取り出すには鍵（🗝️）が必要。
+  // 仕様変更前は踏んだ瞬間に中身が床に出ていたが、敵が落とす鍵を集める意味を
+  // 持たせるため拾い物にした。鍵が無いまま持ち越しても次フロアで開けられる。
   if (item.type === 'chest') {
+    if (!canAddToInventory(item)) {
+      dungeonLog('🎒 持ち物が満杯で宝箱を拾えなかった');
+      return;
+    }
     dungeon.removeFloorItem(item);
-    const inner = item.inner;
-    if (!inner) { dungeonLog('🎁 宝箱は空っぽだった...'); return; }
-    inner.x = item.x; inner.y = item.y;
-    dungeon.floorItems.push(inner);
-    dungeonLog(`🎁 宝箱を開けた！ ${inner.name} が出てきた`, { rarity: inner.rarity });
-    playSfx('drop', { rarityTier: rarityTier(inner.rarity) });
-    _celebratePickup(inner, '宝箱から');
+    const r = addToInventory({ ...item });
+    if (!r.ok) { dungeonLog('🎒 拾えなかった'); return; }
+    playSfx('pickup', { rarityTier: rarityTier(item.rarity) });
+    dungeonLog(`🎁 宝箱を拾った（鍵で開けられる）`, { rarity: item.rarity });
     refreshHUD();
     dungeon.render(document.getElementById('dungeon-canvas'));
     autoSave();
@@ -4484,6 +4503,10 @@ function _handleMonsterDefeated(mob) {
   const mat = _rollMaterialDrop(mob);
   if (mat) _autoCollectDrop(mat);
 
+  // 鍵ドロップ（宝箱を開ける主経路）
+  const keyDrop = _rollKeyDrop(mob);
+  if (keyDrop) _autoCollectDrop(keyDrop);
+
   const drop = _rollMonsterDrop(mob);
   if (drop) {
     if (mob.isBoss) {
@@ -4596,6 +4619,68 @@ window.addEventListener('resize', () => {
   }
 });
 
+// 持ち物の鍵を 1 本消費して、指定 idx の宝箱を開ける。
+//   - 鍵が無ければ「鍵が必要」ダイアログを出して中断
+//   - 開いたら宝箱を inventory から除去し、中身を addToInventory（装備品なら
+//     即装備チェック、消耗品ならスタック合算）。中身のレア度で fanfare を出す。
+async function _openChestFromInventory(idx) {
+  const item = player.inventory?.[idx];
+  if (!item || item.type !== 'chest') return;
+  const inner = item.inner;
+  if (!inner) {
+    showAlert('中身が空っぽの宝箱でした…');
+    player.inventory.splice(idx, 1);
+    refreshMenu();
+    autoSave();
+    return;
+  }
+  // 鍵を持っているか（inventory + storage）から数える。最寄りの 1 本を消費。
+  const keyLocations = [];
+  (player.inventory ?? []).forEach((it, i) => {
+    if (it?.type === 'key') keyLocations.push({ src: 'inv', i });
+  });
+  (player.storage ?? []).forEach((it, i) => {
+    if (it?.type === 'key') keyLocations.push({ src: 'sto', i });
+  });
+  if (keyLocations.length === 0) {
+    showAlert('🗝️ 宝箱を開ける鍵を持っていません。\n敵を倒すかバーコードをスキャンすると鍵が手に入ることがあります。');
+    return;
+  }
+  const ok = await showConfirm(
+    `🎁 宝箱を 🗝️ 鍵 1 本で開けますか？\n\n中身: ${inner.name}（${inner.rarity}）\n所持鍵: ${keyLocations.length} 本`,
+    { okLabel: '開ける' },
+  );
+  if (!ok) return;
+
+  // 鍵 1 本を所定の場所から消費
+  const slot = keyLocations[0];
+  const arr = slot.src === 'inv' ? player.inventory : player.storage;
+  const k = arr[slot.i];
+  if ((k.count ?? 1) > 1) k.count -= 1;
+  else arr.splice(slot.i, 1);
+
+  // 宝箱を消費して中身を獲得（持ち物枠制約は addToInventory で評価）
+  player.inventory.splice(idx, 1);
+  // chest の中身は装備品が中心。持ち物が満杯のときはストレージへ流す。
+  let stowed = false;
+  if (canAddToInventory(inner)) {
+    addToInventory({ ...inner });
+  } else {
+    addToStorage({ ...inner });
+    stowed = true;
+  }
+  playSfx('drop', { rarityTier: rarityTier(inner.rarity) });
+  if (screen === 'dungeon') {
+    dungeonLog(`🎁 宝箱を開けた！ ${inner.name} ${stowed ? 'をストレージへ' : 'を獲得'}`, { rarity: inner.rarity });
+  }
+  if (typeof _celebratePickup === 'function' && screen === 'dungeon') {
+    try { _celebratePickup(inner, '宝箱から'); } catch {}
+  }
+  refreshMenu();
+  refreshHUD();
+  autoSave();
+}
+
 // モンスター撃破時の素材ドロップ（装備ドロップと独立）。15% で発生し、
 // モンスターのレアリティに対応した素材 1 個。合成・ショップで使う想定。
 function _rollMaterialDrop(mob) {
@@ -4603,6 +4688,22 @@ function _rollMaterialDrop(mob) {
   const chance = dbg.forceDrop ? 1 : 0.15;
   if (Math.random() > chance) return null;
   return materialForRarity(mob.rarity);
+}
+
+// 鍵ドロップ。宝箱を開ける主経路。レアリティと「ボスかどうか」で確率を上げる。
+// ボスは確定 1 本（ボス部屋で必ず 1 つ宝箱を開けられる安心感）。
+//   コモン雑魚 6% / レア 12% / エピック 22% / レジェンド 35% / ボス 100%
+// 既存の _rollMonsterDrop / _rollMaterialDrop と独立で、複数ドロップが乗っても OK。
+function _rollKeyDrop(mob) {
+  const dbg = getDebugState();
+  if (mob.isBoss) return makeKey();
+  const chance = dbg.forceDrop ? 1 :
+    mob.rarity === 'レジェンド' ? 0.35 :
+    mob.rarity === 'エピック'   ? 0.22 :
+    mob.rarity === 'レア'       ? 0.12 :
+    0.06;
+  if (Math.random() > chance) return null;
+  return makeKey();
 }
 
 // モンスター撃破時のドロップ判定。

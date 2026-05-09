@@ -237,15 +237,19 @@ export function generateItemFromBarcode(barcode, rarityOverride = null, levelOve
         ? _buildMpPotion(barcode, rng, rarity, level)
         : _buildPotion   (barcode, rng, rarity, level);
     }
-    default:
+    default: {
       // 巻物（type=scroll）は一時的にドロップ無効化。データ・コード（_buildScroll /
       // SCROLLS / 状態異常付与ロジック）は保持し、決定論的バーコード抽選で 3 が
-      // 出た時だけ薬に振り替える。digits[6] の偶奇で HP/MP のどちらが出るかを
-      // potion ルートと同じ規則で決め、同じバーコードからは常に同じアイテムが
-      // 出る決定論性を保つ。将来的に巻物バランス調整後にこの分岐を外せば復活する。
+      // 出た時だけ別アイテムに振り替える。
+      // digits[7] % 4 == 0（25%）: 鍵（宝箱を開けるキー）
+      // それ以外（75%）: 薬（HP/MP は digits[6] 偶奇で決定）
+      // 鍵バーコードを「商品ごとに固定」にするため digits[7] を分岐に使う。
+      const keyBucket = digits[7] % 4;
+      if (keyBucket === 0) return makeKey();
       return ((digits[6] % 2) === 1)
         ? _buildMpPotion(barcode, rng, rarity, level)
         : _buildPotion(barcode, rng, rarity, level);
+    }
   }
 }
 
@@ -372,14 +376,16 @@ function _buildScroll(barcode, rng, rarity, element, level) {
 }
 
 // ── スタック判定 ──
-// 武器・防具は個体差があるので非スタック。それ以外（薬・MP薬・巻物・素材）は
+// 武器・防具は個体差があるので非スタック。それ以外（薬・MP薬・巻物・素材・鍵）は
 // 同種・同名・同レア・同Lv なら 1 スロットに count としてまとめる。
+// 宝箱（chest）は中身が個別なので非スタック。
 export function isStackable(item) {
   if (!item) return false;
   return item.type === 'potion'
       || item.type === 'mpPotion'
       || item.type === 'scroll'
-      || item.type === 'material';
+      || item.type === 'material'
+      || item.type === 'key';
 }
 
 export function stackKey(item) {
@@ -416,6 +422,24 @@ export function makeMaterial(spec) {
 export function materialForRarity(rarityName) {
   const m = MATERIALS.find(s => s.rarity === rarityName) ?? MATERIALS[0];
   return makeMaterial(m);
+}
+
+// ── 鍵（宝箱を開けるキー）──
+// 宝箱は床から拾うとインベントリに入り、鍵を 1 本消費して中身を取り出せる。
+// 仕様簡素化のため鍵にはレア度マッチング無し: コモンの鍵でレジェンド宝箱も開く。
+// 元素や色は将来「同色の鍵で同色の宝箱」と紐付ける拡張余地のために持たせる。
+export function makeKey() {
+  return {
+    type:        'key',
+    name:        '鍵',
+    emoji:       '🗝️',
+    rarity:      'コモン',
+    rarityColor: '#a0a0a0',
+    element:     null,
+    level:       1,
+    desc:        '宝箱（🎁）を 1 つ開けられる',
+    count:       1,
+  };
 }
 
 // ─────────────────────────────────────────────
@@ -865,6 +889,7 @@ const _SHOP_BASE = {
   material:      { コモン: 60,  レア: 220, エピック: 700, レジェンド: 2400 },
   skillBook:     { コモン: 200, レア: 600, エピック: 2000, レジェンド: 6000 },
   mysteryScroll: { コモン: 80,  レア: 200, エピック: 500, レジェンド: 1200 },
+  key:           { コモン: 120, レア: 120, エピック: 120, レジェンド: 120 },
 };
 
 export function shopPriceFor(item, dungeonRarity = 'コモン') {
