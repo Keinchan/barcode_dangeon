@@ -50,6 +50,70 @@
         <button id="btn-scan" class="btn-primary">📷 スキャン</button>
         <button id="btn-menu" class="btn-secondary">🎒 メニュー</button>
       </div>
+      <div class="hud-button-row" style="margin-top:6px">
+        <button id="btn-pvp" class="btn-secondary" style="flex:1">🌐 オンライン対戦</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PvP ロビー画面（部屋作成 / 参加） -->
+  <div id="screen-pvp-lobby" class="screen">
+    <div class="pvp-lobby-box">
+      <div class="pvp-lobby-title">🌐 オンライン対戦</div>
+      <div class="pvp-lobby-sub" id="pvp-lobby-sub">部屋を作るか、招待コードで参加</div>
+
+      <div id="pvp-lobby-actions" class="pvp-lobby-actions">
+        <button id="btn-pvp-create" class="btn-primary">部屋を作る（ホスト）</button>
+        <div class="pvp-lobby-hr"><span>または</span></div>
+        <input id="pvp-join-code" type="text" inputmode="numeric" maxlength="6" placeholder="6桁の招待コード" />
+        <button id="btn-pvp-join" class="btn-secondary">入力して参加</button>
+      </div>
+
+      <div id="pvp-lobby-room" class="pvp-lobby-room hidden">
+        <div class="pvp-lobby-code-label">招待コード</div>
+        <div id="pvp-lobby-code" class="pvp-lobby-code">------</div>
+        <div class="pvp-lobby-players" id="pvp-lobby-players"></div>
+        <button id="btn-pvp-ready" class="btn-primary">準備OK</button>
+        <button id="btn-pvp-cancel" class="btn-back">部屋を出る</button>
+      </div>
+
+      <div id="pvp-lobby-error" class="pvp-lobby-error hidden"></div>
+
+      <button id="btn-pvp-back" class="btn-back" style="margin-top:14px">マップに戻る</button>
+    </div>
+  </div>
+
+  <!-- PvP バトル画面（タイマン） -->
+  <div id="screen-pvp-battle" class="screen">
+    <div class="pvp-battle-wrap">
+      <div class="pvp-battle-side pvp-opponent">
+        <div class="pvp-name" id="pvp-foe-name">相手</div>
+        <div class="pvp-bars">
+          <div class="pvp-bar pvp-hp"><div id="pvp-foe-hp-bar" class="pvp-bar-fill"></div></div>
+          <div class="pvp-bar pvp-mp"><div id="pvp-foe-mp-bar" class="pvp-bar-fill"></div></div>
+        </div>
+        <div class="pvp-stats" id="pvp-foe-stats"></div>
+      </div>
+
+      <div class="pvp-battle-mid" id="pvp-battle-log"></div>
+
+      <div class="pvp-battle-side pvp-self">
+        <div class="pvp-name" id="pvp-me-name">自分</div>
+        <div class="pvp-bars">
+          <div class="pvp-bar pvp-hp"><div id="pvp-me-hp-bar" class="pvp-bar-fill"></div></div>
+          <div class="pvp-bar pvp-mp"><div id="pvp-me-mp-bar" class="pvp-bar-fill"></div></div>
+        </div>
+        <div class="pvp-stats" id="pvp-me-stats"></div>
+      </div>
+
+      <div class="pvp-battle-actions">
+        <div class="pvp-turn-label" id="pvp-turn-label">…</div>
+        <div class="pvp-action-row">
+          <button id="btn-pvp-attack" class="btn-primary">⚔️ こうげき</button>
+          <button id="btn-pvp-skill"  class="btn-secondary">✨ 技</button>
+          <button id="btn-pvp-flee"   class="btn-back">🏃 にげる</button>
+        </div>
+      </div>
     </div>
   </div>
 

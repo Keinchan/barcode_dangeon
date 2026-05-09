@@ -87,6 +87,16 @@ import {
 } from './audio.js';
 import { getItemIconUrl } from './icons.js';
 import { showAlert, showConfirm } from './dialog.js';
+import {
+  buildPvpProfile,
+  createRoom as pvpCreateRoom,
+  joinRoom as pvpJoinRoom,
+  watchRoom as pvpWatchRoom,
+  setReady as pvpSetReady,
+  startBattle as pvpStartBattle,
+  submitAction as pvpSubmitAction,
+  destroyRoom as pvpDestroyRoom,
+} from './multiplayer.js';
 import { MINION_LIBRARY, makeMinion, findMinionTemplate, rehydrateMinion } from './minions.js';
 import {
   ensureScanBudget,
@@ -6112,4 +6122,285 @@ function _updateDebugSaveStatus() {
   } else {
     el.textContent = '未ログイン';
   }
+}
+
+// ─────────────────────────────────────────────
+// オンライン対戦 (PvP) - Phase 1: 招待コード式 1v1 ターン制
+//   Firestore の pvpRooms/{code} に状態を載せて、両者で onSnapshot 同期する。
+//   Phase 1 はテンポ重視の最小機能（こうげき/技/にげる）。
+// ─────────────────────────────────────────────
+let _pvpCode    = null;        // 6 桁ロビーコード
+let _pvpRole    = null;        // 'host' | 'guest'
+let _pvpUnsub   = null;        // watchRoom の unsubscribe
+let _pvpData    = null;        // 最新のスナップショット
+let _pvpEntered = false;       // バトル画面に入ったか
+
+function _showPvpError(msg) {
+  const el = document.getElementById('pvp-lobby-error');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  setTimeout(() => el.classList.add('hidden'), 4000);
+}
+
+function _resetPvpLobbyUI() {
+  document.getElementById('pvp-lobby-actions').classList.remove('hidden');
+  document.getElementById('pvp-lobby-room').classList.add('hidden');
+  document.getElementById('pvp-lobby-error').classList.add('hidden');
+  document.getElementById('pvp-lobby-code').textContent = '------';
+  document.getElementById('pvp-lobby-players').innerHTML = '';
+  const inp = document.getElementById('pvp-join-code');
+  if (inp) inp.value = '';
+}
+
+function _enterPvpLobby() {
+  _resetPvpLobbyUI();
+  show('pvp-lobby');
+}
+
+function _leavePvpRoom() {
+  if (_pvpUnsub) { try { _pvpUnsub(); } catch {} _pvpUnsub = null; }
+  // ホストは部屋を破棄（ゲストは購読解除のみ）
+  if (_pvpRole === 'host' && _pvpCode) {
+    pvpDestroyRoom(_pvpCode).catch(() => {});
+  }
+  _pvpCode = null;
+  _pvpRole = null;
+  _pvpData = null;
+  _pvpEntered = false;
+  _resetPvpLobbyUI();
+}
+
+async function _pvpCreate() {
+  const u = getCurrentAuthUser();
+  if (!u) { _showPvpError('ログインが必要です'); return; }
+  const profile = buildPvpProfile(u.uid, u.displayName ?? u.email ?? 'プレイヤー', player);
+  try {
+    const code = await pvpCreateRoom(profile);
+    _pvpCode = code;
+    _pvpRole = 'host';
+    _pvpUnsub = pvpWatchRoom(code, _onPvpUpdate);
+    document.getElementById('pvp-lobby-actions').classList.add('hidden');
+    document.getElementById('pvp-lobby-room').classList.remove('hidden');
+    document.getElementById('pvp-lobby-code').textContent = code;
+  } catch (err) {
+    _showPvpError(err?.message ?? '部屋作成に失敗');
+  }
+}
+
+async function _pvpJoin() {
+  const u = getCurrentAuthUser();
+  if (!u) { _showPvpError('ログインが必要です'); return; }
+  const inp = document.getElementById('pvp-join-code');
+  const code = (inp?.value ?? '').trim();
+  if (!/^\d{6}$/.test(code)) { _showPvpError('6 桁の数字を入力してください'); return; }
+  const profile = buildPvpProfile(u.uid, u.displayName ?? u.email ?? 'プレイヤー', player);
+  try {
+    await pvpJoinRoom(code, profile);
+    _pvpCode = code;
+    _pvpRole = 'guest';
+    _pvpUnsub = pvpWatchRoom(code, _onPvpUpdate);
+    document.getElementById('pvp-lobby-actions').classList.add('hidden');
+    document.getElementById('pvp-lobby-room').classList.remove('hidden');
+    document.getElementById('pvp-lobby-code').textContent = code;
+  } catch (err) {
+    _showPvpError(err?.message ?? '参加に失敗');
+  }
+}
+
+// 部屋スナップショットを受け取って UI を更新する。state に応じて
+// 待機画面 / バトル画面 / 結果 を出し分ける。
+function _onPvpUpdate(data) {
+  if (!data) {
+    // 部屋が削除された（相手が離脱した等）
+    if (_pvpEntered) {
+      showAlert('対戦相手が部屋を離脱しました');
+    }
+    _leavePvpRoom();
+    show('pvp-lobby');
+    return;
+  }
+  _pvpData = data;
+  if (data.state === 'waiting') {
+    _renderPvpLobbyRoom(data);
+  } else if (data.state === 'battle') {
+    if (!_pvpEntered) {
+      _pvpEntered = true;
+      show('pvp-battle');
+    }
+    _renderPvpBattle(data);
+  } else if (data.state === 'finished') {
+    _renderPvpBattle(data);
+    _showPvpFinished(data);
+  }
+}
+
+function _renderPvpLobbyRoom(data) {
+  const wrap = document.getElementById('pvp-lobby-players');
+  wrap.innerHTML = '';
+  const rows = [];
+  if (data.host) rows.push({ p: data.host, role: 'host', tag: 'ホスト' });
+  if (data.guest) rows.push({ p: data.guest, role: 'guest', tag: 'ゲスト' });
+  for (const { p, tag } of rows) {
+    const div = document.createElement('div');
+    div.className = 'pvp-row' + (p.ready ? ' ready' : '');
+    div.innerHTML = `<span>${tag}: ${p.name} Lv${p.level}</span>` +
+                    `<span>${p.ready ? '✅ 準備OK' : '⌛ 待機中'}</span>`;
+    wrap.appendChild(div);
+  }
+  if (!data.guest) {
+    wrap.innerHTML += '<div class="pvp-row" style="opacity:0.6">ゲスト: 参加待ち…</div>';
+  }
+  // 両者 ready ならホストがバトル開始
+  const bothReady = data.host?.ready && data.guest?.ready;
+  if (bothReady && _pvpRole === 'host') {
+    pvpStartBattle(_pvpCode).catch(err => console.warn(err));
+  }
+}
+
+document.getElementById('btn-pvp')?.addEventListener('click', () => {
+  if (!getCurrentAuthUser()) {
+    showAlert('オンライン対戦にはログインが必要です');
+    return;
+  }
+  playSfx('click');
+  _enterPvpLobby();
+});
+document.getElementById('btn-pvp-back')?.addEventListener('click', () => {
+  playSfx('click');
+  _leavePvpRoom();
+  show('map');
+});
+document.getElementById('btn-pvp-create')?.addEventListener('click', () => {
+  playSfx('click');
+  _pvpCreate();
+});
+document.getElementById('btn-pvp-join')?.addEventListener('click', () => {
+  playSfx('click');
+  _pvpJoin();
+});
+document.getElementById('btn-pvp-cancel')?.addEventListener('click', () => {
+  playSfx('click');
+  _leavePvpRoom();
+});
+document.getElementById('btn-pvp-ready')?.addEventListener('click', async () => {
+  if (!_pvpCode || !_pvpRole) return;
+  const cur = _pvpData?.[_pvpRole]?.ready ?? false;
+  await pvpSetReady(_pvpCode, _pvpRole, !cur);
+  playSfx('click');
+});
+
+// ── バトル画面の描画 + 行動 ──
+function _renderPvpBattle(data) {
+  const me  = data[_pvpRole];
+  const foe = data[_pvpRole === 'host' ? 'guest' : 'host'];
+  if (!me || !foe) return;
+  document.getElementById('pvp-me-name').textContent  = `${me.name} Lv${me.level}`;
+  document.getElementById('pvp-foe-name').textContent = `${foe.name} Lv${foe.level}`;
+  _setBar('pvp-me-hp-bar',  me.hp,  me.maxHp,  'hp');
+  _setBar('pvp-me-mp-bar',  me.mp,  me.maxMp,  'mp');
+  _setBar('pvp-foe-hp-bar', foe.hp, foe.maxHp, 'hp');
+  _setBar('pvp-foe-mp-bar', foe.mp, foe.maxMp, 'mp');
+  document.getElementById('pvp-me-stats').textContent  = `HP ${me.hp}/${me.maxHp}　MP ${me.mp}/${me.maxMp}　ATK ${me.atk}　DEF ${me.def}`;
+  document.getElementById('pvp-foe-stats').textContent = `HP ${foe.hp}/${foe.maxHp}　MP ${foe.mp}/${foe.maxMp}　ATK ${foe.atk}　DEF ${foe.def}`;
+
+  // 行動ボタンの活性: data.turn が自分のロールなら活性
+  const myTurn = data.turn === _pvpRole && data.state === 'battle';
+  const turnEl = document.getElementById('pvp-turn-label');
+  turnEl.textContent = data.state === 'finished'
+    ? '🏁 終了'
+    : (myTurn ? '🟢 あなたのターン' : '⌛ 相手のターン');
+  turnEl.className = 'pvp-turn-label ' + (myTurn ? 'my-turn' : 'foe-turn');
+  for (const id of ['btn-pvp-attack','btn-pvp-skill','btn-pvp-flee']) {
+    const btn = document.getElementById(id);
+    if (btn) btn.disabled = !myTurn;
+  }
+  // 「技」は MP 8 以上ある時のみ
+  const skillBtn = document.getElementById('btn-pvp-skill');
+  if (skillBtn && myTurn && (me.mp ?? 0) < 8) skillBtn.disabled = true;
+
+  // ログ（直近 6 件）
+  const log = document.getElementById('pvp-battle-log');
+  if (log) {
+    const acts = (data.actions ?? []).slice(-6);
+    log.innerHTML = acts.map(a => `<p>${_pvpActionLine(a, data)}</p>`).join('') || '<p style="color:#888">行動を選んでください…</p>';
+  }
+}
+function _setBar(id, cur, max, kind) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const pct = max > 0 ? Math.max(0, Math.min(100, (cur / max) * 100)) : 0;
+  el.style.width = pct + '%';
+  if (kind === 'hp') {
+    el.style.background = pct > 50 ? '#4caf50' : pct > 25 ? '#ffc107' : '#f44336';
+  } else {
+    el.style.background = '#4dc4ff';
+  }
+}
+function _pvpActionLine(a, data) {
+  const role = a.byRole === 'host' ? 'ホスト' : 'ゲスト';
+  const who  = a.byUid === data?.host?.uid ? data?.host?.name : data?.guest?.name;
+  if (a.kind === 'attack') return `⚔️ ${who || role} のこうげき！ ${a.dmg} ダメージ`;
+  if (a.kind === 'skill')  return `✨ ${who || role} の技！ ${a.dmg} ダメージ`;
+  if (a.kind === 'flee')   return `🏃 ${who || role} は逃げ出した（敗北）`;
+  return a.msg ?? '';
+}
+
+async function _pvpDoAction(kind) {
+  if (!_pvpData || !_pvpRole || !_pvpCode) return;
+  const me  = _pvpData[_pvpRole];
+  const foe = _pvpData[_pvpRole === 'host' ? 'guest' : 'host'];
+  if (!me || !foe) return;
+  if (_pvpData.turn !== _pvpRole || _pvpData.state !== 'battle') return;
+  let dmg = 0, hpAfter = foe.hp, attackerMp = me.mp;
+  if (kind === 'attack') {
+    const base = Math.max(1, me.atk - foe.def);
+    const roll = 1 + Math.floor(Math.random() * Math.max(1, Math.floor(base * 0.4)));
+    dmg = base + roll;
+    hpAfter = Math.max(0, foe.hp - dmg);
+  } else if (kind === 'skill') {
+    if ((me.mp ?? 0) < 8) { showAlert('MP が足りません'); return; }
+    attackerMp = (me.mp ?? 0) - 8;
+    const base = Math.max(1, Math.floor(me.atk * 1.6) - foe.def);
+    const roll = 1 + Math.floor(Math.random() * Math.max(1, Math.floor(base * 0.4)));
+    dmg = base + roll;
+    hpAfter = Math.max(0, foe.hp - dmg);
+  } else if (kind === 'flee') {
+    // 逃走: 相手の勝利確定
+  }
+  await pvpSubmitAction(_pvpCode, {
+    byUid:  me.uid,
+    byRole: _pvpRole,
+    kind,
+    dmg,
+    hpAfter,
+    attackerHp: me.hp,
+    attackerMp,
+    turnNo: _pvpData.turnNo ?? 0,
+    hostUid:  _pvpData.host?.uid,
+    guestUid: _pvpData.guest?.uid,
+  });
+  playSfx(kind === 'flee' ? 'click' : (kind === 'skill' ? 'crit' : 'hit'));
+}
+
+document.getElementById('btn-pvp-attack')?.addEventListener('click', () => _pvpDoAction('attack'));
+document.getElementById('btn-pvp-skill') ?.addEventListener('click', () => _pvpDoAction('skill'));
+document.getElementById('btn-pvp-flee')  ?.addEventListener('click', async () => {
+  const ok = await showConfirm('本当に逃げますか？（敗北扱い）', { danger: true, okLabel: '逃げる' });
+  if (!ok) return;
+  _pvpDoAction('flee');
+});
+
+let _pvpFinishShown = false;
+function _showPvpFinished(data) {
+  if (_pvpFinishShown) return;
+  _pvpFinishShown = true;
+  const me = data[_pvpRole];
+  const win = data.winnerUid === me?.uid;
+  setTimeout(async () => {
+    await showAlert(win ? '🎉 勝利！' : '💀 敗北…');
+    _pvpFinishShown = false;
+    _leavePvpRoom();
+    show('map');
+  }, 600);
 }
