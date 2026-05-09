@@ -430,28 +430,30 @@ async function _enterMapBattle(e, isStrong) {
   enterDungeon(dungeonForBattle);
 }
 
-// 宝箱: 拾うか確認してストレージへ自動収納（dungeon 内の chest 経路と同じ）。
-// 持ち物 8 枠を圧迫しないようにストレージ送り、メニューの📦タブから鍵で開ける。
+// 宝箱: 拾うか確認してストレージへ自動収納。中身は鍵で開けるまで秘密にして、
+// 開封時の演出で「初公開」する楽しみを残す（拾った瞬間に中身名を見せない）。
 async function _collectMapChest(e) {
   if (consumedEncounters.has(e.seed)) return;
   if (!e.inner) return;
+  const rarityName = e.rarity?.name ?? e.inner.rarity ?? 'コモン';
   const ok = await showConfirm(
-    `🎁 宝箱を拾いますか？\n\n中身: ${e.inner.name}（${e.rarity?.name ?? ''}）\n` +
-    `※ 鍵が無いと中身は取り出せません（自動でストレージに収納されます）`,
+    `🎁 ${rarityName}の宝箱を拾いますか？\n\n` +
+    `中身は鍵を使って開けるまで分かりません。\n` +
+    `（自動でストレージに収納されます）`,
     { okLabel: '拾う', cancelLabel: 'やめる' },
   );
   if (!ok) return;
   const chestItem = {
     type: 'chest',
-    name: '宝箱',
+    name: `${rarityName}の宝箱`,
     emoji: '🎁',
-    rarity: e.rarity?.name ?? e.inner.rarity,
+    rarity: rarityName,
     rarityColor: e.rarity?.color ?? e.inner.rarityColor,
     inner: e.inner,
   };
   addToStorage(chestItem);
   playSfx('pickup', { rarityTier: rarityTier(chestItem.rarity) });
-  showAlert(`🎁 宝箱をストレージへ収納\nメニュー → 📦ストレージ から鍵で開けると ${e.inner.name} が手に入ります`);
+  showAlert(`🎁 ${rarityName}の宝箱をストレージへ収納\nメニュー → 📦ストレージ → 🎁タブ から鍵で開けてください`);
   _markEncounterConsumed(e.seed);
   refreshHUD();
   refreshMenu();
@@ -859,6 +861,7 @@ function _renderActivePocketTab() {
       case 'weapon': return it.type === 'weapon';
       case 'armor':  return it.type === 'armor';
       case 'scroll': return it.type === 'scroll' || it.type === 'mysteryScroll' || it.type === 'skillBook' || it.type === 'legendaryTome';
+      case 'key':    return it.type === 'key';
       default:       return true;
     }
   };
@@ -1577,9 +1580,9 @@ function _statLine(item) {
   if (item.type === 'scroll') return `${item.element}属性 ${item.dmg}ダメージ`;
   if (item.type === 'key')    return '🗝️ 宝箱を 1 つ開ける';
   if (item.type === 'chest')  {
-    const inner = item.inner;
-    if (!inner) return '🎁 中身は空…';
-    return `🎁 中身: ${inner.name}（鍵で開ける）`;
+    if (!item.inner) return '🎁 中身は空…';
+    // 中身は秘密にして、レア度だけ匂わせる（開封時の演出で初公開する設計）
+    return `🎁 ${item.rarity ?? ''}の宝箱（鍵で開ける）`;
   }
   return '';
 }
@@ -4980,8 +4983,12 @@ async function _openChestAt(src, idx) {
     showAlert('🗝️ 宝箱を開ける鍵を持っていません。\n敵を倒すかバーコードをスキャンすると鍵が手に入ることがあります。');
     return;
   }
+  // 開ける確認モーダルでも中身は明かさない（レアリティと所持鍵だけ）。
+  // 中身は開封時の演出で初公開して「ガチャを引いた瞬間」感を作る。
+  const chestRarity = item.rarity ?? inner.rarity ?? 'コモン';
   const ok = await showConfirm(
-    `🎁 宝箱を 🗝️ 鍵 1 本で開けますか？\n\n中身: ${inner.name}（${inner.rarity}）\n所持鍵: ${keyLocations.length} 本`,
+    `🎁 ${chestRarity}の宝箱を 🗝️ 鍵 1 本で開けますか？\n\n` +
+    `中身は開けてからのお楽しみ。\n所持鍵: ${keyLocations.length} 本`,
     { okLabel: '開ける' },
   );
   if (!ok) return;
@@ -5003,16 +5010,84 @@ async function _openChestAt(src, idx) {
     addToStorage({ ...inner });
     stowed = true;
   }
-  playSfx('drop', { rarityTier: rarityTier(inner.rarity) });
+  // 開封演出: 宝箱のレアリティ（中身レアリティ）に応じた段階別フィーバー。
+  // _celebrateChestOpen がフラッシュ・シェイク・スパーク・爆発を組み合わせて派手にする。
+  _celebrateChestOpen(inner);
   if (screen === 'dungeon') {
     dungeonLog(`🎁 宝箱を開けた！ ${inner.name} ${stowed ? 'をストレージへ' : 'を獲得'}`, { rarity: inner.rarity });
-  }
-  if (typeof _celebratePickup === 'function' && screen === 'dungeon') {
-    try { _celebratePickup(inner, '宝箱から'); } catch {}
   }
   refreshMenu();
   refreshHUD();
   autoSave();
+}
+
+// 宝箱開封の専用演出。レア度ごとに派手さを段階的に上げる：
+//   コモン   - 軽いキラキラ + ピックアップ SFX
+//   レア     - フラッシュ + 中量スパーク + crit SFX
+//   エピック - 大量スパーク + 爆発 + シェイク + フラッシュ + crit SFX
+//   レジェンド- 全力フィーバー（多段ウェーブ + シェイク + 大爆発 + levelup SFX）
+// _celebratePickup より「開封」に特化していて、コモン/レアでも演出が出る。
+function _celebrateChestOpen(inner) {
+  if (!inner) return;
+  const rarity = inner.rarity ?? 'コモン';
+  // 画面中央 + プレイヤー位置の 2 点をアンカーに使う
+  const cx = (window.innerWidth ?? 360) / 2;
+  const cy = (window.innerHeight ?? 600) / 2;
+  const centerAnchor = { left: cx - 12, top: cy - 12, width: 24, height: 24 };
+  const playerAt = playerVfxAnchor() ?? centerAnchor;
+  // バナー（既存の入手バナー UI を流用）
+  showItemBanner(inner, { action: '宝箱から' });
+
+  if (rarity === 'コモン') {
+    sparkSpray(centerAnchor, { count: 12, color: '#ffd54f' });
+    sparkSpray(playerAt,     { count: 6,  color: '#ffd54f' });
+    playSfx('pickup', { rarityTier: rarityTier(rarity) });
+    return;
+  }
+  if (rarity === 'レア') {
+    hitFlash({ color: 'rgba(77,196,255,0.30)' });
+    screenShake(4, 180);
+    sparkSpray(centerAnchor, { count: 18, color: '#4dc4ff' });
+    sparkSpray(centerAnchor, { count: 8,  color: '#fff' });
+    sparkSpray(playerAt,     { count: 10, color: '#4dc4ff' });
+    playSfx('crit');
+    return;
+  }
+  if (rarity === 'エピック') {
+    hitFlash({ color: 'rgba(171,71,188,0.40)' });
+    screenShake(8, 280);
+    explosion(centerAnchor, { color: '#ce93d8' });
+    sparkSpray(centerAnchor, { count: 26, color: '#ce93d8' });
+    sparkSpray(centerAnchor, { count: 12, color: '#fff' });
+    sparkSpray(playerAt,     { count: 16, color: '#ba68c8' });
+    playSfx('crit');
+    setTimeout(() => {
+      sparkSpray(centerAnchor, { count: 14, color: '#e1bee7' });
+      playSfx('pickup', { rarityTier: rarityTier(rarity) });
+    }, 360);
+    return;
+  }
+  // レジェンド: フィーバー総力戦
+  hitFlash({ color: 'rgba(255,213,79,0.55)' });
+  screenShake(14, 480);
+  explosion(centerAnchor, { color: '#ffd54f' });
+  sparkSpray(centerAnchor, { count: 36, color: '#ffd54f' });
+  sparkSpray(centerAnchor, { count: 20, color: '#fff' });
+  sparkSpray(playerAt,     { count: 18, color: '#ffd54f' });
+  playSfx('crit');
+  // 0.3s 後の 2 波目
+  setTimeout(() => {
+    explosion(centerAnchor, { color: '#fff176' });
+    sparkSpray(centerAnchor, { count: 24, color: '#ffe082' });
+    sparkSpray(playerAt,     { count: 14, color: '#fff176' });
+    playSfx('levelup');
+  }, 320);
+  // 0.7s 後の最後のキラキラ
+  setTimeout(() => {
+    sparkSpray(centerAnchor, { count: 18, color: '#fff' });
+    sparkSpray(playerAt,     { count: 12, color: '#fff' });
+    playSfx('victory');
+  }, 720);
 }
 
 // 旧 API 互換: 持ち物 idx の宝箱を開ける（旧セーブで持ち物に居る宝箱用）
