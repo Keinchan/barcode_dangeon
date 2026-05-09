@@ -1752,22 +1752,17 @@ function _commitLearn(skillSpec, bookIdx, target) {
   autoSave();
 }
 
-// 向き [fx, fy] に応じてオフセット [dx, dy] を回転。45° 単位（8 方向）。
-// 「向き」は基準を [0, 1]（下）として、向きベクトルの角度ぶんだけ回転。
-function _rotateOffsetByFacing([dx, dy], [fx, fy]) {
-  const baseAng    = Math.atan2(1, 0);              // 基準: 下向き = π/2
-  const facingAng  = Math.atan2(fy, fx);
-  const delta      = facingAng - baseAng;
-  const cos45 = Math.SQRT1_2;
-  const sin45 = Math.SQRT1_2;
-  // 45° 単位スナップ
-  const snapped = Math.round(delta / (Math.PI / 4)) * (Math.PI / 4);
-  const c = Math.cos(snapped);
-  const s = Math.sin(snapped);
-  // 通常の 2D 回転（誤差吸収のため round）
-  const rx = dx * c - dy * s;
-  const ry = dx * s + dy * c;
-  return [Math.round(rx), Math.round(ry)];
+// 向き [fx, fy] に応じてオフセット [a, b] をグリッド方向で写像。
+// 元のオフセットは「forward=[0,1] (下) / left=[1,0]」基準で書かれている前提。
+// 旧実装は cos/sin の回転行列だったが、これは Euclidean 距離を保存するため
+// 斜め向き [1,1]（magnitude √2）では LINE3 の [0,3] が [2,2] までしか伸びず、
+// VFX と命中マスがズレる原因になっていた。
+// 新実装は forward 軸を facing ベクトルそのまま、left 軸をその CW 90° 回転に
+// したアフィン変換にし、グリッドの斜め方向でも N マス先 = facing×N を保証する。
+function _rotateOffsetByFacing([a, b], [fx, fy]) {
+  // forward = (fx, fy) / left = (fy, -fx)
+  // → (a, b) = a * left + b * forward = (b*fx + a*fy, b*fy - a*fx)
+  return [b * fx + a * fy, b * fy - a * fx];
 }
 
 // 範囲タイプの offsets を向きに合わせて回転する。RANGE_TYPES[id].rotatable が
@@ -3570,12 +3565,15 @@ function _maybeFractureSelfHurt() {
 function _openStatusInfoModal() {
   const body = document.getElementById('status-info-body');
   if (!body) return;
+  // 旧実装は外側の wrapper div が flex の min-width を持たず、
+  // 内側テキスト（status-info-text）が幅を取れずに崩れて読めなかった。
+  // 説明テキストを span ではなく block 要素で置き、明示的な flex で囲う。
   body.innerHTML = Object.entries(STATUS_DEFS).map(([kind, def]) =>
     `<div class="status-info-row" style="--c:${def.color}">
        <div class="status-info-emoji">${def.emoji}</div>
-       <div>
-         <div class="status-info-name">${def.emoji} ${def.label}</div>
-         <div class="status-info-text">${def.desc}</div>
+       <div class="status-info-text">
+         <div class="status-info-name">${def.label}</div>
+         <div>${def.desc}</div>
        </div>
      </div>`
   ).join('');
