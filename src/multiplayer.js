@@ -91,10 +91,28 @@ export function buildPvpProfile(uid, displayName, player, role) {
   };
 }
 
+// 協力モード用のボス NPC 初期スペック。プレイヤーの平均レベル想定で固定値。
+// Phase 3 の MVP では 1 体の固定ボスのみ。レベル別調整は将来。
+function _buildInitialCoopBoss() {
+  return {
+    name:    '🐉 古竜',
+    emoji:   '🐉',
+    element: '火',
+    hp:      300,
+    maxHp:   300,
+    atk:     14,
+    def:     6,
+    x:       Math.floor(ARENA_W / 2),
+    y:       9,                          // アリーナ中央付近
+  };
+}
+
 // ホスト: 部屋を作って code を返す。コリジョン時は最大 5 回まで再試行。
-export async function createRoom(profile) {
+//   opts.mode = 'pvp' | 'coop'  デフォルト 'pvp'
+export async function createRoom(profile, opts = {}) {
   const db = _getDb();
   if (!db) throw new Error('Firestore 未初期化');
+  const mode = opts.mode === 'coop' ? 'coop' : 'pvp';
   for (let attempt = 0; attempt < 5; attempt++) {
     const code = _genCode();
     const ref  = doc(db, ROOMS, code);
@@ -102,12 +120,15 @@ export async function createRoom(profile) {
     if (snap.exists()) continue;          // 既存コードならやり直し
     await setDoc(ref, {
       state:     'waiting',
+      mode,
       host:      profile,
       guest:     null,
       turn:      'host',
       turnNo:    0,
       actions:   [],
       winnerUid: null,
+      cause:     null,                    // 'bossKilled' | 'playerDied' | null
+      boss:      mode === 'coop' ? _buildInitialCoopBoss() : null,
       createdAt: serverTimestamp(),
     });
     return code;
@@ -318,6 +339,7 @@ export async function resetForRematch(code) {
     turnNo:    0,
     actions:   [],
     winnerUid: null,
+    cause:     null,
     'host.hp':       host.maxHp ?? host.hp ?? 1,
     'host.mp':       host.maxMp ?? 0,
     'host.statuses': [],
@@ -335,6 +357,36 @@ export async function resetForRematch(code) {
     updates['guest.facing']   = [0, 1];
     updates['guest.ready']    = false;
   }
+  // 協力モードならボスも HP/位置をリセットして再戦可能にする
+  if (data.mode === 'coop') {
+    updates.boss = _buildInitialCoopBoss();
+  }
+  await updateDoc(ref, updates);
+}
+
+// 協力モード: ボスの HP / 位置 を更新する。プレイヤーがボスを攻撃した結果や
+// ホストがボス AI を進めた時に使う。HP が 0 以下なら state=finished + cause=bossKilled。
+export async function submitBossUpdate(code, args) {
+  const db = _getDb();
+  if (!db) return;
+  const ref = doc(db, ROOMS, code);
+  const updates = {};
+  if (typeof args.hp === 'number') updates['boss.hp'] = Math.max(0, args.hp);
+  if (typeof args.x  === 'number') updates['boss.x']  = args.x;
+  if (typeof args.y  === 'number') updates['boss.y']  = args.y;
+  // ターン交代を一緒に行う場合
+  if (args.flipTurn) {
+    updates.turn   = args.nextTurn ?? 'host';
+    updates.turnNo = (args.turnNo ?? 0) + 1;
+  }
+  // ボス撃破でクリア
+  if (typeof args.hp === 'number' && args.hp <= 0) {
+    updates.state = 'finished';
+    updates.cause = 'bossKilled';
+    // 協力勝利は両者勝者扱い: winnerUid を 'coop' のセンチネルにする
+    updates.winnerUid = 'coop';
+  }
+  if (Object.keys(updates).length === 0) return;
   await updateDoc(ref, updates);
 }
 

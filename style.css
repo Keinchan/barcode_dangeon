@@ -2536,6 +2536,23 @@ input, textarea {
 .pvp-lobby-title { font-size: 22px; font-weight: bold; text-align: center; }
 .pvp-lobby-sub   { font-size: 13px; color: var(--muted); text-align: center; }
 .pvp-lobby-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.pvp-mode-toggle {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(255,255,255,0.04);
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.08);
+  font-size: 13px;
+}
+.pvp-mode-toggle label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.pvp-mode-toggle input[type="radio"] { accent-color: var(--primary); }
 .pvp-lobby-actions input {
   font-size: 18px;
   letter-spacing: 6px;
