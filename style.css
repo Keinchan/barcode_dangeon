@@ -2474,6 +2474,50 @@ input, textarea {
   box-shadow: 0 0 12px rgba(180,180,180,0.30);
 }
 
+/* ── PvP ターン表示バナー（screen-dungeon の上に重ねる） ── */
+.pvp-turn-banner {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4800;
+  padding: 10px 24px;
+  border-radius: 999px;
+  font-size: 16px;
+  font-weight: bold;
+  text-align: center;
+  pointer-events: none;
+  letter-spacing: 1px;
+  transition: background .2s, color .2s, box-shadow .2s;
+}
+.pvp-turn-banner.hidden { display: none; }
+.pvp-turn-banner.my-turn {
+  background: linear-gradient(135deg, #2e7d32 0%, #1b5e20 100%);
+  color: #fff;
+  border: 2px solid #4caf50;
+  box-shadow: 0 0 22px rgba(76,175,80,0.6), 0 0 50px rgba(76,175,80,0.35);
+  animation: pvpTurnPulse 1.4s ease-in-out infinite;
+}
+.pvp-turn-banner.foe-turn {
+  background: linear-gradient(135deg, #424242 0%, #212121 100%);
+  color: #aaa;
+  border: 2px solid #555;
+  box-shadow: 0 0 12px rgba(0,0,0,0.5);
+}
+@keyframes pvpTurnPulse {
+  0%   { box-shadow: 0 0 22px rgba(76,175,80,0.6), 0 0 50px rgba(76,175,80,0.35); }
+  50%  { box-shadow: 0 0 30px rgba(76,175,80,0.9), 0 0 70px rgba(76,175,80,0.55); }
+  100% { box-shadow: 0 0 22px rgba(76,175,80,0.6), 0 0 50px rgba(76,175,80,0.35); }
+}
+
+/* PvP 相手ターン中: ダンジョンフッターと waza-bar を隠す（誤タップ防止） */
+.dungeon-footer.pvp-foe-turn {
+  pointer-events: none;
+  opacity: 0.18;
+  filter: grayscale(0.7);
+  transition: opacity .25s, filter .25s;
+}
+
 /* ── PvP ロビー画面 ── */
 #screen-pvp-lobby {
   background: var(--bg);
