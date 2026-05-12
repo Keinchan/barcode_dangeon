@@ -1082,8 +1082,14 @@ function _autoLearnWizardSkills({ silent = false, slotAuto = true } = {}) {
   if (!t) return;                           // タイプ未設定は救済（コモン技のみ）。自動習得しない
   const want = wizardSkillsLearnableAt(t.primary, player.level);
   const newlyLearned = [];
+  // ミニオンが既に習得済みの技は重複習得を回避する（チーム内で技をユニークに保つ）
+  const minionIds = new Set();
+  for (const mi of (player.minions ?? [])) {
+    for (const s of (mi.learnedSkills ?? [])) minionIds.add(s.id);
+  }
   for (const sk of want) {
     if (player.learnedSkills.find(x => x.id === sk.id)) continue;
+    if (minionIds.has(sk.id)) continue;     // 既にミニオンが覚えている技は飛ばす
     player.learnedSkills.push({ ...sk });
     newlyLearned.push(sk);
   }
@@ -1120,6 +1126,80 @@ function _ensureMinionSkillFields(mi) {
   if (!Array.isArray(mi.learnedSkills)) mi.learnedSkills = [];
   if (!Array.isArray(mi.skillSlots) || mi.skillSlots.length !== 4) {
     mi.skillSlots = [null, null, null, null];
+  }
+}
+
+// チーム全体（プレイヤー + 全ミニオン）で覚えている技 ID を集める。
+// 重複習得防止のための判定に使う。
+function _teamLearnedSkillIds(excluding = null) {
+  const ids = new Set();
+  if (excluding !== player && Array.isArray(player.learnedSkills)) {
+    for (const s of player.learnedSkills) ids.add(s.id);
+  }
+  if (Array.isArray(player.minions)) {
+    for (const mi of player.minions) {
+      if (excluding === mi) continue;
+      if (Array.isArray(mi.learnedSkills)) for (const s of mi.learnedSkills) ids.add(s.id);
+    }
+  }
+  return ids;
+}
+
+// ミニオン用の自動技習得。mi.aptitudeElements に該当するウィザード技を、
+// mi.level 以下のものについて learnedSkills に追加する。
+//   - 既存の他チームメンバ（プレイヤー含む）が習得済みの技は重複排除（skip）
+//   - 空きスロットがあれば mi.level 解放済みのものをオートセット
+// 戻り値: 新規習得分の skill 配列
+function _autoLearnWizardSkillsForMinion(mi) {
+  _ensureMinionSkillFields(mi);
+  const apts = Array.isArray(mi.aptitudeElements) ? mi.aptitudeElements : [];
+  if (apts.length === 0) return [];
+  const teamIds = _teamLearnedSkillIds(mi);
+  const newly = [];
+  for (const el of apts) {
+    const want = wizardSkillsLearnableAt(el, mi.level ?? 1);
+    for (const sk of want) {
+      if (teamIds.has(sk.id)) continue;
+      if (mi.learnedSkills.find(x => x.id === sk.id)) continue;
+      mi.learnedSkills.push({ ...sk });
+      newly.push(sk);
+      teamIds.add(sk.id);   // 同レベルで複数ミニオンが居る場合の重複防止
+    }
+  }
+  // 空きスロットに新規技を順次セット（レベル解放済みのものから）
+  for (const sk of newly) {
+    if ((mi.level ?? 1) < skillLevelReq(sk)) continue;
+    const empty = mi.skillSlots.findIndex(s => !s);
+    if (empty === -1) break;
+    mi.skillSlots[empty] = { ...sk };
+  }
+  return newly;
+}
+
+// プレイヤーレベルアップに合わせてミニオン側のレベル/技/装着を更新。
+// 1) ミニオン level を +1（player.level に追従するが頭打ちは MAX_LEVEL）
+// 2) ATK/DEF/HP を再計算（makeMinion と同じ式で）
+// 3) 自動習得（重複排除あり）
+function _levelUpAllMinionsFromPlayer() {
+  if (!Array.isArray(player.minions)) return;
+  for (const mi of player.minions) {
+    if ((mi.level ?? 1) >= MAX_LEVEL) continue;
+    const beforeLv = mi.level ?? 1;
+    mi.level = Math.min(MAX_LEVEL, beforeLv + 1);
+    const tpl = findMinionTemplate(mi.id);
+    if (tpl) {
+      const lv = mi.level;
+      const newAtk = tpl.baseAtk + Math.floor((lv - 1) * 1.5);
+      const newDef = tpl.baseDef + Math.floor((lv - 1) * 0.7);
+      const newMax = tpl.baseHp  + (lv - 1) * 4;
+      // HP は全回復まで上げず、増加分だけ加算する（ターン中の状態を尊重）
+      const delta = newMax - (mi.maxHp ?? newMax);
+      mi.atk    = newAtk;
+      mi.def    = newDef;
+      mi.maxHp  = newMax;
+      mi.hp     = Math.min(mi.maxHp, (mi.hp ?? newMax) + Math.max(0, delta));
+    }
+    _autoLearnWizardSkillsForMinion(mi);
   }
 }
 
@@ -4256,8 +4336,10 @@ function gainXp(amount) {
     // 既習得の技は重複追加しない。新規習得分は習得バナーとログで通知する。
     const learnedBefore = (player.learnedSkills ?? []).map(s => s.id);
     _autoLearnWizardSkills({ slotAuto: true });
-    const newlyLearned = (player.learnedSkills ?? []).filter(s => !learnedBefore.includes(s.id));
     const gained = player.level - startLevel;
+    // ミニオンもプレイヤーに追随してレベルアップ＆習得（チームで技ユニーク化）
+    for (let n = 0; n < gained; n++) _levelUpAllMinionsFromPlayer();
+    const newlyLearned = (player.learnedSkills ?? []).filter(s => !learnedBefore.includes(s.id));
     _enqueueLevelUpPopup({
       fromLevel: startLevel,
       toLevel:   player.level,
