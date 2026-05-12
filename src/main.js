@@ -4170,17 +4170,30 @@ function dungeonLog(msg, opts = {}) {
 // プレイヤー罹患の画面オーバーレイ更新。dominant status の overlay 色を使う。
 function _refreshStatusOverlay() {
   const el = document.getElementById('status-overlay');
-  if (!el) return;
+  const footer = document.getElementById('dungeon-footer');
   const dom = dominantStatus(player);
   if (!dom || screen !== 'dungeon') {
-    el.classList.add('hidden');
-    el.style.removeProperty('--overlay');
+    el?.classList.add('hidden');
+    el?.style.removeProperty('--overlay');
+    if (footer) {
+      footer.style.removeProperty('--status-color');
+      footer.classList.remove('status-active', 'status-dot', 'status-block', 'status-buff');
+    }
     return;
   }
   const def = STATUS_DEFS[dom.kind];
-  if (!def) { el.classList.add('hidden'); return; }
-  el.style.setProperty('--overlay', def.overlay);
-  el.classList.remove('hidden');
+  if (!def) { el?.classList.add('hidden'); return; }
+  el?.style.setProperty('--overlay', def.overlay);
+  el?.classList.remove('hidden');
+  // 操作パネル（footer）に縁取り＋ホタル光のような脈動を付与して
+  // 「いま何かに罹患している」ことを D-pad / 技バー視点で即把握できるようにする。
+  if (footer) {
+    footer.style.setProperty('--status-color', def.color);
+    footer.classList.add('status-active');
+    footer.classList.toggle('status-dot',   !!def.isDot);
+    footer.classList.toggle('status-block', !!def.isBlock);
+    footer.classList.toggle('status-buff',  !!def.isBuff);
+  }
 }
 
 // プレイヤーに状態異常を付与。バナーログ + オーバーレイ更新。
