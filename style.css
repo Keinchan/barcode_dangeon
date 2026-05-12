@@ -2447,6 +2447,35 @@ input, textarea {
    9999 dpad/waza-bar HUD, debug-panel
    ────────────────────────────────────────────── */
 
+/* アイテム/タイプ/状態異常の詳細モーダル本文。
+   タイトルが画像＋テキスト構成になる時のレイアウトを整える。 */
+#item-detail-modal .modal-title { display: flex; align-items: center; justify-content: center; gap: 4px; }
+#item-detail-modal .item-detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 4px 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #f5f5f5;
+  text-align: left;
+  max-height: calc(70vh - 110px);
+  overflow-y: auto;
+}
+.item-detail-body .idm-meta { font-size: 14px; }
+.item-detail-body .idm-tag {
+  display: inline-block;
+  font-size: 11px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 6px;
+  padding: 2px 8px;
+  align-self: flex-start;
+}
+.item-detail-body .idm-stat  { font-size: 13px; color: #ffd54f; }
+.item-detail-body .idm-skill { font-size: 12px; color: #b070dd; }
+.item-detail-body .idm-desc  { font-size: 12px; color: #ccc; line-height: 1.7; }
+
 /* メニュー(z 5500) 上から開かれるトップレベルモーダル群。
    `.modal`(既定 z 100) のままだとメニュー背後に潜って描画されない。 */
 #status-info-modal,
@@ -3426,6 +3455,7 @@ input, textarea {
   overflow-y: auto;
 }
 .type-select-cell {
+  position: relative;
   background: rgba(255,255,255,0.05);
   border: 1px solid rgba(255,255,255,0.18);
   border-radius: 10px;
@@ -3434,6 +3464,27 @@ input, textarea {
   text-align: left;
   color: #ddd;
 }
+.type-select-cell .ts-info {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  font-size: 11px;
+  font-weight: bold;
+  color: #ffd54f;
+  background: rgba(255,213,79,0.12);
+  border: 1px solid rgba(255,213,79,0.5);
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.type-select-cell .ts-info:active { transform: scale(0.9); }
+.status-info-row { cursor: pointer; }
+.status-info-row:active { transform: scale(0.99); background: rgba(255,255,255,0.1); }
+.material-cell { cursor: pointer; }
+.material-cell:active { transform: scale(0.97); }
 .type-select-cell.active {
   border-color: #ffd54f;
   background: rgba(255,213,79,0.1);

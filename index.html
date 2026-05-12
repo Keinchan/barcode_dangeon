@@ -772,6 +772,17 @@
   <!-- 状態異常オーバーレイ（プレイヤー罹患中に画面に薄く色を乗せる） -->
   <div id="status-overlay" class="status-overlay hidden"></div>
 
+  <!-- アイテム/タイプ/状態異常の詳細表示モーダル。
+       ラベルタップで開く読み取り専用ビューで装備や使用などの操作は出さない。
+       z-index は F1 で 6500 に設定済み。 -->
+  <div id="item-detail-modal" class="modal hidden">
+    <div class="modal-box">
+      <div id="item-detail-title" class="modal-title">アイテム詳細</div>
+      <div id="item-detail-body" class="item-detail-body"></div>
+      <button id="btn-item-detail-close" class="btn-back">閉じる</button>
+    </div>
+  </div>
+
   <!-- 状態異常の説明モーダル（メニュー → 技・タイプ → ボタン から開く） -->
   <div id="status-info-modal" class="modal hidden">
     <div class="modal-box">
