@@ -1013,9 +1013,12 @@ export class Dungeon {
       ctx.globalAlpha = 1;
     }
 
-    // モンスター（現視野内のみ。敵感知巻物中はフォグ越しでも半透明表示）
+    // モンスター（現視野内のみ。敵感知巻物中はフォグ越しでも半透明表示）。
+    // 致命攻撃直後の演出中は m.dying=true がセットされており、hp=0 でも
+    // 一定時間アイコンを表示し続ける（演出と icon 消滅の順序保証）。
     for (const m of this.monsters) {
-      if (m.hp <= 0) continue;
+      const isDying = m.dying === true;
+      if (m.hp <= 0 && !isDying) continue;
       const dx = m.x - (px - half);
       const dy = m.y - (py - half);
       if (dx < 0 || dx >= VIEW || dy < 0 || dy >= VIEW) continue;
@@ -1023,6 +1026,7 @@ export class Dungeon {
       if (!revealAll && !inSight && !showEnemiesThruFog) continue;
       const dim = !revealAll && !inSight;
       if (dim) ctx.globalAlpha = 0.55;
+      if (isDying) ctx.globalAlpha = (ctx.globalAlpha ?? 1) * 0.7;
       const fs = Math.floor(ts * 0.65);
       ctx.font = `${fs}px serif`;
       ctx.textAlign = 'center';
