@@ -1022,7 +1022,6 @@ function _renderConsumableRow(item, idx) {
       </div>
     </button>
     <div class="menu-row-actions">
-      <button class="menu-action-btn move deposit" title="ストレージへ">→📦</button>
       <button class="menu-action-btn danger discard">廃棄</button>
     </div>
   `;
@@ -1051,15 +1050,8 @@ function _renderConsumableRow(item, idx) {
     refreshMenu();
     autoSave();
   });
-  div.querySelector('.deposit').addEventListener('click', () => {
-    // 1 個だけストレージへ。スタックなら count -= 1。
-    const taken = takeOneFromConsumables(idx);
-    if (!taken) return;
-    addToStorage(taken);
-    refreshMenu();
-    playSfx('click');
-    autoSave();
-  });
+  // ストレージへ送るボタンは持ち物画面では出さない（ストレージ画面の
+  // 「持ち物→ストレージ」/「持ち物ミニ」経由でのみ転送できる）
   return div;
 }
 
@@ -1948,7 +1940,6 @@ function _renderInventoryRow(item, idx) {
       </div>
     </button>
     <div class="menu-row-actions">
-      <button class="menu-action-btn move deposit" title="ストレージへ">→📦</button>
       <button class="menu-action-btn danger discard">廃棄</button>
     </div>
   `;
@@ -2014,9 +2005,8 @@ function _renderInventoryRow(item, idx) {
     refreshMenu();
     autoSave();
   });
-  div.querySelector('.deposit').addEventListener('click', () => {
-    _depositToStorage(idx);
-  });
+  // 持ち物画面ではストレージ送りボタンを出さない（装備メニューと
+  // ストレージ操作が混在して使いづらかった対応）。送るときはストレージ画面へ。
   return div;
 }
 
