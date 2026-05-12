@@ -5240,28 +5240,58 @@ function _runEnemyTurn() {
       if (!ev) { _clearBusy(); return; }
 
       const fire = () => {
+        // ターゲットがミニオンの場合: ダメージはミニオン側に乗せて
+        // VFX のアンカーをそのミニオン位置に切り替える。
+        const targetMinion = (ev.targetKind === 'minion') ? ev.targetMinion : null;
+        const isMinionTarget = !!targetMinion;
+        const targetAnchor = isMinionTarget
+          ? _minionScreenAnchor(targetMinion)
+          : playerVfxAnchor();
+        const targetName = isMinionTarget
+          ? `${targetMinion.emoji ?? '🌸'} ${targetMinion.name}`
+          : 'あなた';
         // hit=false（外れ）の場合はダメージ無し + MISS フロート + 専用ログ
         if (ev.hit === false) {
-          dungeonLog(`💨 ${ev.mob.name} の魔法攻撃が外れた！`);
-          const playerAt = playerVfxAnchor();
-          if (playerAt) showMissAt({ left: playerAt.left + 18, top: playerAt.top + 8, width: 0, height: 0 });
+          dungeonLog(`💨 ${ev.mob.name} の攻撃は ${targetName} を外れた！`);
+          if (targetAnchor) showMissAt({ left: targetAnchor.left + 18, top: targetAnchor.top + 8, width: 0, height: 0 });
           if (i < magics.length) setTimeout(apply, STEP_MS);
           else _clearBusy();
           return;
         }
-        player.hp = Math.max(0, player.hp - ev.dmg);
-        showFloatingDamage(ev.dmg);
+        if (isMinionTarget) {
+          targetMinion.hp = Math.max(0, (targetMinion.hp ?? 0) - ev.dmg);
+        } else {
+          player.hp = Math.max(0, player.hp - ev.dmg);
+        }
+        if (targetAnchor) showDamageAt(targetAnchor, ev.dmg, { kind: 'normal' });
+        else if (!isMinionTarget) showFloatingDamage(ev.dmg);
         playSfx('damage');
         const mobScreen = _mobScreenAnchor(ev.mob);
-        if (mobScreen) attackTrail(mobScreen, playerVfxAnchor(), { element: ev.mob.element });
-        magicCircle(playerVfxAnchor(), ev.mob.element);
-        shockwave(playerVfxAnchor(), { color: 'rgba(255,82,82,0.6)' });
-        const matchup = elementMatchup(ev.mob.element, player.armor?.element);
-        if (matchup >= 1.5) _showWeaknessBanner('弱点ヒット!!');
-        dungeonLog(`✨ ${ev.mob.name} の魔法攻撃！ ${ev.dmg} ダメージ${matchup >= 1.5 ? '　弱点!!' : ''}`);
-        // 命中時の状態異常付与（dungeon.tickEnemies が ev.inflict に乗せた）。
-        if (ev.inflict && player.hp > 0) {
+        if (mobScreen && targetAnchor) attackTrail(mobScreen, targetAnchor, { element: ev.mob.element });
+        if (targetAnchor) {
+          magicCircle(targetAnchor, ev.mob.element);
+          shockwave(targetAnchor, { color: 'rgba(255,82,82,0.6)' });
+        }
+        const matchup = isMinionTarget
+          ? elementMatchup(ev.mob.element, targetMinion.element)
+          : elementMatchup(ev.mob.element, player.armor?.element);
+        if (!isMinionTarget && matchup >= 1.5) _showWeaknessBanner('弱点ヒット!!');
+        dungeonLog(`✨ ${ev.mob.name} の攻撃！ ${targetName} に ${ev.dmg} ダメージ${matchup >= 1.5 ? '　弱点!!' : ''}`);
+        // 状態異常付与: プレイヤー被弾時のみ統一処理。ミニオン被弾時は status を生やさない（簡略）。
+        if (!isMinionTarget && ev.inflict && player.hp > 0) {
           _applyStatusToPlayer(ev.inflict.kind, { turns: ev.inflict.turns, stacks: ev.inflict.stacks });
+        }
+        // ミニオンが致命: 配列から取り除き dungeon.minions も同期
+        if (isMinionTarget && targetMinion.hp <= 0) {
+          dungeonLog(`💀 ${targetMinion.name} が倒れた…`, { rarity: 'レア' });
+          if (Array.isArray(player.minions)) {
+            const k = player.minions.indexOf(targetMinion);
+            if (k >= 0) player.minions.splice(k, 1);
+          }
+          if (Array.isArray(dungeon.minions)) {
+            const k = dungeon.minions.indexOf(targetMinion);
+            if (k >= 0) dungeon.minions.splice(k, 1);
+          }
         }
         refreshHUD();
         if (player.hp <= 0) {
