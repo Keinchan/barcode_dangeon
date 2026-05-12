@@ -688,6 +688,38 @@ input, textarea {
   flex-shrink: 0;
   width: 100%;
   box-sizing: border-box;
+  /* 状態異常時はここを縁取って D-pad / 技バーの視界で何が効いてるか分かるようにする。
+     --status-color は JS が設定。デバフ(burn/poison など)は status-dot で
+     軽くパルスする赤系、行動制限(sleep/shock)は status-block で粘度高めのリング。 */
+  position: relative;
+  transition: box-shadow 0.3s, border-color 0.3s;
+}
+.dungeon-footer.status-active {
+  box-shadow:
+    inset 0 0 0 2px var(--status-color, transparent),
+    inset 0 0 18px color-mix(in srgb, var(--status-color, #fff) 25%, transparent),
+    0 0 14px color-mix(in srgb, var(--status-color, #fff) 35%, transparent);
+}
+.dungeon-footer.status-active::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    var(--status-color, #fff) 25%,
+    var(--status-color, #fff) 75%,
+    transparent 100%
+  );
+  pointer-events: none;
+  animation: statusBorderPulse 1.6s ease-in-out infinite;
+}
+.dungeon-footer.status-dot::before   { animation-duration: 0.9s; }
+.dungeon-footer.status-block::before { animation-duration: 1.8s; opacity: 0.85; }
+.dungeon-footer.status-buff::before  { animation-duration: 2.4s; opacity: 0.75; }
+@keyframes statusBorderPulse {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1;    }
 }
 
 /* ログを横に「📜履歴」ボタンと並べる行ラッパ。flex で log が伸び、
