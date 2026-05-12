@@ -171,6 +171,23 @@ function addToInventory(item) {
   return _addToList(player.inventory, item, 8);
 }
 function addToStorage(item)   { return _addToList(player.storage,   item, null); }
+
+// 宝箱の中身を「死亡ロールバックでも消えない」ように entrySnapshot に追記する。
+// 回復薬は consumables、それ以外は inventory に積む。スタック可能なら count を加算。
+// snapshot 用なので addToInventory のような容量チェックは行わず必ず受け入れる。
+function _secureChestInnerToSnapshot(inner) {
+  if (!entrySnapshot || !inner) return;
+  const target = _isConsumableType(inner)
+    ? (entrySnapshot.consumables ?? (entrySnapshot.consumables = []))
+    : (entrySnapshot.inventory   ?? (entrySnapshot.inventory   = []));
+  const incoming = inner.count ?? 1;
+  if (isStackable(inner)) {
+    const key = stackKey(inner);
+    const ex  = target.find(it => isStackable(it) && stackKey(it) === key);
+    if (ex) { ex.count = (ex.count ?? 1) + incoming; return; }
+  }
+  target.push(isStackable(inner) ? { ...inner, count: incoming } : { ...inner });
+}
 // 素材は専用ボックス（容量無制限・スタック）。
 // 持ち物を 1 枠も消費せず、敗北時の entrySnapshot 復元対象に含める。
 function addToMaterials(item) { return _addToList(player.materials, item, null); }
@@ -5459,6 +5476,12 @@ async function _openChestAt(src, idx) {
   } else {
     addToStorage({ ...inner });
     stowed = true;
+  }
+  // 開封後の死亡で中身が失われないように、ダンジョン中なら入場時スナップショットに
+  // この中身を同期する（次の showResult(false) ロールバックで一緒に復元される）。
+  // ストレージへ流した分は元々ロールバック対象外なので何もしない。
+  if (!stowed && entrySnapshot) {
+    _secureChestInnerToSnapshot(inner);
   }
   // 開封演出: 宝箱のレアリティ（中身レアリティ）に応じた段階別フィーバー。
   // _celebrateChestOpen がフラッシュ・シェイク・スパーク・爆発を組み合わせて派手にする。
