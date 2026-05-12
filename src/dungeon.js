@@ -558,6 +558,28 @@ export class Dungeon {
     // 周囲8マスのスロット（予約済みは Set に追加していく）
     const reserved = new Set();
 
+    // 敵のターゲット候補リスト = プレイヤー + 生存ミニオン。
+    // 各 mob は毎ターン最寄りのターゲットを選び直す（最寄り優先 / 同距離なら player）。
+    // multiplayer Coop 用の remote player (isPvpOpponent) もミニオンと同じ扱いで
+    // 取り込める（hp プロパティがあれば良い）。
+    const targetCandidates = [];
+    targetCandidates.push({ kind: 'player', x: this.playerPos.x, y: this.playerPos.y, ref: player });
+    if (Array.isArray(this.minions)) {
+      for (const mi of this.minions) {
+        if ((mi.hp ?? 0) > 0) targetCandidates.push({ kind: 'minion', x: mi.x, y: mi.y, ref: mi });
+      }
+    }
+    const _pickTarget = (m) => {
+      let best = targetCandidates[0];
+      let bestD = Math.abs(best.x - m.x) + Math.abs(best.y - m.y);
+      for (let i = 1; i < targetCandidates.length; i++) {
+        const c = targetCandidates[i];
+        const d = Math.abs(c.x - m.x) + Math.abs(c.y - m.y);
+        if (d < bestD) { bestD = d; best = c; }
+      }
+      return best;
+    };
+
     for (const { m } of actors) {
       // 状態異常: stun は移動も攻撃も不可、seal は移動だけ可・攻撃不可。
       // 1 ターン分カウントを消費するため continue 前に turns-- する。
@@ -576,13 +598,16 @@ export class Dungeon {
       // チャージは毎ターン進行（職業特殊技の発動に使う）
       m.skillCharge = (m.skillCharge ?? 0) + 1;
 
-      const adx = Math.abs(m.x - this.playerPos.x);
-      const ady = Math.abs(m.y - this.playerPos.y);
+      // この mob にとっての最寄りターゲット（プレイヤー or ミニオン）を選ぶ
+      const tgt = _pickTarget(m);
+      const adx = Math.abs(m.x - tgt.x);
+      const ady = Math.abs(m.y - tgt.y);
       const inMagicRange = adx <= 1 && ady <= 1 && !(adx === 0 && ady === 0);
 
       // 職業による遠距離・特殊行動を先に試す（成立すれば移動も隣接攻撃もスキップ）
+      // 職業特殊技はプレイヤー狙い前提なので、ターゲットがプレイヤーの時だけ試す。
       const sealed = !!(m.status && m.status.kind === 'seal' && m.status.turns > 0);
-      if (!sealed && !inMagicRange) {
+      if (!sealed && !inMagicRange && tgt.kind === 'player') {
         const ranged = this._tryJobRangedAttack(m, player);
         if (ranged) {
           reserved.add(`${m.x},${m.y}`);
@@ -595,7 +620,7 @@ export class Dungeon {
       }
 
       if (inMagicRange) {
-        // 既に隣接：その場で魔法攻撃。座標もスロット予約に入れて他敵と衝突回避
+        // 既に隣接：その場で攻撃。座標もスロット予約に入れて他敵と衝突回避
         reserved.add(`${m.x},${m.y}`);
         // seal 中は攻撃ができない。turn カウントだけ消費して終了
         if (sealed) {
@@ -603,31 +628,36 @@ export class Dungeon {
           if (m.status.turns <= 0) m.status = null;
           continue;
         }
+        // ターゲットの防御値を採用（プレイヤー or ミニオン）
+        const tDef = tgt.ref?.def ?? 0;
         // 命中率: 敵レアリティが高いほど精度が上がる。プレイヤーの whiff と
         // 同じ「外す」概念を敵側にも導入し、緊張感の偏りを減らす。
         // レジェンド 5% / エピック 10% / レア 18% / コモン 25% で外す。
         const whiff = _enemyWhiffChance(m);
         if (Math.random() < whiff) {
-          events.push({ type: 'magic', mob: m, dmg: 0, hit: false });
+          events.push({ type: 'magic', mob: m, dmg: 0, hit: false,
+            targetKind: tgt.kind, targetMinion: tgt.kind === 'minion' ? tgt.ref : null });
           continue;
         }
-        const base = Math.max(1, m.atk - player.def);
+        const base = Math.max(1, m.atk - tDef);
         const roll = 1 + Math.floor(Math.random() * Math.ceil(base * 0.4));
         const dmg  = base + roll;
         // ジョブ / 属性ベースで状態異常付与をロール（命中時のみ）。
         const inflict = rollInflictOnHit(m, { ranged: false });
-        events.push({ type: 'magic', mob: m, dmg, hit: true, inflict });
+        events.push({ type: 'magic', mob: m, dmg, hit: true, inflict,
+          targetKind: tgt.kind, targetMinion: tgt.kind === 'minion' ? tgt.ref : null });
         totalDmg += dmg;
 
         // 武道家: 隣接時の 2 連撃（chargeBonus + 2 でチャージ充填）
         if (m.job?.aiHint === 'doublehit' && m.skillCharge >= 3) {
           m.skillCharge = 0;
           if (Math.random() >= whiff) {
-            const base2 = Math.max(1, Math.floor(m.atk * 0.7) - player.def);
+            const base2 = Math.max(1, Math.floor(m.atk * 0.7) - tDef);
             const roll2 = 1 + Math.floor(Math.random() * Math.ceil(base2 * 0.4));
             const dmg2  = base2 + roll2;
             const inflict2 = rollInflictOnHit(m, { ranged: false });
-            events.push({ type: 'magic', mob: m, dmg: dmg2, hit: true, inflict: inflict2 });
+            events.push({ type: 'magic', mob: m, dmg: dmg2, hit: true, inflict: inflict2,
+              targetKind: tgt.kind, targetMinion: tgt.kind === 'minion' ? tgt.ref : null });
             totalDmg += dmg2;
           }
         }
@@ -636,7 +666,8 @@ export class Dungeon {
 
       // 周囲8マスから「歩ける・他敵未予約・壁でない」スロットを mob ごとに選ぶ。
       // 候補は「自 mob からの距離」が短い順に評価し、最も近いものを予約する。
-      const slot = this._pickSurroundSlot(m, reserved);
+      // tgt（プレイヤー or 最寄りミニオン）の周囲スロットを使う。
+      const slot = this._pickSurroundSlot(m, reserved, tgt.x, tgt.y);
       if (!slot) {
         // 取れるスロットが無い → その場待機（混雑時の暴走を防止）
         reserved.add(`${m.x},${m.y}`);
@@ -826,9 +857,10 @@ export class Dungeon {
 
   // プレイヤー周囲8マスから、まだ誰にも予約されていない・歩ける・通行可能な
   // スロットを mob から見て最も近い順に1つ返す
-  _pickSurroundSlot(m, reserved) {
-    const px = this.playerPos.x;
-    const py = this.playerPos.y;
+  _pickSurroundSlot(m, reserved, tx = null, ty = null) {
+    // ターゲット未指定時はプレイヤーをデフォルトに（後方互換）。
+    const px = tx ?? this.playerPos.x;
+    const py = ty ?? this.playerPos.y;
     const candidates = [];
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
