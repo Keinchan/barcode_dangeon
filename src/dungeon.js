@@ -1097,15 +1097,54 @@ export class Dungeon {
       }
     }
 
-    // 視野内モンスター（オレンジ点）
+    // 既踏マスにある宝箱（金色 ◆）。視野外でも一度見たことがあれば表示。
+    // 持ち物宝箱とは別で、床に落ちているチェスト型アイテムだけ対象。
+    for (const it of this.floorItems) {
+      if (it.type !== 'chest') continue;
+      const seen = revealAll || this.discovered[it.y]?.[it.x] === 1;
+      if (!seen) continue;
+      const inSight = revealAll || this.visible.has(`${it.x},${it.y}`);
+      ctx.fillStyle = inSight ? '#ffd54f' : '#a3812a';
+      const cx = it.x * tx + tx / 2;
+      const cy = it.y * ty + ty / 2;
+      const sz = Math.max(1.5, Math.min(tx, ty) * 0.55);
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - sz);
+      ctx.lineTo(cx + sz, cy);
+      ctx.lineTo(cx, cy + sz);
+      ctx.lineTo(cx - sz, cy);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // 既踏マスにある商人（紫の四角）。撃破済みでない限り discovered で表示。
+    for (const m of this.monsters) {
+      if (!m?.isShopkeeper) continue;
+      if (m.hp <= 0) continue;
+      const seen = revealAll || this.discovered[m.y]?.[m.x] === 1;
+      if (!seen) continue;
+      const inSight = revealAll || this.visible.has(`${m.x},${m.y}`);
+      ctx.fillStyle = inSight ? '#ba68c8' : '#5d3f63';
+      const sz = Math.max(2, Math.min(tx, ty) * 0.7);
+      ctx.fillRect(m.x * tx + tx / 2 - sz / 2, m.y * ty + ty / 2 - sz / 2, sz, sz);
+    }
+
+    // 視野内モンスター（オレンジ点）。商人は別扱いで上で描画済みなのでスキップ。
     for (const m of this.monsters) {
       if (m.hp <= 0) continue;
+      if (m.isShopkeeper) continue;
       if (!revealAll && !this.visible.has(`${m.x},${m.y}`)) continue;
-      ctx.fillStyle = '#ff9800';
-      const r = Math.max(1, Math.min(tx, ty) * 0.5);
+      ctx.fillStyle = m.isBoss ? '#e53935' : '#ff9800';
+      const r = Math.max(1.5, Math.min(tx, ty) * 0.55);
       ctx.beginPath();
       ctx.arc(m.x * tx + tx / 2, m.y * ty + ty / 2, r, 0, Math.PI * 2);
       ctx.fill();
+      if (m.isBoss) {
+        // ボスは細い金リングで強調
+        ctx.strokeStyle = '#ffd54f';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
     }
 
     // プレイヤー（赤点）
