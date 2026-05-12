@@ -784,6 +784,23 @@
   <!-- 弱点ヒット時の派手バナー -->
   <div id="weakness-banner" class="weakness-banner hidden"></div>
 
+  <!-- レベルアップ ポップアップ。他モーダルより上に表示するため z-index は最上層に近い 6800。
+       連続レベルアップは内部でキューイングして 1 枚ずつ表示する。 -->
+  <div id="levelup-popup" class="levelup-popup hidden" role="dialog" aria-modal="true">
+    <div class="levelup-popup-box">
+      <div class="levelup-popup-burst" aria-hidden="true">
+        <span class="lvup-star s1">✨</span>
+        <span class="lvup-star s2">⭐</span>
+        <span class="lvup-star s3">✨</span>
+      </div>
+      <div class="levelup-popup-title">LEVEL UP!</div>
+      <div class="levelup-popup-level"><span id="levelup-old">1</span> <span class="lvup-arrow">→</span> <span id="levelup-new">2</span></div>
+      <div id="levelup-stats" class="levelup-popup-stats"></div>
+      <div id="levelup-skills" class="levelup-popup-skills"></div>
+      <button id="btn-levelup-close" class="btn-primary">続ける</button>
+    </div>
+  </div>
+
   <!-- アイコンギャラリーモーダル（デバッグ用） -->
   <div id="icon-gallery-modal" class="confirm-modal hidden">
     <div class="icon-gallery-box">

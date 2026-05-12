@@ -2422,6 +2422,142 @@ input, textarea {
   z-index: 5000;
 }
 
+/* ── レベルアップ ポップアップ ──
+   z-index 6800: 通常モーダル(6000-6500)より上、dialog-modal(7000)より下。
+   1 回のXP獲得で複数レベルが上がった場合は JS 側でキューイングして 1 枚ずつ表示。 */
+.levelup-popup {
+  position: fixed;
+  inset: 0;
+  z-index: 6800;
+  background: rgba(0,0,0,0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: lvupBgIn 0.18s ease-out;
+}
+.levelup-popup.hidden { display: none; }
+@keyframes lvupBgIn { from { opacity: 0; } to { opacity: 1; } }
+
+.levelup-popup-box {
+  position: relative;
+  background: radial-gradient(ellipse at top, #3a2a08 0%, #1a1100 60%, #14141c 100%);
+  border: 2px solid #ffd54f;
+  border-radius: 18px;
+  padding: 26px 28px 22px;
+  max-width: 360px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+  box-shadow:
+    0 0 32px rgba(255,213,79,0.65),
+    0 0 80px rgba(255,179,0,0.40),
+    inset 0 0 28px rgba(255,213,79,0.15);
+  animation: lvupBoxIn 0.45s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+}
+@keyframes lvupBoxIn {
+  0%   { transform: scale(0.55) rotate(-3deg); opacity: 0; }
+  60%  { transform: scale(1.06) rotate(1deg);  opacity: 1; }
+  100% { transform: scale(1)    rotate(0deg);  opacity: 1; }
+}
+
+.levelup-popup-burst {
+  position: absolute;
+  top: -22px;
+  left: 0;
+  right: 0;
+  height: 0;
+  pointer-events: none;
+}
+.lvup-star {
+  position: absolute;
+  font-size: 28px;
+  text-shadow: 0 0 10px #ffd54f, 0 0 4px #fff;
+  animation: lvupStar 1.6s ease-in-out infinite;
+}
+.lvup-star.s1 { left:  20%; animation-delay: 0s; }
+.lvup-star.s2 { left:  50%; transform: translateX(-50%); font-size: 36px; animation-delay: 0.15s; }
+.lvup-star.s3 { right: 20%; animation-delay: 0.3s; }
+@keyframes lvupStar {
+  0%, 100% { transform: translateY(0)    scale(1);   opacity: 1; }
+  50%      { transform: translateY(-6px) scale(1.2); opacity: 0.85; }
+}
+.lvup-star.s2 {
+  /* s2 は translateX を保持するので別アニメーションで上下動だけ表現 */
+  animation-name: lvupStarCenter;
+}
+@keyframes lvupStarCenter {
+  0%, 100% { transform: translateX(-50%) translateY(0)    scale(1);   opacity: 1; }
+  50%      { transform: translateX(-50%) translateY(-8px) scale(1.25); opacity: 0.85; }
+}
+
+.levelup-popup-title {
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: 3px;
+  color: #ffd54f;
+  text-shadow: 0 0 12px rgba(255,213,79,0.9), 0 2px 4px rgba(0,0,0,0.7);
+  margin-top: 6px;
+}
+.levelup-popup-level {
+  font-size: 32px;
+  font-weight: 900;
+  color: #fff;
+  letter-spacing: 1px;
+  text-shadow: 0 0 14px rgba(255,213,79,0.7), 0 2px 6px rgba(0,0,0,0.85);
+}
+.levelup-popup-level .lvup-arrow {
+  color: #ffd54f;
+  margin: 0 6px;
+}
+.levelup-popup-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  width: 100%;
+  margin-top: 4px;
+}
+.lvup-stat {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,213,79,0.35);
+  border-radius: 8px;
+  padding: 7px 4px;
+  font-size: 12px;
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.lvup-stat .label  { color: #ffe082; font-size: 11px; letter-spacing: 1px; }
+.lvup-stat .delta  { color: #b9f6ca; font-size: 15px; font-weight: bold; }
+.levelup-popup-skills {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+  max-height: 90px;
+  overflow-y: auto;
+}
+.lvup-skill {
+  background: rgba(255,255,255,0.05);
+  border-left: 3px solid var(--c, #ffd54f);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+  text-align: left;
+  color: #f5f5f5;
+}
+.lvup-skill .name { font-weight: bold; color: var(--c, #ffd54f); margin-right: 6px; }
+.levelup-popup-box .btn-primary {
+  width: 100%;
+  margin-top: 6px;
+  padding: 11px;
+}
+
 /* ── アプリ内 alert/confirm ダイアログ ── */
 .dialog-modal {
   position: fixed;

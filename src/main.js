@@ -3967,6 +3967,7 @@ function _refreshBuffChips() {
 function gainXp(amount) {
   if (amount <= 0) return;
   player.xp += amount;
+  const startLevel = player.level;
   let leveledUp = false;
   while (player.level < MAX_LEVEL && player.xp >= xpRequiredForLevel(player.level)) {
     player.xp -= xpRequiredForLevel(player.level);
@@ -3985,12 +3986,75 @@ function gainXp(amount) {
     playSfx('levelup');
     // タイプ別ウィザード技の自動習得（プライマリ属性のみ）。
     // 既習得の技は重複追加しない。新規習得分は習得バナーとログで通知する。
-    _autoLearnWizardSkills();
+    const learnedBefore = (player.learnedSkills ?? []).map(s => s.id);
+    _autoLearnWizardSkills({ slotAuto: true });
+    const newlyLearned = (player.learnedSkills ?? []).filter(s => !learnedBefore.includes(s.id));
+    const gained = player.level - startLevel;
+    _enqueueLevelUpPopup({
+      fromLevel: startLevel,
+      toLevel:   player.level,
+      hpDelta:   HP_PER_LEVEL  * gained,
+      atkDelta:  ATK_PER_LEVEL * gained,
+      defDelta:  DEF_PER_LEVEL * gained,
+      learned:   newlyLearned,
+    });
   }
   refreshHUD();
   if (!document.getElementById('menu-modal').classList.contains('hidden')) refreshMenu();
   autoSave();
 }
+
+// レベルアップ ポップアップ。
+//   - 連続レベルアップ（1 回の XP で複数 Lv 上がる場合）は 1 枚に集約。
+//   - 別の戦闘で再度 LvUp が起きた場合はキューに積んで順次表示。
+//   - 表示中は OK ボタン or 背景タップで閉じる。3.5 秒で自動クローズ（自動クリア）。
+const _LEVELUP_POPUP_QUEUE = [];
+let   _LEVELUP_POPUP_OPEN  = false;
+let   _LEVELUP_POPUP_AUTO  = null;
+function _enqueueLevelUpPopup(payload) {
+  _LEVELUP_POPUP_QUEUE.push(payload);
+  if (!_LEVELUP_POPUP_OPEN) _showNextLevelUpPopup();
+}
+function _showNextLevelUpPopup() {
+  const next = _LEVELUP_POPUP_QUEUE.shift();
+  const modal = document.getElementById('levelup-popup');
+  if (!next || !modal) { _LEVELUP_POPUP_OPEN = false; return; }
+  _LEVELUP_POPUP_OPEN = true;
+  document.getElementById('levelup-old').textContent = `Lv ${next.fromLevel}`;
+  document.getElementById('levelup-new').textContent = `Lv ${next.toLevel}`;
+  const stats = document.getElementById('levelup-stats');
+  if (stats) {
+    stats.innerHTML =
+      `<div class="lvup-stat"><div class="label">HP</div><div class="delta">+${next.hpDelta}</div></div>` +
+      `<div class="lvup-stat"><div class="label">ATK</div><div class="delta">+${next.atkDelta}</div></div>` +
+      `<div class="lvup-stat"><div class="label">DEF</div><div class="delta">+${next.defDelta}</div></div>`;
+  }
+  const skills = document.getElementById('levelup-skills');
+  if (skills) {
+    if (!next.learned || next.learned.length === 0) {
+      skills.innerHTML = '';
+    } else {
+      skills.innerHTML = next.learned.slice(0, 6).map(sk => {
+        const col = RARITIES.find(r => r.name === sk.rarity)?.color ?? '#ffd54f';
+        return `<div class="lvup-skill" style="--c:${col}">📕 <span class="name">${sk.name}</span><span style="opacity:0.8">${sk.element}・${sk.rarity}</span></div>`;
+      }).join('');
+    }
+  }
+  modal.classList.remove('hidden');
+  if (_LEVELUP_POPUP_AUTO) clearTimeout(_LEVELUP_POPUP_AUTO);
+  _LEVELUP_POPUP_AUTO = setTimeout(_closeLevelUpPopup, 3500);
+}
+function _closeLevelUpPopup() {
+  if (_LEVELUP_POPUP_AUTO) { clearTimeout(_LEVELUP_POPUP_AUTO); _LEVELUP_POPUP_AUTO = null; }
+  document.getElementById('levelup-popup')?.classList.add('hidden');
+  _LEVELUP_POPUP_OPEN = false;
+  // 次がキューにあれば 200ms 遅延で再オープン（連打防止）
+  if (_LEVELUP_POPUP_QUEUE.length > 0) setTimeout(_showNextLevelUpPopup, 200);
+}
+document.getElementById('btn-levelup-close')?.addEventListener('click', _closeLevelUpPopup);
+document.getElementById('levelup-popup')?.addEventListener('click', (e) => {
+  if (e.target.id === 'levelup-popup') _closeLevelUpPopup();
+});
 
 // モンスター撃破時のXP量。旧仕様は固定値だったので、低 Lv プレイヤーが格上を
 // 倒しても全然レベルが上がらず作業感が強かった。
