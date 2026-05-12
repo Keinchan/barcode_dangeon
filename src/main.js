@@ -4676,11 +4676,21 @@ function _celebratePickup(item, action = '入手') {
   const playerAt = playerVfxAnchor() ?? centerAnchor;
 
   if (rarity === 'エピック') {
-    hitFlash({ color: 'rgba(171,71,188,0.32)' });
-    screenShake(5, 220);
-    sparkSpray(centerAnchor, { count: 16, color: '#ce93d8' });
-    sparkSpray(playerAt,     { count: 10, color: '#ce93d8' });
+    // 旧仕様は単発の小爆発で「レジェンドの劣化版」感が強かった。
+    // 紫キラキラを 2 波で出して、レジェンドに次ぐ派手さに見せる。
+    hitFlash({ color: 'rgba(171,71,188,0.42)' });
+    screenShake(7, 260);
+    explosion(centerAnchor, { color: '#ce93d8' });
+    sparkSpray(centerAnchor, { count: 22, color: '#ce93d8' });
+    sparkSpray(centerAnchor, { count: 12, color: '#fff' });
+    sparkSpray(playerAt,     { count: 14, color: '#ba68c8' });
     playSfx('crit');
+    // 0.35 秒後の 2 波目: 薄紫＋白の混色でキラキラ感を強める
+    setTimeout(() => {
+      sparkSpray(centerAnchor, { count: 16, color: '#e1bee7' });
+      sparkSpray(playerAt,     { count: 10, color: '#fff' });
+      playSfx('pickup', { rarityTier: rarityTier(rarity) });
+    }, 360);
   } else if (rarity === 'レジェンド') {
     hitFlash({ color: 'rgba(255,213,79,0.42)' });
     screenShake(10, 340);
@@ -5877,17 +5887,26 @@ function _celebrateChestOpen(inner) {
     return;
   }
   if (rarity === 'エピック') {
-    hitFlash({ color: 'rgba(171,71,188,0.40)' });
-    screenShake(8, 280);
+    // レジェンドより控えめだが「キラキラ感」をしっかり出す: 3 波構成 + ストロボ。
+    hitFlash({ color: 'rgba(171,71,188,0.45)' });
+    screenShake(10, 320);
     explosion(centerAnchor, { color: '#ce93d8' });
-    sparkSpray(centerAnchor, { count: 26, color: '#ce93d8' });
-    sparkSpray(centerAnchor, { count: 12, color: '#fff' });
-    sparkSpray(playerAt,     { count: 16, color: '#ba68c8' });
+    sparkSpray(centerAnchor, { count: 30, color: '#ce93d8' });
+    sparkSpray(centerAnchor, { count: 16, color: '#fff' });
+    sparkSpray(playerAt,     { count: 18, color: '#ba68c8' });
     playSfx('crit');
+    // 0.3s 後: 薄紫＋白の追いキラキラ
     setTimeout(() => {
-      sparkSpray(centerAnchor, { count: 14, color: '#e1bee7' });
+      sparkSpray(centerAnchor, { count: 20, color: '#e1bee7' });
+      sparkSpray(playerAt,     { count: 12, color: '#fff' });
       playSfx('pickup', { rarityTier: rarityTier(rarity) });
-    }, 360);
+    }, 300);
+    // 0.65s 後: もう 1 波 + ストロボフラッシュ
+    setTimeout(() => {
+      hitFlash({ color: 'rgba(225,190,231,0.30)' });
+      sparkSpray(centerAnchor, { count: 16, color: '#fff' });
+      sparkSpray(playerAt,     { count: 10, color: '#e1bee7' });
+    }, 650);
     return;
   }
   // レジェンド: フィーバー総力戦
