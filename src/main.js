@@ -5804,6 +5804,9 @@ async function _openChestAt(src, idx) {
   if (!stowed && entrySnapshot) {
     _secureChestInnerToSnapshot(inner);
   }
+  // 開封アニメーション: 宝箱が揺れて蓋が開く CSS アニメ → その後にフィーバー演出。
+  // ユーザの「開ける瞬間が分かりにくい」体感を埋めるための一拍。
+  await _playChestOpenAnimation(inner);
   // 開封演出: 宝箱のレアリティ（中身レアリティ）に応じた段階別フィーバー。
   // _celebrateChestOpen がフラッシュ・シェイク・スパーク・爆発を組み合わせて派手にする。
   _celebrateChestOpen(inner);
@@ -5849,6 +5852,38 @@ document.getElementById('chest-result-modal')?.addEventListener('click', (e) => 
     playSfx('click');
   }
 });
+
+// 宝箱を開ける CSS アニメーション（揺れ → 蓋オープン → 中身がはじける）。
+// _celebrateChestOpen 直前に 1.4 秒だけ走らせて「開ける瞬間」を演出する。
+// レアリティに応じてグロー色を変える。
+function _playChestOpenAnimation(inner) {
+  return new Promise(resolve => {
+    const rarity = inner?.rarity ?? 'コモン';
+    const glow =
+      rarity === 'レジェンド' ? '#ffd54f' :
+      rarity === 'エピック'   ? '#ce93d8' :
+      rarity === 'レア'       ? '#4dc4ff' :
+      '#cccccc';
+    const wrap = document.createElement('div');
+    wrap.className = 'chest-open-anim';
+    wrap.innerHTML = `
+      <div class="chest-anim-box" style="--c:${glow}">
+        <div class="chest-anim-glow"></div>
+        <div class="chest-anim-emoji">🎁</div>
+        <div class="chest-anim-burst b1">✨</div>
+        <div class="chest-anim-burst b2">⭐</div>
+        <div class="chest-anim-burst b3">✨</div>
+        <div class="chest-anim-burst b4">💫</div>
+      </div>
+    `;
+    document.body.appendChild(wrap);
+    playSfx('click');
+    setTimeout(() => {
+      try { wrap.remove(); } catch {}
+      resolve();
+    }, 1400);
+  });
+}
 
 // 宝箱開封の専用演出。レア度ごとに派手さを段階的に上げる：
 //   コモン   - 軽いキラキラ + ピックアップ SFX

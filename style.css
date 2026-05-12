@@ -2529,6 +2529,71 @@ input, textarea {
   z-index: 5000;
 }
 
+/* ── 宝箱オープン アニメーション ──
+   画面中央に 🎁 を出し、揺れる → 蓋が開いて中身がにじみ出る → フェード。
+   _celebrateChestOpen 直前に挿入され、終了後に開封結果モーダルが開く。 */
+.chest-open-anim {
+  position: fixed;
+  inset: 0;
+  z-index: 6700;          /* chest-result-modal(6000) より上、levelup(6800) より下 */
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.chest-open-anim .chest-anim-box {
+  position: relative;
+  width: 140px;
+  height: 140px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.chest-open-anim .chest-anim-glow {
+  position: absolute;
+  inset: -30px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--c, #ffd54f) 0%, transparent 65%);
+  opacity: 0;
+  animation: chestGlow 1.4s ease-out forwards;
+}
+.chest-open-anim .chest-anim-emoji {
+  font-size: 90px;
+  line-height: 1;
+  filter: drop-shadow(0 4px 12px rgba(0,0,0,0.55));
+  animation: chestShakeOpen 1.4s ease-in-out forwards;
+}
+.chest-open-anim .chest-anim-burst {
+  position: absolute;
+  font-size: 30px;
+  opacity: 0;
+  animation: chestBurst 0.9s ease-out 0.7s forwards;
+}
+.chest-open-anim .chest-anim-burst.b1 { transform: translate(-60px, -50px); }
+.chest-open-anim .chest-anim-burst.b2 { transform: translate( 50px, -55px); }
+.chest-open-anim .chest-anim-burst.b3 { transform: translate(-55px,  40px); }
+.chest-open-anim .chest-anim-burst.b4 { transform: translate( 55px,  40px); }
+@keyframes chestShakeOpen {
+  0%   { transform: scale(1)      rotate(0deg); }
+  15%  { transform: scale(1.04)   rotate(-6deg); }
+  30%  { transform: scale(1.04)   rotate(6deg); }
+  45%  { transform: scale(1.04)   rotate(-6deg); }
+  60%  { transform: scale(1.06)   rotate(0deg); }
+  72%  { transform: scale(1.20)   rotate(0deg); }
+  85%  { transform: scale(1.10)   rotate(0deg); filter: drop-shadow(0 0 18px var(--c, #ffd54f)); }
+  100% { transform: scale(0.85)   rotate(0deg); opacity: 0; filter: drop-shadow(0 0 28px var(--c, #ffd54f)); }
+}
+@keyframes chestGlow {
+  0%   { opacity: 0;    transform: scale(0.5); }
+  60%  { opacity: 0.85; transform: scale(1.0); }
+  100% { opacity: 0;    transform: scale(1.6); }
+}
+@keyframes chestBurst {
+  0%   { opacity: 0; }
+  50%  { opacity: 1; }
+  100% { opacity: 0; transform: var(--end-tx, translate(0, -120px)); }
+}
+
 /* ── レベルアップ ポップアップ ──
    z-index 6800: 通常モーダル(6000-6500)より上、dialog-modal(7000)より下。
    1 回のXP獲得で複数レベルが上がった場合は JS 側でキューイングして 1 枚ずつ表示。 */
