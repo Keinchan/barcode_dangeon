@@ -22,6 +22,7 @@ let recommendedLvCb   = null;
 let onEncounterCb         = null;
 let isEncounterConsumedCb = null;
 let getPlayerLevelCb      = null;
+let onPositionUpdateCb    = null;   // GPS 更新ごとに lat,lng を渡す（商人距離キャンセル等）
 // ユーザーが手動でドラッグ／ピンチした最後の時刻。直後 N 秒は GPS 更新で
 // 自動再センタリングしない（離れた場所のピンを見たい時用）。それ以外は
 // 常にプレイヤーが地図の中心に来るよう追従する。
@@ -109,6 +110,8 @@ function _setPlayer(lat, lng) {
   }
 
   _refreshDungeons(lat, lng);
+  // 位置更新を main.js などに通知。距離キャンセル系の判定はこのコールバックで行う。
+  try { onPositionUpdateCb?.(lat, lng); } catch {}
 }
 
 function _refreshDungeons(lat, lng) {
@@ -343,10 +346,11 @@ export function removeEncounterPin(seed) {
 // main.js が後付けでコールバックを差し替えるための setter。
 // initMap の引数で渡しても良いが、登録順序が main.js の構造に依存してしまうため
 // 別関数で受けるようにした（Phase C で追加）。
-export function setEncounterCallbacks({ onEncounter, isConsumed, playerLevel } = {}) {
+export function setEncounterCallbacks({ onEncounter, isConsumed, playerLevel, onPositionUpdate } = {}) {
   if (onEncounter)        onEncounterCb         = onEncounter;
   if (isConsumed)         isEncounterConsumedCb = isConsumed;
   if (playerLevel)        getPlayerLevelCb      = playerLevel;
+  if (onPositionUpdate)   onPositionUpdateCb    = onPositionUpdate;
   // 既に GPS が来ている場合は即時再描画（コールバック切替の反映）
   if (playerPos) _refreshEncounters(playerPos.lat, playerPos.lng);
 }

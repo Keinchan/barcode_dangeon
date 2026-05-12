@@ -9,6 +9,7 @@ import {
   rollGoldDropFromMonster,
   makeGoldFloorItem,
   forceTypeBarcode,
+  distanceMeters,
   MAX_LEVEL,
   HP_PER_LEVEL,
   ATK_PER_LEVEL,
@@ -326,6 +327,7 @@ setEncounterCallbacks({
   onEncounter:  e => _handleMapEncounter(e),
   isConsumed:   seed => consumedEncounters.has(seed),
   playerLevel:  () => player?.level ?? 1,
+  onPositionUpdate: (lat, lng) => _onPlayerPositionUpdate(lat, lng),
 });
 
 // プレイヤーvsダンジョンの難易度評価
@@ -504,6 +506,9 @@ async function _collectMapChest(e) {
 // しているので、地図上から開いている間だけ dungeon を「在庫だけ返す軽量アダプタ」
 // に差し替える。ショップ閉じる時 (btn-shop-close) に元へ戻す。
 let _mapMerchantPrevDungeon = null;
+// 地図商人の現在の lat/lng とキャンセル距離。GPS 更新で離れすぎたら自動で閉じる。
+let _mapMerchantPos    = null;
+const MERCHANT_CANCEL_RADIUS_M = 100;   // 取引可能な「店の前」の距離（80m 出現 + 余裕）
 function _openMapMerchant(e) {
   const fakeShopkeeper = {
     name: '行商人',
@@ -522,7 +527,26 @@ function _openMapMerchant(e) {
   };
   _mapMerchantPrevDungeon = dungeon;
   dungeon = adapter;
+  _mapMerchantPos = { lat: e.lat, lng: e.lng };
   _openShopModal(fakeShopkeeper);
+}
+// GPS が更新されたとき、商人セッション中なら距離をチェックして
+// 離れすぎていればモーダルを閉じてアラート。戦闘中（dungeon.tickEnemies 中など）の
+// shop モーダルは存在しないので地図商人だけが対象。
+function _onPlayerPositionUpdate(lat, lng) {
+  if (!_mapMerchantPos) return;
+  const shop = document.getElementById('shop-modal');
+  if (!shop || shop.classList.contains('hidden')) return;
+  const d = distanceMeters(lat, lng, _mapMerchantPos.lat, _mapMerchantPos.lng);
+  if (d > MERCHANT_CANCEL_RADIUS_M) {
+    shop.classList.add('hidden');
+    _mapMerchantPos = null;
+    if (_mapMerchantPrevDungeon !== null) {
+      dungeon = _mapMerchantPrevDungeon;
+      _mapMerchantPrevDungeon = null;
+    }
+    showAlert(`商人から離れすぎたため取引がキャンセルされました（距離 ${Math.round(d)} m）`);
+  }
 }
 
 function showPreDungeonModal(d) {
@@ -3035,6 +3059,7 @@ document.getElementById('btn-shop-close').addEventListener('click', () => {
     dungeon = _mapMerchantPrevDungeon;
     _mapMerchantPrevDungeon = null;
   }
+  _mapMerchantPos = null;
   _currentShopkeeper = null;
 });
 
