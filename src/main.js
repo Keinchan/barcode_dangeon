@@ -1178,8 +1178,19 @@ document.getElementById('btn-open-type-select')?.addEventListener('click', () =>
       <div class="ts-name">${t.emoji} ${t.name}</div>
       <div class="ts-desc">${t.desc}</div>
       <div class="ts-apt">適性: ${t.primary}・${t.secondary}</div>
+      <span class="ts-info" role="button" aria-label="タイプ詳細" title="詳細を見る">?</span>
     </button>`;
   }).join('');
+  // ? アイコンタップ: タイプ選択ではなく詳細モーダルを開く
+  list.querySelectorAll('.ts-info').forEach(info => {
+    info.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const cell = info.closest('.type-select-cell');
+      const t = PLAYER_TYPES.find(x => x.id === cell?.dataset?.id);
+      playSfx('click');
+      _showTypeDetailModal(t);
+    });
+  });
   list.querySelectorAll('.type-select-cell').forEach(btn => {
     btn.addEventListener('click', () => {
       player.type = btn.dataset.id;
@@ -1339,6 +1350,11 @@ function _refreshMaterialsUI() {
       <div class="material-cell-name" style="color:${it.rarityColor}">${it.name}</div>
       <div class="material-cell-count">×${it.count ?? 1}</div>
     `;
+    // 素材セルもタップで詳細表示（HTML title 属性だけだとモバイルで見られない）
+    cell.addEventListener('click', () => {
+      playSfx('click');
+      _showItemDetailModal(it);
+    });
     grid.appendChild(cell);
   }
 }
@@ -1470,18 +1486,26 @@ function _renderStorageRow(item, idx) {
   const openBtn = isChest
     ? `<button class="menu-action-btn open">🗝️ 開ける</button>` : '';
   div.innerHTML = `
-    <div class="menu-row-emoji">${iconImg(item, 38)}</div>
-    <div class="menu-row-info">
-      <div class="menu-row-name" style="color:${item.rarityColor}">${item.name} ${lvHtml} ${countHtml}</div>
-      <div class="menu-row-stat">${_statLine(item)} / ${item.rarity}</div>
-      ${skillHtml}
-    </div>
+    <button class="menu-row-main menu-row-detail" type="button" data-action="detail">
+      <div class="menu-row-emoji">${iconImg(item, 38)}</div>
+      <div class="menu-row-info">
+        <div class="menu-row-name" style="color:${item.rarityColor}">${item.name} ${lvHtml} ${countHtml}</div>
+        <div class="menu-row-stat">${_statLine(item)} / ${item.rarity}</div>
+        ${skillHtml}
+      </div>
+    </button>
     <div class="menu-row-actions">
       ${openBtn}
       <button class="menu-action-btn move withdraw">→持ち物</button>
       <button class="menu-action-btn danger discard">廃棄</button>
     </div>
   `;
+  // ストレージ行のラベル領域（アイコン＋名前）タップで詳細表示。
+  // 「→持ち物」「廃棄」など操作ボタンは別 div なので誤発火しない。
+  div.querySelector('.menu-row-detail')?.addEventListener('click', () => {
+    playSfx('click');
+    _showItemDetailModal(item);
+  });
   if (isChest) {
     div.querySelector('.open').addEventListener('click', () => _openChestFromStorage(idx));
   }
@@ -4332,6 +4356,83 @@ function _maybeFractureSelfHurt() {
   return true;
 }
 
+// ── 詳細モーダル（読取専用 / ラベルタップで開く） ──
+// アイテム・タイプ・状態異常を共通の枠で表示。装備/使用ボタンは出さない。
+function _showItemDetailModal(item) {
+  if (!item) return;
+  const titleEl = document.getElementById('item-detail-title');
+  const bodyEl  = document.getElementById('item-detail-body');
+  const modal   = document.getElementById('item-detail-modal');
+  if (!titleEl || !bodyEl || !modal) return;
+  const rarityCol = item.rarityColor ?? RARITIES.find(r => r.name === item.rarity)?.color ?? '#ddd';
+  const lvLine   = item.level ? ` ・ Lv${item.level}` : '';
+  const countLine= (isStackable(item) && (item.count ?? 1) > 1) ? ` ・ ×${item.count}` : '';
+  const statLine = typeof _statLine === 'function' ? _statLine(item) : '';
+  const skillLine = item.skill?.name
+    ? `<div class="idm-skill">✨ ${item.skill.name}${item.skill.element ? ' / ' + item.skill.element : ''}</div>`
+    : '';
+  const descLine = item.desc ? `<div class="idm-desc">${item.desc}</div>` : '';
+  const elem = item.element ? `<div class="idm-tag">属性: ${item.element}</div>` : '';
+  const typeLabel = {
+    weapon: '武器', armor: '防具', potion: '回復薬(HP)', mpPotion: '回復薬(MP)',
+    scroll: '巻物', mysteryScroll: '不思議な巻物', skillBook: '技の書',
+    chest: '宝箱', key: '鍵', material: '素材', legendaryTome: '伝説の書',
+    dungeonPortal: 'ダンジョン入口', statusCure: '状態異常 回復薬',
+  }[item.type] ?? item.type ?? '';
+  titleEl.innerHTML = `${iconImg(item, 28)}<span style="margin-left:6px">${item.name}</span>`;
+  bodyEl.innerHTML = `
+    <div class="idm-meta">
+      <span style="color:${rarityCol};font-weight:bold">${item.rarity ?? ''}</span>${lvLine}${countLine}
+    </div>
+    <div class="idm-tag">${typeLabel}</div>
+    ${elem}
+    ${statLine ? `<div class="idm-stat">${statLine}</div>` : ''}
+    ${skillLine}
+    ${descLine}
+  `;
+  modal.classList.remove('hidden');
+}
+function _showTypeDetailModal(typeDef) {
+  if (!typeDef) return;
+  const titleEl = document.getElementById('item-detail-title');
+  const bodyEl  = document.getElementById('item-detail-body');
+  const modal   = document.getElementById('item-detail-modal');
+  if (!titleEl || !bodyEl || !modal) return;
+  titleEl.textContent = `${typeDef.emoji} ${typeDef.name}`;
+  bodyEl.innerHTML = `
+    <div class="idm-meta"><span style="color:#ffd54f;font-weight:bold">タイプ</span></div>
+    <div class="idm-tag">適性属性: ${typeDef.primary} ・ ${typeDef.secondary}</div>
+    <div class="idm-desc">${typeDef.desc ?? ''}</div>
+    <div class="idm-desc" style="opacity:0.8">プライマリ属性の技をレベルアップで自動習得します。タイプを変更すると、適性外になった旧タイプの技スロットは自動で外れます（習得済み技は保持）。</div>
+  `;
+  modal.classList.remove('hidden');
+}
+function _showStatusDetailModal(kind) {
+  const def = STATUS_DEFS[kind];
+  if (!def) return;
+  const titleEl = document.getElementById('item-detail-title');
+  const bodyEl  = document.getElementById('item-detail-body');
+  const modal   = document.getElementById('item-detail-modal');
+  if (!titleEl || !bodyEl || !modal) return;
+  titleEl.textContent = `${def.emoji} ${def.label}`;
+  const cat = def.isBuff ? 'ポジティブ（バフ）' :
+              def.isDot  ? 'ネガティブ・DoT'    :
+              def.isBlock? 'ネガティブ・行動制限':
+              def.isMod  ? 'ネガティブ・補正系': 'その他';
+  bodyEl.innerHTML = `
+    <div class="idm-meta"><span style="color:${def.color};font-weight:bold">${cat}</span></div>
+    <div class="idm-desc">${def.desc}</div>
+  `;
+  modal.classList.remove('hidden');
+}
+document.getElementById('btn-item-detail-close')?.addEventListener('click', () => {
+  document.getElementById('item-detail-modal')?.classList.add('hidden');
+  playSfx('click');
+});
+document.getElementById('item-detail-modal')?.addEventListener('click', (e) => {
+  if (e.target.id === 'item-detail-modal') e.target.classList.add('hidden');
+});
+
 // 状態異常 説明モーダル
 function _openStatusInfoModal() {
   const body = document.getElementById('status-info-body');
@@ -4340,7 +4441,7 @@ function _openStatusInfoModal() {
   // 内側テキスト（status-info-text）が幅を取れずに崩れて読めなかった。
   // 説明テキストを span ではなく block 要素で置き、明示的な flex で囲う。
   body.innerHTML = Object.entries(STATUS_DEFS).map(([kind, def]) =>
-    `<div class="status-info-row" style="--c:${def.color}">
+    `<div class="status-info-row" data-kind="${kind}" style="--c:${def.color}">
        <div class="status-info-emoji">${def.emoji}</div>
        <div class="status-info-text">
          <div class="status-info-name">${def.label}</div>
@@ -4348,6 +4449,14 @@ function _openStatusInfoModal() {
        </div>
      </div>`
   ).join('');
+  // 各行タップで個別の詳細モーダルを開く（同じ画面に長文が連続するより、
+  // 1 種類ずつ拡大して読みたい時用）
+  body.querySelectorAll('.status-info-row').forEach(row => {
+    row.addEventListener('click', () => {
+      playSfx('click');
+      _showStatusDetailModal(row.dataset.kind);
+    });
+  });
   document.getElementById('status-info-modal')?.classList.remove('hidden');
 }
 document.getElementById('btn-open-status-info')?.addEventListener('click', () => {
