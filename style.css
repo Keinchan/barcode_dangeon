@@ -493,6 +493,19 @@ input, textarea {
   background: rgba(255,82,82,0.08) !important;
   color: rgba(255,82,82,0.7) !important;
 }
+/* タイプ変更で適性外になった旧タイプ技。発動不可なので斜線＋灰色で「使えない」と分かる見た目に。
+   lowmp と重なっても off-aptitude が優先されるよう個別ルールで上書き。 */
+.waza-slot.off-aptitude {
+  border-color: rgba(255,255,255,0.18) !important;
+  background:
+    repeating-linear-gradient(
+      135deg,
+      rgba(120,120,120,0.18) 0 6px,
+      rgba(60,60,60,0.18) 6px 12px
+    ) !important;
+  color: rgba(200,200,200,0.55) !important;
+  filter: grayscale(0.6);
+}
 .waza-slot-emoji { font-size: 16px; line-height: 1; }
 .waza-slot-name  { font-size: 10px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .waza-slot-mp    { font-size: 9px; opacity: 0.75; }

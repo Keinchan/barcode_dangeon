@@ -1171,7 +1171,11 @@ document.getElementById('btn-open-type-select')?.addEventListener('click', () =>
       // タイプ変更時も自動習得を回す。すでに覚えた技（旧タイプの技含む）は失われない。
       // 新タイプのプライマリ属性で「現在のレベル以下の技」を全部覚える。
       _autoLearnWizardSkills({ silent: true });
+      // 装着中のスロットに新タイプ適性外の技が残っていると「使えるが当たらない」
+      // 不整合になるので、適性外スロットだけ空にする（learnedSkills は保持）
+      _purgeOffAptitudeSlots();
       _refreshSkillConfig();
+      _refreshWazaBar();
       autoSave();
     });
   });
@@ -1180,6 +1184,26 @@ document.getElementById('btn-open-type-select')?.addEventListener('click', () =>
 document.getElementById('btn-type-select-cancel')?.addEventListener('click', () => {
   document.getElementById('type-select-modal').classList.add('hidden');
 });
+
+// プレイヤーの現在タイプ適性に技 element が含まれるか判定。
+// タイプ未設定は救済としてコモン技だけ許可する。
+function _skillElementInAptitude(skill) {
+  if (!skill) return false;
+  const t = findPlayerType(player.type);
+  if (!t) return skill.rarity === 'コモン';
+  return skill.element === t.primary || skill.element === t.secondary;
+}
+// タイプ変更後にスロットへ残っている適性外の技を取り除く。
+// learnedSkills（コレクション）は触らず、装備中スロットだけクリアする。
+function _purgeOffAptitudeSlots() {
+  if (!Array.isArray(player.skillSlots)) return;
+  for (let i = 0; i < player.skillSlots.length; i++) {
+    const sk = player.skillSlots[i];
+    if (sk && !_skillElementInAptitude(sk)) {
+      player.skillSlots[i] = null;
+    }
+  }
+}
 
 // ── 技選択（スロットへ割り当て）モーダル ──
 let _skillPickContext = null;
@@ -1196,10 +1220,12 @@ function _openSkillPicker(ctx) {
   let labelMeta = '';
   if (ctx.owner === 'player') {
     _ensurePlayerSkillFields();
-    pool = player.learnedSkills;
+    // タイプ変更後に旧タイプの技をスロットへ載せられないよう適性でフィルタする。
+    // learnedSkills 自体は将来タイプを戻したときに復活できるよう温存する。
+    pool = (player.learnedSkills ?? []).filter(_skillElementInAptitude);
     ownerLevel = player.level;
     const t = findPlayerType(player.type);
-    labelMeta = `自分のスロット ${ctx.slotIdx + 1} 番に技を割り当てます。タイプ: ${t ? t.name : '未設定'}`;
+    labelMeta = `自分のスロット ${ctx.slotIdx + 1} 番に技を割り当てます。タイプ: ${t ? t.name : '未設定'}（適性外の技は表示されません）`;
   } else {
     const mi = player.minions[ctx.minionIdx];
     if (!mi) return;
@@ -2199,6 +2225,14 @@ async function _executeSkill(skill) {
   }
   // PvP アリーナ: 自分のターンじゃなければ技も封じる
   if (dungeonData?.isPvpArena && _pvpData?.turn !== _pvpRole) return;
+  // タイプ変更後に旧タイプの技を発動しようとしてもブロックする。
+  // セーブの整合性が崩れている場合に備えた多重防御（slot 側でも purge 済み）。
+  if (!_skillElementInAptitude(skill)) {
+    const t = findPlayerType(player.type);
+    const aptLabel = t ? `${t.primary}・${t.secondary}` : 'コモン';
+    showAlert(`「${skill.name}」は今のタイプ（適性: ${aptLabel}）では発動できません。タイプ変更前の技です。`);
+    return;
+  }
   // 状態異常で技使用が制限される: sleep=封じ / shock=確率封じ / burn=MP+1
   if (hasStatus(player, 'sleep')) {
     dungeonLog('😴 睡眠中で技を使えない！'); _runEnemyTurn(); return;
@@ -3109,7 +3143,9 @@ function _refreshWazaBar() {
     const emoji = SKILL_ELEMENT_EMOJI[sk.element] ?? '✨';
     const lvLocked = player.level < skillLevelReq(sk);
     const lowMp    = (player.mp ?? 0) < sk.mpCost;
-    btn.classList.toggle('lowmp', lowMp || lvLocked);
+    const offAptitude = !_skillElementInAptitude(sk);
+    btn.classList.toggle('lowmp', lowMp || lvLocked || offAptitude);
+    btn.classList.toggle('off-aptitude', offAptitude);
     // disabled にすると「押しても無反応」と誤解されるので、ボタンは常に有効化。
     // ハンドラ側で MP 不足・Lv ロックを判定して案内ダイアログを出す方針。
     btn.disabled = false;
@@ -3118,10 +3154,12 @@ function _refreshWazaBar() {
     btn.style.color       = color;
     btn.title = lvLocked
       ? `${sk.name}（Lv${skillLevelReq(sk)} で解放）`
-      : `${sk.name}（${sk.element} / ${sk.pattern}型 / MP-${sk.mpCost}）${lowMp ? ' MP不足' : ''}`;
+      : offAptitude
+        ? `${sk.name}（タイプ変更により適性外: 発動できません）`
+        : `${sk.name}（${sk.element} / ${sk.pattern}型 / MP-${sk.mpCost}）${lowMp ? ' MP不足' : ''}`;
     btn.innerHTML =
       `<span class="waza-slot-emoji">${emoji}</span>` +
-      `<span class="waza-slot-name">${sk.name}${lvLocked ? '🔒' : ''}</span>` +
+      `<span class="waza-slot-name">${sk.name}${lvLocked ? '🔒' : offAptitude ? '✕' : ''}</span>` +
       `<span class="waza-slot-mp">MP-${sk.mpCost}</span>` +
       `<span class="waza-slot-info" role="button" aria-label="効果範囲を見る" title="効果範囲を見る">?</span>`;
     const filledHandler = () => {
