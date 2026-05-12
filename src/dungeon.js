@@ -324,7 +324,20 @@ export class Dungeon {
     // 複数ミニオンが同じ目標を集中攻撃して撃破しやすくなる（旧仕様は完全独立判断）。
     const sharedTarget = this._minionPickSharedTarget(player) ?? null;
 
-    for (const mi of this.minions) {
+    // 包囲スロット予約: ターゲット敵の周囲（melee は隣接、ranged は距離 3 のリング）を
+    // 「先着順」で 1 ミニオン 1 スロット予約する。同じマスに群がる現象を避ける。
+    const reservedSlots = new Set();
+    // ターゲットから近い順にミニオンを処理 → 近距離型がまず内側を確保し、
+    // 遠距離型は外側に自然に押し出される
+    const orderedMinions = sharedTarget
+      ? this.minions.slice().sort((a, b) => {
+          const da = Math.max(Math.abs(a.x - sharedTarget.x), Math.abs(a.y - sharedTarget.y));
+          const db = Math.max(Math.abs(b.x - sharedTarget.x), Math.abs(b.y - sharedTarget.y));
+          return da - db;
+        })
+      : this.minions.slice();
+
+    for (const mi of orderedMinions) {
       // 攻撃対象の探索（隣接 8 マス）
       let target = null;
       let bestDist = Infinity;
@@ -366,26 +379,30 @@ export class Dungeon {
       const pref = this._minionPreferredRange(mi);
       const enemy = sharedTarget;
       if (enemy) {
+        // 包囲スロット: 敵を中心とした半径 pref のリングから「未予約・自分が到達できる」
+        // 最寄りのマスを選んで自分の目標とする。これで複数ミニオンが別マスを取り、
+        // 「1 人だけ立ち止まる」/ 全員同じマスに群がる現象を回避する。
+        const slot = this._minionPickEncircleSlot(mi, enemy, pref, reservedSlots);
+        if (slot) {
+          reservedSlots.add(`${slot.x},${slot.y}`);
+          // 既にスロットに居れば待機
+          if (mi.x === slot.x && mi.y === slot.y) continue;
+          const sx = Math.sign(slot.x - mi.x);
+          const sy = Math.sign(slot.y - mi.y);
+          this._minionStepTowards(mi, sx, sy, events);
+          continue;
+        }
+        // スロットが取れなければ従来通り敵に向かう単純追従
         const dx = enemy.x - mi.x;
         const dy = enemy.y - mi.y;
         const cheb = Math.max(Math.abs(dx), Math.abs(dy));
-        // 近距離型: 隣接(1)まで詰める / 遠距離型: pref マス前後を維持
         let step;
-        if (cheb > pref) {
-          // 近づく
-          step = [Math.sign(dx), Math.sign(dy)];
-        } else if (cheb < pref - 0) {
-          // 離れる（遠距離型のみ。pref===1 では発火しない）
-          step = [-Math.sign(dx), -Math.sign(dy)];
-        } else {
-          // 理想距離 → そのまま待機
-          step = [0, 0];
-        }
+        if (cheb > pref) step = [Math.sign(dx), Math.sign(dy)];
+        else if (cheb < pref) step = [-Math.sign(dx), -Math.sign(dy)];
+        else step = [0, 0];
         if (step[0] !== 0 || step[1] !== 0) {
           this._minionStepTowards(mi, step[0], step[1], events);
-          continue;
         }
-        // 理想距離に居る: 待機して次ターンへ
         continue;
       }
 
@@ -422,6 +439,34 @@ export class Dungeon {
       if (d < bestDist) { bestDist = d; best = m; }
     }
     return best;
+  }
+
+  // 包囲スロット選定: 敵 enemy を中心としたチェビシェフ距離 ring（pref マス）の中で、
+  // 「歩ける・他敵未占有・他ミニオン未占有・他ミニオン未予約」のマスを集めて、
+  // 自分が一番早く到達できるものを返す。これで複数ミニオンが別の側面から取り囲む。
+  _minionPickEncircleSlot(mi, enemy, ring, reservedSlots) {
+    const candidates = [];
+    const ex = enemy.x, ey = enemy.y;
+    for (let dy = -ring; dy <= ring; dy++) {
+      for (let dx = -ring; dx <= ring; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue;
+        const sx = ex + dx;
+        const sy = ey + dy;
+        if (!this.canWalk(sx, sy)) continue;
+        // 敵マスは除外（pref=0 のケース防御）
+        if (sx === ex && sy === ey) continue;
+        // 他敵マスは除外
+        if (this._monsterAt(sx, sy)) continue;
+        // 既に他のミニオンが居る/予約済みマスは除外（自分が既にそこならOK）
+        if (reservedSlots.has(`${sx},${sy}`)) continue;
+        if (this.minions.some(o => o !== mi && o.x === sx && o.y === sy)) continue;
+        const d = Math.max(Math.abs(mi.x - sx), Math.abs(mi.y - sy));
+        candidates.push({ x: sx, y: sy, d });
+      }
+    }
+    if (candidates.length === 0) return null;
+    candidates.sort((a, b) => a.d - b.d);
+    return candidates[0];
   }
 
   // ミニオンの装備技から「理想距離」を決定する。
