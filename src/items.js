@@ -242,11 +242,14 @@ export function generateItemFromBarcode(barcode, rarityOverride = null, levelOve
     case 0: return _buildWeapon(barcode, rng, rarity, element, level);
     case 1: return _buildArmor(barcode, rng, rarity, element, level);
     case 2: {
-      // 薬カテゴリ内で digits[6] により HP/MP を振り分け（決定論的）
-      const isMp = (digits[6] % 2) === 1;
-      return isMp
-        ? _buildMpPotion(barcode, rng, rarity, level)
-        : _buildPotion   (barcode, rng, rarity, level);
+      // 薬カテゴリ内で digits[6] により振り分け（決定論的）
+      //   %3 === 0: 状態異常回復薬（statusCure）
+      //   %3 === 1: MP 回復薬
+      //   その他   : HP 回復薬
+      const cureBucket = digits[6] % 3;
+      if (cureBucket === 0) return buildStatusCurePotion(barcode, rarity, level);
+      if (cureBucket === 1) return _buildMpPotion(barcode, rng, rarity, level);
+      return _buildPotion(barcode, rng, rarity, level);
     }
     default: {
       // 巻物（type=scroll）は一時的にドロップ無効化。データ・コード（_buildScroll /
@@ -257,9 +260,10 @@ export function generateItemFromBarcode(barcode, rarityOverride = null, levelOve
       // 鍵バーコードを「商品ごとに固定」にするため digits[7] を分岐に使う。
       const keyBucket = digits[7] % 4;
       if (keyBucket === 0) return makeKey();
-      return ((digits[6] % 2) === 1)
-        ? _buildMpPotion(barcode, rng, rarity, level)
-        : _buildPotion(barcode, rng, rarity, level);
+      const cureBucket = digits[6] % 3;
+      if (cureBucket === 0) return buildStatusCurePotion(barcode, rarity, level);
+      if (cureBucket === 1) return _buildMpPotion(barcode, rng, rarity, level);
+      return _buildPotion(barcode, rng, rarity, level);
     }
   }
 }
@@ -361,6 +365,22 @@ function _buildMpPotion(barcode, rng, rarity, level) {
   };
 }
 
+// 状態異常回復薬。type='statusCure' で使用時に player.statuses からデバフ全消し。
+// HP/MP は回復しない。バフ（atkUp/defUp/agility 系）は失わない。
+export function buildStatusCurePotion(barcode, rarity, level) {
+  const rarityObj = (typeof rarity === 'object') ? rarity : (RARITIES.find(r => r.name === rarity) ?? RARITIES[0]);
+  const lv = Math.max(1, Math.min(100, level ?? 1));
+  return {
+    type: 'statusCure', barcode: barcode ?? 'cure_synth',
+    name: `${rarityObj.name}の浄化薬`,
+    emoji: '⚕️',
+    rarity: rarityObj.name, rarityColor: rarityObj.color, element: null, level: lv,
+    atkBonus: 0, defBonus: 0,
+    skill: { kind: 'none', name: '' },
+    desc: '使用すると毒・熱傷・睡眠など状態異常を解除する（バフは残る）',
+  };
+}
+
 function _buildScroll(barcode, rng, rarity, element, level) {
   const match = SCROLLS.find(s => s.element === element) ?? SCROLLS[Math.floor(rng() * SCROLLS.length)];
   const dmg   = Math.max(5, Math.floor(match.dmg * rarity.mult * _levelMult(level)));
@@ -394,6 +414,7 @@ export function isStackable(item) {
   if (!item) return false;
   return item.type === 'potion'
       || item.type === 'mpPotion'
+      || item.type === 'statusCure'
       || item.type === 'scroll'
       || item.type === 'material'
       || item.type === 'key';
