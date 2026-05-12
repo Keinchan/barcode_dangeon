@@ -734,6 +734,7 @@ const MENU_STAGE_TITLES = {
   materials: '素材ボックス',
   synth:     '合成・強化',
   skills:    '技・タイプ',
+  chests:    '宝箱開封',
   element:   '属性相性',
   currency:  '通貨・スキャン',
   sound:     'サウンド',
@@ -748,6 +749,7 @@ function _setMenuStage(stage) {
   // ストレージ画面に入った時は持ち物ミニ一覧を再描画
   if (stage === 'storage') _refreshInventoryMini();
   if (stage === 'skills')  _refreshSkillConfig();
+  if (stage === 'chests')  _refreshChestList();
 }
 
 // タイル → ステージ切替
@@ -859,6 +861,62 @@ function refreshMenu() {
   _refreshSkillConfig();
   // 技を学ぶ/忘れるとスロット内容が変わるのでクイックバーも再描画
   _refreshWazaBar();
+  // 宝箱開封タイルの有効/無効＋一覧
+  _refreshChestList();
+}
+
+// 宝箱一覧（メニュー stage="chests"）。持ち物・ストレージ両方の chest を集めて
+// 「開ける」アクションを 1 箇所にまとめる UI。ダンジョン中は閲覧のみ（非活性）。
+function _refreshChestList() {
+  const tile = document.getElementById('menu-tile-chests');
+  const list = document.getElementById('menu-chests-list');
+  const count= document.getElementById('menu-chests-count');
+  const help = document.getElementById('menu-chests-help');
+  const isOnMap = screen !== 'dungeon';
+  if (tile) tile.classList.toggle('menu-tile-disabled', !isOnMap);
+  if (!list) return;
+  const entries = [];
+  (player.inventory ?? []).forEach((it, i) => {
+    if (it?.type === 'chest') entries.push({ src: 'inv', idx: i, item: it });
+  });
+  (player.storage ?? []).forEach((it, i) => {
+    if (it?.type === 'chest') entries.push({ src: 'sto', idx: i, item: it });
+  });
+  if (count) count.textContent = `(${entries.length})`;
+  if (help) {
+    help.textContent = isOnMap
+      ? '地図画面なので開封できます。タップして開封してください。'
+      : 'ダンジョン内では開封できません。地図画面（ホーム）に戻ってからお試しください。';
+    help.style.color = isOnMap ? '#b9f6ca' : '#ff8a65';
+  }
+  if (entries.length === 0) {
+    list.innerHTML = '<div class="menu-empty">所持中の宝箱はありません</div>';
+    return;
+  }
+  list.innerHTML = '';
+  for (const e of entries) {
+    const row = document.createElement('div');
+    row.className = 'menu-row';
+    const rarity = e.item.rarity ?? e.item.inner?.rarity ?? 'コモン';
+    const rarityColor = e.item.rarityColor ?? RARITIES.find(r => r.name === rarity)?.color ?? '#ddd';
+    const srcLabel = e.src === 'inv' ? '🎒 持ち物' : '📦 ストレージ';
+    row.innerHTML = `
+      <button class="menu-row-main" type="button" ${isOnMap ? '' : 'disabled'}>
+        <div class="menu-row-emoji">${iconImg(e.item, 38)}</div>
+        <div class="menu-row-info">
+          <div class="menu-row-name" style="color:${rarityColor}">${e.item.name}</div>
+          <div class="menu-row-stat">${rarity} ・ ${srcLabel}</div>
+        </div>
+      </button>
+    `;
+    if (isOnMap) {
+      row.querySelector('.menu-row-main').addEventListener('click', () => {
+        playSfx('click');
+        _openChestAt(e.src, e.idx).then(() => _refreshChestList());
+      });
+    }
+    list.appendChild(row);
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -5631,6 +5689,13 @@ async function _openChestAt(src, idx) {
   const list = src === 'inv' ? player.inventory : player.storage;
   const item = list?.[idx];
   if (!item || item.type !== 'chest') return;
+  // 宝箱開封はマップ画面（screen !== 'dungeon'）でのみ可能。
+  // ダンジョン中は閲覧のみ→ストレージ/持ち物の「開ける」ボタンも
+  // ここでハードガード（タップしても showAlert で案内）。
+  if (screen === 'dungeon') {
+    showAlert('宝箱の開封は地図画面に戻ってから行ってください。\n（メニュー → 🎁 宝箱開封）');
+    return;
+  }
   const inner = item.inner;
   if (!inner) {
     showAlert('中身が空っぽの宝箱でした…');
@@ -5639,34 +5704,14 @@ async function _openChestAt(src, idx) {
     autoSave();
     return;
   }
-  // 鍵を持っているか（inventory + storage）から数える。最寄りの 1 本を消費。
-  const keyLocations = [];
-  (player.inventory ?? []).forEach((it, i) => {
-    if (it?.type === 'key') keyLocations.push({ src: 'inv', i });
-  });
-  (player.storage ?? []).forEach((it, i) => {
-    if (it?.type === 'key') keyLocations.push({ src: 'sto', i });
-  });
-  if (keyLocations.length === 0) {
-    showAlert('🗝️ 宝箱を開ける鍵を持っていません。\n敵を倒すかバーコードをスキャンすると鍵が手に入ることがあります。');
-    return;
-  }
-  // 開ける確認モーダルでも中身は明かさない（レアリティと所持鍵だけ）。
+  // 鍵廃止: 宝箱の開封に鍵は不要。中身を見るかだけ確認。
   // 中身は開封時の演出で初公開して「ガチャを引いた瞬間」感を作る。
   const chestRarity = item.rarity ?? inner.rarity ?? 'コモン';
   const ok = await showConfirm(
-    `🎁 ${chestRarity}の宝箱を 🗝️ 鍵 1 本で開けますか？\n\n` +
-    `中身は開けてからのお楽しみ。\n所持鍵: ${keyLocations.length} 本`,
+    `🎁 ${chestRarity}の宝箱を開けますか？\n\n中身は開けてからのお楽しみ。`,
     { okLabel: '開ける' },
   );
   if (!ok) return;
-
-  // 鍵 1 本を所定の場所から消費
-  const keySlot = keyLocations[0];
-  const keyArr  = keySlot.src === 'inv' ? player.inventory : player.storage;
-  const k = keyArr[keySlot.i];
-  if ((k.count ?? 1) > 1) k.count -= 1;
-  else keyArr.splice(keySlot.i, 1);
 
   // 宝箱を消費して中身を獲得
   list.splice(idx, 1);

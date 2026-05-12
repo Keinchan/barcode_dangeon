@@ -2016,7 +2016,8 @@ input, textarea {
 .menu-section.stage-element,
 .menu-section.stage-currency,
 .menu-section.stage-sound,
-.menu-section.stage-account {
+.menu-section.stage-account,
+.menu-section.stage-chests {
   display: none;
 }
 .menu-modal[data-stage="home"]      .menu-section.stage-home,
@@ -2028,7 +2029,8 @@ input, textarea {
 .menu-modal[data-stage="element"]   .menu-section.stage-element,
 .menu-modal[data-stage="currency"]  .menu-section.stage-currency,
 .menu-modal[data-stage="sound"]     .menu-section.stage-sound,
-.menu-modal[data-stage="account"]   .menu-section.stage-account {
+.menu-modal[data-stage="account"]   .menu-section.stage-account,
+.menu-modal[data-stage="chests"]    .menu-section.stage-chests {
   display: block;
 }
 /* home 以外では「閉じる」を隠して「↑ メニュー」だけ出す。
@@ -2058,6 +2060,25 @@ input, textarea {
   font-size: 12px;
   font-weight: bold;
   transition: transform .08s, background .12s;
+}
+/* 状況依存（ダンジョン中は宝箱開封不可など）でグレーアウト。
+   表示は残してタップ時は別途警告するので pointer-events は弱めず opacity だけ落とす。 */
+.menu-tile.menu-tile-disabled {
+  position: relative;
+  opacity: 0.4;
+  filter: grayscale(0.7);
+}
+.menu-tile.menu-tile-disabled::after {
+  content: '🚫';
+  position: absolute;
+  bottom: 2px;
+  right: 4px;
+  font-size: 10px;
+}
+.menu-chests-help {
+  font-size: 12px;
+  margin-bottom: 8px;
+  line-height: 1.55;
 }
 .menu-tile:active {
   transform: scale(0.96);
