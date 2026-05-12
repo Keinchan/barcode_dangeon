@@ -1062,6 +1062,81 @@ export class Dungeon {
     // ミニマップ
     const mini = document.getElementById('minimap');
     if (mini) this._renderMinimap(mini);
+
+    // 視野外にいる敵の方向インジケータ（部屋内・直線通路上だけ）
+    this._renderEnemyDirectionIndicators(canvas, ts, VIEW, half);
+  }
+
+  // ── 視野外敵の方向インジケータ ──
+  //   部屋内（プレイヤーと同じ部屋）か、直線通路（同 x or 同 y で間に壁が無い）の
+  //   敵だけを対象に、メイン canvas の縁に点で方向を示す。視野内（VIEW 内）の敵は
+  //   通常描画で見えているので除外。
+  _renderEnemyDirectionIndicators(canvas, ts, VIEW, half) {
+    const ctx = canvas.getContext('2d');
+    const W   = canvas.width;
+    const H   = canvas.height;
+    const px  = this.playerPos.x;
+    const py  = this.playerPos.y;
+    const playerRoom = this.rooms?.find(r =>
+      px >= r.x && px < r.x + r.w && py >= r.y && py < r.y + r.h
+    ) ?? null;
+    // 直線通路上か（同行/同列で間に壁が無い）。プレイヤー → 敵 方向で 1 マスずつ歩く
+    const straightLosClear = (mx, my) => {
+      if (mx !== px && my !== py) return false;
+      if (mx === px && my === py) return false;
+      let sx = 0, sy = 0;
+      if (mx === px) sy = my > py ? 1 : -1;
+      else           sx = mx > px ? 1 : -1;
+      let cx = px + sx, cy = py + sy;
+      while (cx !== mx || cy !== my) {
+        if (cx < 0 || cx >= this.grid[0].length) return false;
+        if (cy < 0 || cy >= this.grid.length) return false;
+        if (this.grid[cy][cx] === T.WALL) return false;
+        cx += sx; cy += sy;
+      }
+      return true;
+    };
+    const inSameRoom = (mx, my) => {
+      if (!playerRoom) return false;
+      return mx >= playerRoom.x && mx < playerRoom.x + playerRoom.w
+          && my >= playerRoom.y && my < playerRoom.y + playerRoom.h;
+    };
+    // canvas 中央 = プレイヤー位置。敵までのベクトルを縁にクリップしてマーカー表示。
+    const cx = W / 2;
+    const cy = H / 2;
+    const margin = 6;   // 縁からの内側余白
+    const maxR   = Math.min(W, H) / 2 - margin;
+    for (const m of this.monsters) {
+      if (m.hp <= 0) continue;
+      if (m.isShopkeeper) continue;
+      const dx = m.x - px;
+      const dy = m.y - py;
+      // 視野内に既に居れば普通の描画で見えているのでスキップ
+      if (Math.abs(dx) <= half && Math.abs(dy) <= half) continue;
+      // 部屋内 or 直線通路 だけ
+      if (!(inSameRoom(m.x, m.y) || straightLosClear(m.x, m.y))) continue;
+      // 縁の点を求める: 8 方向ベクトルを正規化して maxR 倍する
+      const norm = Math.max(Math.abs(dx), Math.abs(dy));
+      const ux = dx / norm;
+      const uy = dy / norm;
+      const ix = cx + ux * maxR;
+      const iy = cy + uy * maxR;
+      const isBoss = !!m.isBoss;
+      ctx.fillStyle = isBoss ? '#e53935' : '#ff9800';
+      ctx.shadowColor = ctx.fillStyle;
+      ctx.shadowBlur  = 6;
+      ctx.beginPath();
+      ctx.arc(ix, iy, isBoss ? 6 : 4.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      // 中心に向かう小さい三角（矢じり）も描く
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(ix - ux * 4, iy - uy * 4);
+      ctx.lineTo(ix - ux * 10, iy - uy * 10);
+      ctx.stroke();
+    }
   }
 
   // ── ミニマップ描画（既踏マスのみ、視野内は強調） ──
