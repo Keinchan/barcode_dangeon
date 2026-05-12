@@ -392,6 +392,10 @@
             <span class="menu-tile-emoji">🧰</span>
             <span class="menu-tile-label">素材ボックス</span>
           </button>
+          <button class="menu-tile" data-go="chests" id="menu-tile-chests">
+            <span class="menu-tile-emoji">🎁</span>
+            <span class="menu-tile-label">宝箱開封</span>
+          </button>
           <button class="menu-tile" data-go="synth">
             <span class="menu-tile-emoji">🛠</span>
             <span class="menu-tile-label">合成・強化</span>
@@ -470,6 +474,14 @@
         <div id="menu-materials" class="materials-grid"></div>
         <div class="menu-materials-help">合成専用の素材入れ。持ち物の枠を消費しません。<br>
           <span style="color:#ff8a65">敗北時はロストします</span>（ダンジョンから持ち帰れなかった素材は失われる）。</div>
+      </section>
+
+      <section class="menu-section stage-chests">
+        <div class="menu-section-title">🎁 宝箱開封 <span id="menu-chests-count" class="menu-section-meta"></span></div>
+        <div class="menu-chests-help" id="menu-chests-help">
+          地図画面でだけ宝箱を開封できます。ダンジョン内では一覧表示のみ（タップしても開けません）。
+        </div>
+        <div id="menu-chests-list"></div>
       </section>
 
       <section class="menu-section stage-synth">
