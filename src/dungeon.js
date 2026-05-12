@@ -310,13 +310,19 @@ export class Dungeon {
   // ミニオン AI: プレイヤーの行動後に 1 ティック動かす。
   //   1. 隣接 8 マスに敵がいたら最寄り 1 体を攻撃（whiff なし、固定で当たる）
   //      ダメージは ATK と DEF に加え属性相性（elementMatchup）を適用する。
-  //   2. なければプレイヤーに 1 マス近づく。プレイヤーマスへ進む際は「位置交換」、
-  //      他ミニオン・敵で詰まれば待機。
+  //   2. 攻撃できなければ、装備技に応じた「理想距離」を維持しつつターゲット敵を追う:
+  //      - 近距離技のみ → 隣接まで踏み込む（プレイヤーを越えてでも進む）
+  //      - 遠距離技あり → プレイヤーが狙っている / 最寄りの敵から 3 マス前後を保つ
+  //   3. 敵が射程内に居ない時はプレイヤー近くで待機する（旧挙動）。
   // 戻り値: events = [{ type:'minion-attack', minion, mob, dmg, killed, matchup }]
   tickMinions(player) {
     const events = [];
     if (!Array.isArray(this.minions) || this.minions.length === 0) return { events };
     if (getDebugState().disableEnemyAI) return { events };
+
+    // 共有のターゲット敵 = プレイヤーから最も近い、視認できる/同部屋の敵。
+    // 複数ミニオンが同じ目標を集中攻撃して撃破しやすくなる（旧仕様は完全独立判断）。
+    const sharedTarget = this._minionPickSharedTarget(player) ?? null;
 
     for (const mi of this.minions) {
       // 攻撃対象の探索（隣接 8 マス）
@@ -356,44 +362,115 @@ export class Dungeon {
         continue;
       }
 
-      // プレイヤーに近づく（既に隣接していたら待機）
+      // 攻撃できなかった: ターゲット敵に向けて位置調整する。
+      const pref = this._minionPreferredRange(mi);
+      const enemy = sharedTarget;
+      if (enemy) {
+        const dx = enemy.x - mi.x;
+        const dy = enemy.y - mi.y;
+        const cheb = Math.max(Math.abs(dx), Math.abs(dy));
+        // 近距離型: 隣接(1)まで詰める / 遠距離型: pref マス前後を維持
+        let step;
+        if (cheb > pref) {
+          // 近づく
+          step = [Math.sign(dx), Math.sign(dy)];
+        } else if (cheb < pref - 0) {
+          // 離れる（遠距離型のみ。pref===1 では発火しない）
+          step = [-Math.sign(dx), -Math.sign(dy)];
+        } else {
+          // 理想距離 → そのまま待機
+          step = [0, 0];
+        }
+        if (step[0] !== 0 || step[1] !== 0) {
+          this._minionStepTowards(mi, step[0], step[1], events);
+          continue;
+        }
+        // 理想距離に居る: 待機して次ターンへ
+        continue;
+      }
+
+      // ターゲット敵不在 → プレイヤーに近づく（既に隣接していたら待機）
       const px = this.playerPos.x;
       const py = this.playerPos.y;
       const adx = Math.abs(mi.x - px);
       const ady = Math.abs(mi.y - py);
       if (adx <= 1 && ady <= 1) continue;
-      const sx = Math.sign(px - mi.x);
-      const sy = Math.sign(py - mi.y);
-      // tryStep: プレイヤーマスは「位置交換」で許可。他ミニオン・敵は不許可
-      const tryStep = (dx, dy) => {
-        if (dx === 0 && dy === 0) return false;
-        const tx = mi.x + dx;
-        const ty = mi.y + dy;
-        if (!this.canWalk(tx, ty)) return false;
-        if (this._monsterAt(tx, ty)) return false;
-        if (this.minions.some(o => o !== mi && o.x === tx && o.y === ty)) return false;
-        return true;
-      };
-      const swapWithPlayer = (dx, dy) => {
-        const oldX = mi.x, oldY = mi.y;
-        mi.x = px; mi.y = py;
-        this.playerPos.x = oldX; this.playerPos.y = oldY;
-        events.push({ type: 'swap', minion: mi });
-      };
-      const trySwap = (dx, dy) => {
-        const tx = mi.x + dx;
-        const ty = mi.y + dy;
-        return tx === px && ty === py;
-      };
-      if      (trySwap(sx, sy)) swapWithPlayer(sx, sy);
-      else if (trySwap(sx, 0))  swapWithPlayer(sx, 0);
-      else if (trySwap(0, sy))  swapWithPlayer(0, sy);
-      else if (tryStep(sx, sy)) { mi.x += sx; mi.y += sy; }
-      else if (tryStep(sx, 0))  { mi.x += sx; }
-      else if (tryStep(0, sy))  { mi.y += sy; }
-      // どこにも進めなければ待機
+      this._minionStepTowards(mi, Math.sign(px - mi.x), Math.sign(py - mi.y), events);
     }
     return { events };
+  }
+
+  // ミニオン用「現在攻撃する目標敵」を選ぶ。プレイヤーから視認できる
+  // （= this.visible に含まれる）or 同じ部屋内に居る最寄りの敵を返す。
+  _minionPickSharedTarget(player) {
+    const px = this.playerPos.x;
+    const py = this.playerPos.y;
+    const playerRoom = this.rooms?.find(r =>
+      px >= r.x && px < r.x + r.w && py >= r.y && py < r.y + r.h
+    ) ?? null;
+    let best = null;
+    let bestDist = Infinity;
+    for (const m of this.monsters) {
+      if (m.hp <= 0) continue;
+      if (m.isShopkeeper) continue;
+      const inRoom = playerRoom
+        && m.x >= playerRoom.x && m.x < playerRoom.x + playerRoom.w
+        && m.y >= playerRoom.y && m.y < playerRoom.y + playerRoom.h;
+      const inSight = this.visible?.has(`${m.x},${m.y}`);
+      if (!inRoom && !inSight) continue;
+      const d = Math.max(Math.abs(m.x - px), Math.abs(m.y - py));
+      if (d < bestDist) { bestDist = d; best = m; }
+    }
+    return best;
+  }
+
+  // ミニオンの装備技から「理想距離」を決定する。
+  //   遠距離パターン（LINE5 以上）が 1 つでも入っていれば 3 を返す。
+  //   それ以外（近距離型）は 1 を返す = 隣接まで詰める。
+  _minionPreferredRange(mi) {
+    const RANGED_PATTERNS = new Set([
+      'LINE5', 'LINE_INF', 'PIERCE', 'RANGED',
+      'ROOM', 'ROOM_ALL', 'FLOOR', 'FLOOR_ALL',
+      'TERRAIN_3X3', 'TERRAIN_5X5', 'AROUND_TARGET',
+    ]);
+    const slots = Array.isArray(mi.skillSlots) ? mi.skillSlots : [];
+    for (const s of slots) {
+      if (s && RANGED_PATTERNS.has(s.pattern)) return 3;
+    }
+    return 1;
+  }
+
+  // ミニオンを 1 マス進める。プレイヤーマスは位置交換、他ミニオン/敵は不許可、
+  // 斜めが詰まれば軸別フォールバック。events に swap を push する場合あり。
+  _minionStepTowards(mi, sx, sy, events) {
+    const px = this.playerPos.x;
+    const py = this.playerPos.y;
+    const tryStep = (dx, dy) => {
+      if (dx === 0 && dy === 0) return false;
+      const tx = mi.x + dx;
+      const ty = mi.y + dy;
+      if (!this.canWalk(tx, ty)) return false;
+      if (this._monsterAt(tx, ty)) return false;
+      if (this.minions.some(o => o !== mi && o.x === tx && o.y === ty)) return false;
+      return true;
+    };
+    const trySwap = (dx, dy) => {
+      const tx = mi.x + dx;
+      const ty = mi.y + dy;
+      return tx === px && ty === py;
+    };
+    const swapWithPlayer = () => {
+      const oldX = mi.x, oldY = mi.y;
+      mi.x = px; mi.y = py;
+      this.playerPos.x = oldX; this.playerPos.y = oldY;
+      events.push({ type: 'swap', minion: mi });
+    };
+    if      (trySwap(sx, sy)) swapWithPlayer();
+    else if (trySwap(sx, 0))  swapWithPlayer();
+    else if (trySwap(0, sy))  swapWithPlayer();
+    else if (tryStep(sx, sy)) { mi.x += sx; mi.y += sy; }
+    else if (tryStep(sx, 0))  { mi.x += sx; }
+    else if (tryStep(0, sy))  { mi.y += sy; }
   }
 
   canWalk(x, y) {
