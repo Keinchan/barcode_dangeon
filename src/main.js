@@ -4506,6 +4506,17 @@ function _tickPlayerStatuses() {
   const tick = tickStatuses(player);
   if (tick.dotDamage > 0) {
     player.hp = Math.max(0, player.hp - tick.dotDamage);
+    // ダメージ数を頭上にフロート + プレイヤーアンカーを赤フラッシュ:
+    // 状態異常で削れる時の体感を「攻撃を受けた」と同じレベルに引き上げる。
+    const anchor = playerVfxAnchor();
+    if (anchor) {
+      showDamageAt(anchor, tick.dotDamage, { kind: 'normal' });
+      // dominant status の色でフラッシュ（毒なら紫、熱傷ならオレンジ）
+      const dom = dominantStatus(player);
+      const col = dom ? (STATUS_DEFS[dom.kind]?.color ?? '#ff5252') : '#ff5252';
+      hitFlash({ color: _alphaize(col, 0.30) });
+    }
+    playSfx('damage');
     dungeonLog(`💥 状態異常で ${tick.dotDamage} ダメージ`);
     refreshHUD();
   }
@@ -4515,6 +4526,21 @@ function _tickPlayerStatuses() {
   }
   _refreshStatusOverlay();
   return player.hp <= 0 ? 'dead' : 'alive';
+}
+
+// 入力が状態異常でブロックされた時の被ダメ風演出（ダメージは発生しない）。
+// sleep/shock など「動けなかった」体感を視覚的にフィードバックする。
+function _flashStatusBlock(reason) {
+  const anchor = playerVfxAnchor();
+  if (!anchor) return;
+  const def = STATUS_DEFS[reason];
+  const col = def?.color ?? '#fff176';
+  hitFlash({ color: _alphaize(col, 0.25) });
+  // 「動けなかった！」浮き文字の代用として MISS を出す（ダメージ 0 では無いことを示す）
+  if (typeof showMissAt === 'function') {
+    showMissAt({ left: anchor.left + 18, top: anchor.top + 8, width: 0, height: 0 });
+  }
+  playSfx('hit');
 }
 
 // 入力された移動方向を状態異常で改変する。confuse でランダム化、
@@ -4807,10 +4833,13 @@ function move(dx, dy) {
     const t = _transformInputForStatuses(dx, dy);
     if (t.replacedReason === 'sleep') {
       dungeonLog('😴 睡眠中で動けない！');
+      _flashStatusBlock('sleep');
     } else if (t.replacedReason === 'shock') {
       dungeonLog('⚡ 感電して行動できなかった！');
+      _flashStatusBlock('shock');
     } else if (t.replacedReason === 'confuse') {
       dungeonLog(`😵 錯乱で別方向（${t.dx},${t.dy}）に動いた！`);
+      _flashStatusBlock('confuse');
     }
     dx = t.dx; dy = t.dy;
   }
