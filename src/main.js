@@ -2762,7 +2762,9 @@ async function _executeSkill(skill) {
     autoSave();
     return;
   }
-  _runEnemyTurn();
+  // 技演出が一通り終わるまで（hits の preDelay + 個別アニメ）待ってから敵ターン。
+  // 演出と敵反撃が重なって見えづらかったので、戦闘速度に応じたディレイを入れる。
+  setTimeout(() => _runEnemyTurn(), Math.max(360, combatStepMs()));
   autoSave();
 }
 
@@ -5696,8 +5698,11 @@ function _bumpMeleeAttack(mob) {
     _pvpSendBossDamage(mob.hp, dmg);
     return;
   }
-  // 1 呼吸の間（演出が見える時間を確保）→ 敵ターン
-  setTimeout(() => _runEnemyTurn(), 220);
+  // 1 呼吸の間（演出が見える時間を確保）→ 敵ターン。
+  // 旧仕様は固定 220ms で「自分の攻撃ヒット → 即敵反撃」感が強かった。
+  // 戦闘速度設定（低速 720ms / 高速 280ms）に合わせ、少なくともそのステップ分は
+  // 必ず待ってから敵ターンへ入る。
+  setTimeout(() => _runEnemyTurn(), Math.max(280, combatStepMs()));
 }
 
 // 壁角越しの斜めバンプ → 弱体魔法（無 MP）。プレイヤーは移動しない
