@@ -5679,6 +5679,21 @@ function _handleMonsterDefeated(mob) {
     dungeon.removeMonster(mob);
     return;
   }
+  // 低速モード: 致命攻撃のとき「演出 → 敵アイコン消滅 + アイテム落下」
+  // の順番にしたいので、ここから先のドロップ/退場処理を deathBurst の
+  // アニメーション時間（約 700ms）だけ遅延して実行する。
+  // dying フラグで render 側に「hp=0 でも描画継続」を伝える。
+  // 高速モード時はそのまま即時実行する（既存挙動と差を出さない）。
+  if (shouldShowTelegraph()) {
+    mob.dying = true;
+    setTimeout(() => _resolveMonsterDeathTail(mob), 700);
+    return;
+  }
+  _resolveMonsterDeathTail(mob);
+}
+
+function _resolveMonsterDeathTail(mob) {
+  if (!mob) return;
   _maybeRecruitMinion(mob);
   dungeon.removeMonster(mob);
 
@@ -5741,6 +5756,12 @@ function _handleMonsterDefeated(mob) {
       (dungeon.monsters ?? []).filter(m => m.hp > 0 && !m.isShopkeeper).length === 0) {
     dungeonClear();
   }
+  // 低速モードで遅延実行された場合、呼び出し元の rAF render はもう走り終わっているので
+  // 削除後の最新状態をここで再描画する。
+  if (dungeon) {
+    try { dungeon.render(document.getElementById('dungeon-canvas')); } catch {}
+  }
+  refreshHUD();
 }
 
 // 敵マス座標 → スクリーンアンカー（VFX 用）
