@@ -2369,6 +2369,59 @@ input, textarea {
   color: #fff;
 }
 
+/* ──────────────────────────────────────────────
+   Z-INDEX LAYER REFERENCE（一元管理）
+   30   status-overlay（HUD色着色）
+   100  .modal 既定（背景レイヤ用途）
+   1000 screen
+   3500 vfx-hitflash
+   3700 weakness-banner / vfx-ring
+   4000 damage-float
+   4400 vfx-telegraph
+   4450 vfx-skill-badge
+   4500 vfx-explosion/shockwave/circle/wrap, pre-dungeon-modal
+   4800 (predeclared)
+   5000 shop-modal
+   5500 menu-modal
+   5800 ↑ メニュー上に重ねるトップレベルモーダル（waza-modal 等）
+   6000 chest-result-modal, confirm-modal
+   6500 ↑ menu より上の説明系/詳細系（status-info, log-history, range-preview, item-detail）
+   7000 dialog-modal（alert/confirm 最上層）
+   9999 dpad/waza-bar HUD, debug-panel
+   ────────────────────────────────────────────── */
+
+/* メニュー(z 5500) 上から開かれるトップレベルモーダル群。
+   `.modal`(既定 z 100) のままだとメニュー背後に潜って描画されない。 */
+#status-info-modal,
+#log-history-modal,
+#range-preview-modal,
+#item-detail-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 6500;
+  background: rgba(0,0,0,0.78);
+  align-items: center;
+  padding: 16px;
+}
+#status-info-modal .modal-box,
+#log-history-modal .modal-box,
+#range-preview-modal .modal-box,
+#item-detail-modal .modal-box {
+  border-radius: 16px;
+}
+
+/* 戦闘中に画面下から出る技選択。HUD（z 9999）よりは下、ダイアログ系よりは下。
+   ただし `.modal` 既定 z 100 だと VFX(4400-4500) に隠れるので 5800 を明示。 */
+#waza-modal {
+  z-index: 5800;
+}
+
+/* 地図上のショップ。menu(5500) より下で良いが、`.modal` 既定では HUD と
+   重なる場合に視認性が落ちるので明示。 */
+#shop-modal {
+  z-index: 5000;
+}
+
 /* ── アプリ内 alert/confirm ダイアログ ── */
 .dialog-modal {
   position: fixed;
