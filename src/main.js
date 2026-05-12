@@ -1264,18 +1264,29 @@ function _openSkillPicker(ctx) {
       const color = SKILL_ELEMENT_COLOR[sk.element] ?? '#c5c5d4';
       return `<div class="skill-pick-row${locked ? ' locked' : ''}" data-idx="${i}">
         <span class="sp-emoji">${emoji}</span>
-        <div>
+        <div class="sp-text">
           <div class="sp-name" style="color:${color}">${sk.name}</div>
           <div class="sp-meta">${sk.element} / ${sk.pattern}型 / 威力×${sk.dmgMult} / MP-${sk.mpCost} / ${sk.rarity}</div>
         </div>
+        <span class="sp-info" role="button" aria-label="技の詳細" title="詳細を見る">?</span>
         ${locked ? `<span class="sp-lock">🔒 Lv${lvReq}</span>` : ''}
       </div>`;
     }).join('');
-    list.querySelectorAll('.skill-pick-row:not(.locked)').forEach(row => {
+    list.querySelectorAll('.skill-pick-row').forEach(row => {
+      const i = parseInt(row.dataset.idx, 10);
+      const sk = pool[i];
+      if (!sk) return;
+      // ? 詳細ボタン: 行クリック（割り当て）への伝播を止めて詳細だけ開く
+      const info = row.querySelector('.sp-info');
+      if (info) {
+        info.addEventListener('click', (e) => {
+          e.stopPropagation();
+          playSfx('click');
+          _showSkillRangePreview(sk);
+        });
+      }
+      if (row.classList.contains('locked')) return;
       row.addEventListener('click', () => {
-        const i = parseInt(row.dataset.idx, 10);
-        const sk = pool[i];
-        if (!sk) return;
         _assignSkillToSlot(_skillPickContext, sk);
         modal.classList.add('hidden');
       });
@@ -3007,12 +3018,31 @@ function _showSkillRangePreview(skill) {
   if (!titleEl || !bodyEl) return;
   titleEl.textContent = `${skill.name} の効果範囲`;
 
-  // ヘッダ情報（属性 / コスト / 説明）
+  // ヘッダ情報（属性 / コスト / 説明 / 付与効果）
+  // 状態異常を付与する技は何がどれくらい掛かるかを明示。
+  // SELF 系の自己バフも同様に「何ターン何が乗るか」を表示。
+  const rarityCol = RARITIES.find(rr => rr.name === skill.rarity)?.color ?? '#ddd';
+  const extras = [];
+  if (skill.status?.kind && STATUS_DEFS[skill.status.kind]) {
+    const def = STATUS_DEFS[skill.status.kind];
+    extras.push(`<div class="rp-extra" style="--rp-color:${def.color}"><span class="rp-extra-emoji">${def.emoji}</span>命中時 <b>${def.label}</b> を ${skill.status.turns ?? 3}T 付与</div>`);
+  }
+  if (skill.selfBuff?.kind && STATUS_DEFS[skill.selfBuff.kind]) {
+    const def = STATUS_DEFS[skill.selfBuff.kind];
+    extras.push(`<div class="rp-extra" style="--rp-color:${def.color}"><span class="rp-extra-emoji">${def.emoji}</span>自分に <b>${def.label}</b> を ${skill.selfBuff.turns ?? 3}T 付与</div>`);
+  }
+  if (skill.knockback) extras.push(`<div class="rp-extra"><span class="rp-extra-emoji">💨</span>命中時 ${skill.knockback}マス ノックバック</div>`);
+  if (skill.support)   extras.push(`<div class="rp-extra"><span class="rp-extra-emoji">🛡️</span>ダメージ無し（支援技）</div>`);
+  const lvReq = (skill.learnedAt ?? 1);
   const infoHtml = `
     <div class="range-preview-info" style="--rp-color:${color}">
       <div class="rp-name" style="color:${color}">${SKILL_ELEMENT_EMOJI[skill.element] ?? '✨'} ${skill.name}</div>
-      <div class="rp-meta">${skill.element}属性 / ${PATTERN_DESC[rangeId] ?? r.label} / 威力×${skill.dmgMult ?? 1} / MP-${skill.mpCost ?? 0}</div>
+      <div class="rp-meta">
+        ${skill.element}属性 ・ <span style="color:${rarityCol}">${skill.rarity ?? '?'}</span> ・ Lv${lvReq} 解放
+      </div>
+      <div class="rp-meta">${PATTERN_DESC[rangeId] ?? r.label} / 威力×${skill.dmgMult ?? 0} / MP-${skill.mpCost ?? 0}</div>
       <div class="rp-desc">${skill.desc ?? ''}</div>
+      ${extras.length ? `<div class="rp-extras">${extras.join('')}</div>` : ''}
     </div>
   `;
 
@@ -3125,12 +3155,19 @@ function _refreshWazaBar() {
       btn.removeEventListener('click', btn._wazaHandler);
       btn._wazaHandler = null;
     }
-    // 旧仕様の長押し / 右クリックハンドラが残っていれば剥がす
+    // 長押し（pointer 系）ハンドラが残っていれば剥がす。
+    // 旧仕様の touchstart/touchend/touchmove/contextmenu キーも互換のため落とす。
     if (btn._wazaLongHandler) {
-      btn.removeEventListener('contextmenu', btn._wazaLongHandler.context);
-      btn.removeEventListener('touchstart',  btn._wazaLongHandler.touchstart, { passive: true });
-      btn.removeEventListener('touchend',    btn._wazaLongHandler.touchend);
-      btn.removeEventListener('touchmove',   btn._wazaLongHandler.touchmove);
+      const h = btn._wazaLongHandler;
+      btn.removeEventListener('pointerdown',   h.pointerdown);
+      btn.removeEventListener('pointerup',     h.pointerup);
+      btn.removeEventListener('pointerleave',  h.pointerleave);
+      btn.removeEventListener('pointercancel', h.pointercancel);
+      // 旧キー（互換用）
+      if (h.context)    btn.removeEventListener('contextmenu', h.context);
+      if (h.touchstart) btn.removeEventListener('touchstart',  h.touchstart, { passive: true });
+      if (h.touchend)   btn.removeEventListener('touchend',    h.touchend);
+      if (h.touchmove)  btn.removeEventListener('touchmove',   h.touchmove);
       btn._wazaLongHandler = null;
     }
 
@@ -3215,6 +3252,48 @@ function _refreshWazaBar() {
       // pointerdown は無視させる必要は無いが、念のため stop しておく。
       infoEl.addEventListener('pointerdown', (e) => { e.stopPropagation(); });
     }
+
+    // 技ボタン長押し（500ms）で技詳細プレビューを開く。
+    // - touch / mouse / pen 全部に対応するため pointer 系で実装
+    // - 長押し成立時に詳細を開き、click 発火を抑止するフラグを立てる
+    // - フラグは filledHandler 内で参照して通常タップ発動を中断
+    let pressTimer  = null;
+    let longTriggered = false;
+    const LONG_MS = 500;
+    const onPressStart = (e) => {
+      if (pressTimer) clearTimeout(pressTimer);
+      longTriggered = false;
+      pressTimer = setTimeout(() => {
+        longTriggered = true;
+        pressTimer = null;
+        try { if (navigator.vibrate) navigator.vibrate(18); } catch {}
+        playSfx('click');
+        _showSkillRangePreview(sk);
+      }, LONG_MS);
+    };
+    const onPressEnd = () => {
+      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+    };
+    const onPressCancel = () => {
+      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+      // 長押し成立後の touch/pointer-end は通常 click も飛んでくるので、
+      // 直後の click を 1 回だけ吸収する。
+      if (longTriggered) {
+        const swallow = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+        btn.addEventListener('click', swallow, { capture: true, once: true });
+        longTriggered = false;
+      }
+    };
+    btn.addEventListener('pointerdown',   onPressStart);
+    btn.addEventListener('pointerup',     onPressCancel);
+    btn.addEventListener('pointerleave',  onPressEnd);
+    btn.addEventListener('pointercancel', onPressEnd);
+    btn._wazaLongHandler = {
+      pointerdown:   onPressStart,
+      pointerup:     onPressCancel,
+      pointerleave:  onPressEnd,
+      pointercancel: onPressEnd,
+    };
   }
 }
 
