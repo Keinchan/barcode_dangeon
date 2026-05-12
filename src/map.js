@@ -145,6 +145,22 @@ function _refreshEncounters(lat, lng) {
     const dist = distanceMeters(lat, lng, e.lat, e.lng);
     if (dist > ENTER_RADIUS) continue;       // 80m 以内に来た瞬間に出現
     _addEncounterPin(e);
+    // 新規スポーン時のハプティクスフィードバック。
+    // 種類で長さを変えて何が出たか体感で分かるようにする:
+    //   monster (通常敵) ……… 短く 1 回
+    //   strong  (強敵)    ……… ザザッと長め
+    //   chest   (宝箱)    ……… 弾むパターン
+    //   merchant          ……… バイブ無し（取引相手に驚かされたくない）
+    try {
+      if (navigator.vibrate) {
+        const pattern = ({
+          monster:  [40],
+          strong:   [80, 40, 80],
+          chest:    [25, 50, 25, 50, 80],
+        })[e.kind];
+        if (pattern) navigator.vibrate(pattern);
+      }
+    } catch {}
   }
   for (const [seed, entry] of renderedEncounters) {
     const dist = distanceMeters(lat, lng, entry.encounter.lat, entry.encounter.lng);
