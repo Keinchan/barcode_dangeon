@@ -128,10 +128,10 @@ import {
 //   isStackable(item) が true の場合、同じ stackKey のスタックに合算する。
 //   非スタックは個体差があるので必ず別スロット。
 //   capacity 指定時は新規スタック作成のみ枠を消費する（既存スタックへの加算は枠外）。
-// 回復薬（potion / mpPotion）は別ボックス（player.consumables / 容量無制限）。
+// 回復薬（potion / mpPotion / statusCure）は別ボックス（player.consumables / 容量無制限）。
 // 「持ち物8枠」を圧迫しないので、判定とプッシュ先を分岐させる。
 function _isConsumableType(item) {
-  return item?.type === 'potion' || item?.type === 'mpPotion';
+  return item?.type === 'potion' || item?.type === 'mpPotion' || item?.type === 'statusCure';
 }
 // インベントリに追加できるか事前判定。
 //   - 回復薬: 容量無制限なので常に true
@@ -1010,7 +1010,8 @@ function _renderConsumableRow(item, idx) {
   // 使用は screen === 'dungeon' のみ。ダンジョン外でも表示はするが行動は不可にする
   // （_usePotionFromInventory が dungeonLog を出すので screen 不問でも安全に動くが、
   // UX 上は満タン警告のみを場外で出す挙動になる）。
-  const isUsable = (item.type === 'potion' || item.type === 'mpPotion') && screen === 'dungeon';
+  const isUsable = (item.type === 'potion' || item.type === 'mpPotion' || item.type === 'statusCure')
+                   && screen === 'dungeon';
   const action = isUsable ? 'use' : 'none';
   div.innerHTML = `
     <button class="menu-row-main" data-action="${action}" ${isUsable ? '' : 'disabled'}>
@@ -1032,6 +1033,10 @@ function _renderConsumableRow(item, idx) {
       }
       if (item.type === 'mpPotion' && (player.mp ?? 0) >= (player.maxMp ?? 0)) {
         showAlert('MPが満タンです'); return;
+      }
+      if (item.type === 'statusCure'
+          && (!Array.isArray(player.statuses) || !player.statuses.some(s => !STATUS_DEFS[s.kind]?.isBuff))) {
+        showAlert('解除すべき状態異常がありません'); return;
       }
       showActionConfirm(`${item.name} を使いますか？`, item, '使う', () => {
         _usePotionFromInventory(idx, 'cons');
@@ -1515,7 +1520,7 @@ function _refreshStorageUI() {
   if (_storageCat !== 'all') {
     // 'potion' タブには HP / MP の両方を、'scroll' タブには通常巻物 + 不思議系 + 技の書も含める
     arr = arr.filter(x => x.it.type === _storageCat
-      || (_storageCat === 'potion' && x.it.type === 'mpPotion')
+      || (_storageCat === 'potion' && (x.it.type === 'mpPotion' || x.it.type === 'statusCure'))
       || (_storageCat === 'scroll' && (x.it.type === 'mysteryScroll' || x.it.type === 'skillBook')));
   }
   arr = _sortStorageRows(arr, _storageSort);
@@ -1757,6 +1762,7 @@ function _statLine(item) {
   if (item.type === 'armor')  return `DEF +${item.defBonus}（${item.element}属性）`;
   if (item.type === 'potion')        return `HP +${item.heal} 回復`;
   if (item.type === 'mpPotion')      return `MP +${item.mpHeal} 回復`;
+  if (item.type === 'statusCure')    return `状態異常解除（バフは残す）`;
   if (item.type === 'mysteryScroll') return item.desc;
   if (item.type === 'skillBook')     return `📕 ${item.skillName} を習得`;
   if (item.type === 'legendaryTome') return item.desc;
@@ -1905,7 +1911,7 @@ function _renderInventoryRow(item, idx) {
     ? `<div class="menu-row-skill">✨ ${item.skill.name}</div>` : '';
   const isEquippable = item.type === 'weapon' || item.type === 'armor';
   const isUsableHere =
-    (item.type === 'potion' || item.type === 'mpPotion'
+    (item.type === 'potion' || item.type === 'mpPotion' || item.type === 'statusCure'
       || item.type === 'mysteryScroll' || item.type === 'scroll')
     && screen === 'dungeon';
   const isLearnable = item.type === 'skillBook';   // 場所問わず学べる
@@ -1953,12 +1959,16 @@ function _renderInventoryRow(item, idx) {
           _equipFromInventory(idx);
         });
       } else if (action === 'use') {
-        // 薬は HP/MP 満タン時にアラート（消費を防ぐ）。MP 薬は MP 側で判定
+        // 薬は HP/MP 満タン時にアラート（消費を防ぐ）。statusCure は罹患無しの時にアラート
         if (item.type === 'potion' && player.hp >= player.maxHp) {
           showAlert('HPが満タンです'); return;
         }
         if (item.type === 'mpPotion' && (player.mp ?? 0) >= (player.maxMp ?? 0)) {
           showAlert('MPが満タンです'); return;
+        }
+        if (item.type === 'statusCure'
+            && (!Array.isArray(player.statuses) || !player.statuses.some(s => !STATUS_DEFS[s.kind]?.isBuff))) {
+          showAlert('解除すべき状態異常がありません'); return;
         }
         showActionConfirm(`${item.name} を使いますか？`, item, '使う', () => {
           _usePotionFromInventory(idx);
@@ -3836,6 +3846,7 @@ function _usePotionFromInventory(idx, source = 'cons') {
   const list = source === 'inv' ? player.inventory : (player.consumables ?? []);
   const item = list[idx];
   if (!item) return;
+  let used = false;
   if (item.type === 'potion') {
     if (player.hp >= player.maxHp) { showAlert('HPが満タンです'); return; }
     // 「少しでも欠けていれば上限解放」: 欠けている時に飲むなら回復量フルで加算し、
@@ -3851,6 +3862,7 @@ function _usePotionFromInventory(idx, source = 'cons') {
                  overcap ? { rarity: 'レア' } : {});
     }
     playSfx('drink');
+    used = true;
   } else if (item.type === 'mpPotion') {
     if ((player.mp ?? 0) >= (player.maxMp ?? 0)) { showAlert('MPが満タンです'); return; }
     const before = player.mp ?? 0;
@@ -3863,12 +3875,35 @@ function _usePotionFromInventory(idx, source = 'cons') {
                  overcap ? { rarity: 'レア' } : {});
     }
     playSfx('drink');
+    used = true;
+  } else if (item.type === 'statusCure') {
+    // 状態異常回復薬: デバフ系（isBuff !== true）の status を全消去。
+    // バフは残してプレイヤーの自衛行動に支障を出さない。
+    const before = Array.isArray(player.statuses) ? player.statuses.length : 0;
+    if (before === 0 || !player.statuses?.some(s => !STATUS_DEFS[s.kind]?.isBuff)) {
+      showAlert('解除すべき状態異常がありません');
+      return;
+    }
+    player.statuses = player.statuses.filter(s => STATUS_DEFS[s.kind]?.isBuff);
+    if (source === 'inv') takeOneFromInventory(idx); else takeOneFromConsumables(idx);
+    if (typeof dungeonLog === 'function' && screen === 'dungeon') {
+      dungeonLog(`⚕️ ${item.name} を使用！ 状態異常を解除した`, { rarity: 'レア' });
+    }
+    _refreshStatusOverlay();
+    _refreshBuffChips?.();
+    playSfx('drink');
+    used = true;
   } else {
     return;
   }
   refreshHUD();
   refreshMenu();
   autoSave();
+  // 回復薬使用は 1 ターン消費する仕様（HP/MP/statusCure 共通）。
+  // ダンジョン内・PvP 以外でだけ敵ターンを回す（地図画面での飲み薬は通常通り）。
+  if (used && screen === 'dungeon' && dungeon && !dungeonData?.isPvpArena) {
+    setTimeout(() => _runEnemyTurn(), 120);
+  }
 }
 
 function _equipFromInventory(idx) {
