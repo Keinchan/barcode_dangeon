@@ -2768,7 +2768,27 @@ async function _confirmBigSkillTarget(skill, rangeId, r) {
 }
 
 // 技を発動（ダンジョン探索中。向きに合わせてパターンを回転して発射）
+//
+// 連打防止:
+//   ① _skillExecuting フラグで「同じ技関数が既に走っている時」を弾く。
+//      _confirmBigSkillTarget で await している間にもう一発タップされても無視する。
+//   ② _turnBusy フラグで「敵 / ミニオンのアニメーション中」も技を弾く。
+//      move() と対称な挙動。これが無いと敵ターン中に技を連打して並列実行できた。
+//   どちらの早期 return パス（MP 不足・適性外など）でもフラグを必ず解放するため
+//   try/finally で全体を包む。
+let _skillExecuting = false;
 async function _executeSkill(skill) {
+  if (_skillExecuting) return;
+  if (_turnBusy)       return;
+  _skillExecuting = true;
+  try {
+    return await _executeSkillImpl(skill);
+  } finally {
+    _skillExecuting = false;
+  }
+}
+
+async function _executeSkillImpl(skill) {
   if (!dungeon || screen !== 'dungeon') {
     showAlert('技はダンジョン探索中にだけ使えます');
     return;
