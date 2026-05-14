@@ -3509,6 +3509,27 @@ input, textarea {
   box-shadow: 0 0 14px #b388ff, 0 4px 10px rgba(0,0,0,0.55);
   animation: bolderothPulse 2.4s ease-in-out infinite;
 }
+/* ─── 敵 / ミニオンのターン進行中はプレイヤーの行動ボタンを物理的に無効化 ───
+   _setTurnBusy(true) で body に付くクラス。技スロット 4 個と D-pad 9 個を
+   pointer-events: none で完全にタップ不可にしつつ、視覚的にも grayscale + 半透明
+   でロック状態を明示する。これにより async の隙間で DOM クリック event が積まれて
+   も発火しないので、技ボタン連打 → 敵ターン多重起動 という不具合が物理的に防げる。 */
+body.is-turn-busy .waza-slot,
+body.is-turn-busy .dpad-btn {
+  pointer-events: none;
+  filter: grayscale(0.6);
+  opacity: 0.55;
+  cursor: not-allowed;
+  /* タップ時の active flash も抑制（誤発火の見た目を残さない） */
+  transition: none;
+}
+/* 空スロットや既に disabled なボタンは更に深く沈ませる */
+body.is-turn-busy .waza-slot.empty,
+body.is-turn-busy .waza-slot[disabled],
+body.is-turn-busy .dpad-btn[disabled] {
+  opacity: 0.30;
+}
+
 /* ─── クエスト進捗のミニマップ風常駐パネル ───
    body 直下のフローティングカード。マップ／ダンジョン／スキャン／リザルト画面に
    右上で常駐し、別画面遷移なしに進捗を確認できる。
