@@ -3509,42 +3509,69 @@ input, textarea {
   box-shadow: 0 0 14px #b388ff, 0 4px 10px rgba(0,0,0,0.55);
   animation: bolderothPulse 2.4s ease-in-out infinite;
 }
-/* ─── クエスト進捗のフローティングチップ（全画面共通） ───
-   body 直下に常駐する小さなパネル。マップ／ダンジョン／スキャン／リザルト画面で
-   右上に出現し、進捗状況を一目で把握できる。
-   最小化モード（.minimized）ではアイコン 1 個だけになり、邪魔にならない。
-   z-index は modal 群（>=5000）より下、HUD より上の 4500 に設定。 */
+/* ─── クエスト進捗のミニマップ風常駐パネル ───
+   body 直下のフローティングカード。マップ／ダンジョン／スキャン／リザルト画面に
+   右上で常駐し、別画面遷移なしに進捗を確認できる。
+   展開時:  タイトル + 進捗バー + ステップアイコン + ヒント文
+   最小化:  アイコン 1 個だけ（タップで展開）
+   z-index は modal 群（>=5000）より下、HUD より上の 4500。 */
 .quest-floating {
   position: fixed;
   top: 64px;
   right: 8px;
   z-index: 4500;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  background: rgba(28,20,56,0.92);
+  width: 210px;
+  display: flex;
+  flex-direction: column;
+  background: rgba(20,16,40,0.94);
   border: 1.5px solid rgba(179,136,255,0.85);
-  border-radius: 18px;
+  border-radius: 12px;
   color: #ddd;
   font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.55);
+  overflow: hidden;
+  cursor: default;
   user-select: none;
-  box-shadow: 0 4px 14px rgba(0,0,0,0.45);
-  transition: padding 180ms ease-out, gap 180ms ease-out, background 120ms ease-out;
+  transition: width 200ms ease-out, padding 180ms ease-out;
 }
-.quest-floating:hover { background: rgba(38,30,72,0.96); }
+.quest-floating .qf-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: rgba(60,40,110,0.55);
+  border-bottom: 1px solid rgba(179,136,255,0.35);
+}
 .quest-floating .qf-icon {
   font-size: 16px;
   line-height: 1;
+  flex: 0 0 auto;
 }
-.quest-floating .qf-label {
+.quest-floating .qf-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
   white-space: nowrap;
-  opacity: 1;
-  max-width: 200px;
   overflow: hidden;
-  transition: max-width 180ms ease-out, opacity 140ms ease-out;
+  text-overflow: ellipsis;
+  flex: 1 1 auto;
+}
+.quest-floating .qf-status {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(255,213,79,0.22);
+  color: #ffe082;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.quest-floating.ready .qf-status {
+  background: rgba(179,136,255,0.35);
+  color: #fff;
+}
+.quest-floating.done .qf-status {
+  background: rgba(102,187,106,0.35);
+  color: #c8e6c9;
 }
 .quest-floating .qf-toggle {
   display: inline-flex;
@@ -3552,67 +3579,138 @@ input, textarea {
   justify-content: center;
   width: 18px;
   height: 18px;
-  margin-left: 2px;
   padding: 0;
   background: rgba(255,255,255,0.10);
   color: #ddd;
-  border: 1px solid rgba(255,255,255,0.3);
+  border: 1px solid rgba(255,255,255,0.30);
   border-radius: 9px;
   font-size: 13px;
   line-height: 1;
   cursor: pointer;
+  flex: 0 0 auto;
 }
-.quest-floating .qf-toggle:hover { background: rgba(255,255,255,0.20); }
+.quest-floating .qf-toggle:hover { background: rgba(255,255,255,0.22); }
 
-/* 最小化モード: ラベルとボタンを畳んでアイコンだけにする */
-.quest-floating.minimized {
-  padding: 6px;
-  gap: 0;
+.quest-floating .qf-body {
+  padding: 7px 9px 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
-.quest-floating.minimized .qf-label {
-  max-width: 0;
-  opacity: 0;
-  margin: 0;
-  padding: 0;
+.quest-floating .qf-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
-.quest-floating.minimized .qf-toggle {
-  width: 0;
-  height: 0;
-  margin: 0;
-  border-width: 0;
-  opacity: 0;
-  pointer-events: none;
+.quest-floating .qf-progress-bar {
+  flex: 1;
+  height: 8px;
+  background: rgba(255,255,255,0.10);
+  border-radius: 4px;
   overflow: hidden;
 }
+.quest-floating .qf-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #b388ff 0%, #ffd54f 100%);
+  border-radius: 4px;
+  transition: width 0.35s ease-out;
+}
+.quest-floating .qf-progress-text {
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  min-width: 32px;
+  text-align: right;
+}
+.quest-floating .qf-steps {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+}
+.quest-floating .qf-step {
+  flex: 1;
+  text-align: center;
+  position: relative;
+  opacity: 0.45;
+  filter: grayscale(0.4);
+}
+.quest-floating .qf-step.active {
+  opacity: 1;
+  filter: none;
+  animation: qfStepBlink 1.4s ease-in-out infinite;
+}
+.quest-floating .qf-step.done {
+  opacity: 0.95;
+  filter: none;
+  color: #66bb6a;
+}
+.quest-floating .qf-step + .qf-step::before {
+  content: '·';
+  position: absolute;
+  left: -4px;
+  color: rgba(255,255,255,0.3);
+}
+@keyframes qfStepBlink {
+  0%, 100% { transform: scale(1);    text-shadow: none; }
+  50%      { transform: scale(1.15); text-shadow: 0 0 8px currentColor; }
+}
+.quest-floating .qf-hint {
+  font-size: 11px;
+  color: #ddd;
+  line-height: 1.35;
+}
 
-/* 状態別カラー */
+/* 最小化モード: ヘッダーのアイコンだけ残してそれ以外を畳む。
+   width を auto に潰し、body と title / status / button を非表示にする。 */
+.quest-floating.minimized {
+  width: auto;
+}
+.quest-floating.minimized .qf-header {
+  padding: 6px;
+  border-bottom: none;
+  background: transparent;
+}
+.quest-floating.minimized .qf-title,
+.quest-floating.minimized .qf-status,
+.quest-floating.minimized .qf-toggle,
+.quest-floating.minimized .qf-body {
+  display: none;
+}
+.quest-floating.minimized {
+  cursor: pointer;
+}
+
+/* 状態別カラー（ヘッダー枠） */
 .quest-floating.ready {
   border-color: #b388ff;
-  background: rgba(60,40,110,0.95);
   animation: questFloatPulse 1.8s ease-in-out infinite;
 }
 .quest-floating.done {
   border-color: rgba(102,187,106,0.85);
-  background: rgba(36,68,40,0.95);
-  color: #c8e6c9;
+}
+.quest-floating.done .qf-header {
+  background: rgba(40,80,46,0.6);
+  border-bottom-color: rgba(102,187,106,0.5);
 }
 @keyframes questFloatPulse {
-  0%   { box-shadow: 0 4px 14px rgba(0,0,0,0.45), 0 0 0   rgba(179,136,255,0.0); }
-  50%  { box-shadow: 0 4px 14px rgba(0,0,0,0.45), 0 0 16px rgba(179,136,255,0.85); }
-  100% { box-shadow: 0 4px 14px rgba(0,0,0,0.45), 0 0 0   rgba(179,136,255,0.0); }
+  0%   { box-shadow: 0 6px 18px rgba(0,0,0,0.55), 0 0 0   rgba(179,136,255,0.0); }
+  50%  { box-shadow: 0 6px 18px rgba(0,0,0,0.55), 0 0 16px rgba(179,136,255,0.85); }
+  100% { box-shadow: 0 6px 18px rgba(0,0,0,0.55), 0 0 0   rgba(179,136,255,0.0); }
 }
 
-/* ダンジョン画面ではヘッダー（メニュー🎒ボタン）と被らないように位置を下げる。
-   ヘッダー高さ ≒ 56px + 余白で 74px。スキャン／リザルトでも安全。 */
-#screen-dungeon.active ~ .quest-floating,
+/* ダンジョン画面ではヘッダー（メニュー🎒ボタン）と被らないように位置を下げる。 */
 .quest-floating.on-dungeon {
   top: 88px;
   right: 8px;
 }
-/* スキャナー画面はヘッダーが小さい */
-#screen-scanner.active ~ .quest-floating,
 .quest-floating.on-scanner {
   top: 56px;
+}
+
+/* 狭幅端末では幅を縮めて HUD と被らないように */
+@media (max-width: 420px) {
+  .quest-floating { width: 184px; }
 }
 
 /* メニュー「📜 クエスト」セクションの中身。クエスト 1 件あたりに 1 つの
