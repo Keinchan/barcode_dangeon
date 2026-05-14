@@ -5385,9 +5385,13 @@ function _pvpSendMoveAction() {
     y:      dungeon.playerPos.y,
     facing: dungeon.playerPos.facing.slice(),
   }, _pvpData?.turnNo ?? 0)
-    .catch(err => console.warn('PvP move sync failed:', err))
-    .finally(() => {
+    .catch(err => {
+      // submit に失敗した場合だけロック解除（成功時は相手の応答で _onPvpArenaUpdate
+      // 経由でロックが外れる）。
+      console.warn('PvP move sync failed:', err);
       _setTurnBusy(false);
+    })
+    .finally(() => {
       if (dungeon) dungeon.render(document.getElementById('dungeon-canvas'));
     });
 }
@@ -5427,9 +5431,11 @@ function _pvpSendSkillAction(args) {
     targetStatuses: Array.isArray(opp?.statuses) ? opp.statuses : null,
     turnNo: _pvpData.turnNo ?? 0,
   })
-    .catch(err => console.warn('PvP skill sync failed:', err))
+    .catch(err => {
+      console.warn('PvP skill sync failed:', err);
+      _setTurnBusy(false);   // 失敗時のみ解除
+    })
     .finally(() => {
-      _setTurnBusy(false);
       if (dungeon) dungeon.render(document.getElementById('dungeon-canvas'));
     });
 }
@@ -5450,9 +5456,11 @@ function _pvpSendSelfBuff() {
     turnNo:   _pvpData.turnNo ?? 0,
     otherUid: _pvpData[otherRole]?.uid,
   })
-    .catch(err => console.warn('PvP self-buff sync failed:', err))
-    .finally(() => {
+    .catch(err => {
+      console.warn('PvP self-buff sync failed:', err);
       _setTurnBusy(false);
+    })
+    .finally(() => {
       if (dungeon) dungeon.render(document.getElementById('dungeon-canvas'));
     });
 }
@@ -5495,9 +5503,11 @@ function _pvpSendBossDamage(bossHpAfter, dmg) {
     turnNo:   _pvpData.turnNo ?? 0,
     counter,
   })
-    .catch(err => console.warn('PvP boss update failed:', err))
-    .finally(() => {
+    .catch(err => {
+      console.warn('PvP boss update failed:', err);
       _setTurnBusy(false);
+    })
+    .finally(() => {
       if (dungeon) dungeon.render(document.getElementById('dungeon-canvas'));
     });
 }
@@ -5513,9 +5523,11 @@ function _pvpSendAttackAction(dmg, targetHpAfter) {
     attackerUid: _pvpData[_pvpRole]?.uid,
     turnNo: _pvpData.turnNo ?? 0,
   })
-    .catch(err => console.warn('PvP attack sync failed:', err))
-    .finally(() => {
+    .catch(err => {
+      console.warn('PvP attack sync failed:', err);
       _setTurnBusy(false);
+    })
+    .finally(() => {
       if (dungeon) dungeon.render(document.getElementById('dungeon-canvas'));
     });
 }
@@ -5540,17 +5552,27 @@ function _runEnemyTurn() {
     return;
   }
 
-  // ターン進行: アニメーションが終わるまで move() の追加入力を弾く。
-  // 完了パスが複数ある（即終了/death/最後の magic 後など）ため、ここで上限の
-  // setTimeout も予防的に張って必ずクリアされるようにする。
+  // ターン進行: アニメーションが終わるまで move() / 技ボタンの追加入力を弾く。
+  // 「ミニオン全員 → 敵全員」の演出が完全に終わってから _clearBusy が呼ばれて
+  // 初めてロック解除する。完了パスが複数ある（即終了/death/最後の magic 後など）
+  // ので idempotent な _clearBusy にして、二重呼び出しを安全に吸収する。
   _setTurnBusy(true);
+  let _busyCleared = false;
+  let _safetyTimer = null;
   const _clearBusy = () => {
+    if (_busyCleared) return;
+    _busyCleared = true;
+    if (_safetyTimer) { clearTimeout(_safetyTimer); _safetyTimer = null; }
     _setTurnBusy(false);
     // 敵ターン完了時点で次ターンの行動回数を再計算（バフ tick 反映後の値）
     _actionsLeftThisTurn = actionsPerTurn(player);
   };
-  // 上限ガード: 通常はアニメ完了 callback でクリアするが、想定外で漏れた場合の保険
-  setTimeout(_clearBusy, 6000);
+  // 上限ガード: 想定外で _clearBusy パスに来なかった場合の最終保険。
+  // 旧 6 秒では「超低速モード × 多人数戦」で本来の完了より先に発火していたため、
+  // 戦闘速度に応じて十分余裕のある時間に拡張。最終保険なのでアニメ完了が
+  // 早ければ idempotent ガードでクリアタイマーが先に取り消される。
+  const _safetyMs = Math.max(20000, combatStepMs() * 40);
+  _safetyTimer = setTimeout(_clearBusy, _safetyMs);
 
   // ターン進行: 状態異常 (DoT / 期限切れ通知) を最初に処理。
   // 死亡したらリザルトへ。
@@ -7923,6 +7945,14 @@ function _onPvpArenaUpdate(data) {
   _refreshPvpTurnUI(data);
   refreshHUD();
   if (dungeon) dungeon.render(document.getElementById('dungeon-canvas'));
+  // PvP / 協力: ロックのタイミングはターン所有権で決める。
+  // 自分のターンになった瞬間のみ解除し、相手のターン中・battle 以外（waiting/finished）は
+  // 物理的にボタンを封じる。これで「submit 直後に押せる隙間」が消える。
+  if (data?.state === 'battle') {
+    _setTurnBusy(data.turn !== _pvpRole);
+  } else {
+    _setTurnBusy(false);
+  }
 }
 
 // PvP のターン表示・入力封鎖を更新する。自分のターンの時は緑バナーで脈動、
