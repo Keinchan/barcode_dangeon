@@ -46,6 +46,7 @@
       <div class="hud-title">⚔️ バーコードダンジョン</div>
       <div id="map-gold-display" class="hud-gold">🪙 0</div>
       <div id="map-scan-status" class="hud-scan-status">📷 0/5　💎 0</div>
+      <div id="map-quest-chip" class="hud-quest-chip hidden" title="クエスト進捗"></div>
       <div class="hud-button-row">
         <button id="btn-scan" class="btn-primary">📷 スキャン</button>
         <button id="btn-menu" class="btn-secondary">🎒 メニュー</button>
@@ -408,6 +409,10 @@
             <span class="menu-tile-emoji">⚖️</span>
             <span class="menu-tile-label">属性相性</span>
           </button>
+          <button class="menu-tile" data-go="quest">
+            <span class="menu-tile-emoji">📜</span>
+            <span class="menu-tile-label">クエスト</span>
+          </button>
           <button class="menu-tile" data-go="currency">
             <span class="menu-tile-emoji">💎</span>
             <span class="menu-tile-label">通貨・スキャン</span>
@@ -522,6 +527,11 @@
         <div class="menu-section-title">💎 通貨・スキャン</div>
         <div id="menu-scan-status" class="menu-scan-status">📷 0/5　💎 0</div>
         <button id="btn-buy-platinum" class="menu-action-btn">プラチナ結晶を購入（テスト）</button>
+      </section>
+
+      <section class="menu-section stage-quest">
+        <div class="menu-section-title">📜 進行中のクエスト</div>
+        <div id="menu-quest-body" class="quest-body"></div>
       </section>
 
       <section class="menu-section stage-sound">

@@ -297,6 +297,8 @@ function show(name) {
       resumeGeolocation();
       // ボルダロスピンの再確認（マップに戻る毎に条件を見直す）
       try { _ensureBolderothPin(); } catch {}
+      // クエスト進捗チップも合わせて更新
+      try { _refreshQuestChip(); } catch {}
     });
   }
   _bgmForScreen(name);
@@ -859,6 +861,7 @@ const MENU_STAGE_TITLES = {
   skills:    '技・タイプ',
   chests:    '宝箱開封',
   element:   '属性相性',
+  quest:     'クエスト',
   currency:  '通貨・スキャン',
   sound:     'サウンド',
   account:   'アカウント',
@@ -873,6 +876,7 @@ function _setMenuStage(stage) {
   if (stage === 'storage') _refreshInventoryMini();
   if (stage === 'skills')  _refreshSkillConfig();
   if (stage === 'chests')  _refreshChestList();
+  if (stage === 'quest')   _refreshQuestPanel();
 }
 
 // タイル → ステージ切替
@@ -1041,6 +1045,136 @@ function _refreshChestList() {
     list.appendChild(row);
   }
 }
+
+// ─────────────────────────────────────────────
+// クエスト進捗パネル（メニューの「📜 クエスト」）
+// ─────────────────────────────────────────────
+//   現状は「動かざる磐石・ボルダロス」クエスト 1 件のみ。3 ステップ：
+//     1. 通常ダンジョンを 3 回攻略する（dungeonClearCount）
+//     2. マップに出現したボルダロスの試練に挑む
+//     3. ボルダロスを撃破して Lv10 の壁を破る
+//   状態に応じて step ごとの ✅ / ➤ / 🔒 を切り替え、進捗バーで可視化する。
+//   ボス撃破済みなら done バリアントで表示。
+function _questBolderothState() {
+  const clears = player.dungeonClearCount ?? 0;
+  const cleared = !!player.bolderothCleared;
+  const target  = 3;
+  const spawned = !!bolderothQuest && !cleared;
+  let phase = 'collecting';        // 1) クリア数集め
+  if (cleared)         phase = 'done';
+  else if (spawned)    phase = 'engage';
+  else if (clears >= target) phase = 'spawning';   // ピンを置く直前（次回 GPS で出現）
+  return {
+    phase, cleared, spawned, clears, target,
+    cap: effectiveLevelCap(),
+    pos: bolderothQuest ? { lat: bolderothQuest.lat, lng: bolderothQuest.lng } : null,
+  };
+}
+
+function _refreshQuestPanel() {
+  const body = document.getElementById('menu-quest-body');
+  if (!body) return;
+  const s = _questBolderothState();
+  const statusLabel =
+    s.phase === 'done'      ? { label: '撃破済み', cls: 'done' } :
+    s.phase === 'engage'    ? { label: '挑戦待ち', cls: 'ready' } :
+    s.phase === 'spawning'  ? { label: '出現直前', cls: 'ready' } :
+                              { label: '進行中',   cls: 'active' };
+  const stepClass = (i) => {
+    // step インデックス: 0=ダンジョン 3 回 / 1=ピン挑戦 / 2=撃破
+    if (s.phase === 'done') return 'step-done';
+    if (i === 0) {
+      if (s.clears >= s.target) return 'step-done';
+      return 'step-active';
+    }
+    if (i === 1) {
+      if (s.spawned || s.clears >= s.target) {
+        return s.spawned ? 'step-active' : 'step-active';
+      }
+      return 'step-locked';
+    }
+    if (i === 2) {
+      if (s.spawned) return 'step-active';
+      return 'step-locked';
+    }
+    return '';
+  };
+  const pct = Math.min(100, Math.floor((s.clears / s.target) * 100));
+  const cardCls = s.phase === 'done' ? 'quest-card done' : 'quest-card';
+
+  body.innerHTML = `
+    <div class="${cardCls}">
+      <div class="quest-card-title">
+        <span>🪨 動かざる磐石・ボルダロス</span>
+        <span class="quest-card-status ${statusLabel.cls}">${statusLabel.label}</span>
+      </div>
+      <div class="quest-card-sub">
+        ${s.phase === 'done'
+          ? 'Lv10 の壁は既に砕け、上限が解放されている。'
+          : `現在の Lv 上限: <b>Lv ${s.cap}</b>${s.cap < MAX_LEVEL ? '（ボルダロス撃破で解放）' : ''}`}
+      </div>
+      <div class="quest-card-desc">
+        ${s.phase === 'done'
+          ? '古き磐の主を打ち倒し、レベル上限が <b>Lv 100</b> まで広がった。'
+          : 'ダンジョンを 3 回攻略すると、マップ上に「動かざる磐石・ボルダロス」が出現する。それを撃破するとレベル 10 の壁が砕け、これ以上のレベル上昇が解放される。'}
+      </div>
+
+      <div class="quest-card-section-label">攻略数</div>
+      <div class="quest-progress">
+        <div class="quest-progress-bar"><div class="fill" style="width:${pct}%"></div></div>
+        <div class="quest-progress-text">${Math.min(s.clears, s.target)} / ${s.target}</div>
+      </div>
+
+      <div class="quest-card-section-label">進行</div>
+      <ul class="quest-step-list">
+        <li class="${stepClass(0)}">ダンジョンを 3 回攻略する（${Math.min(s.clears, s.target)}/${s.target}）</li>
+        <li class="${stepClass(1)}">マップ上のボルダロスのピンに挑む${
+          s.spawned ? '（出現中）' : (s.clears >= s.target ? '（次回のマップ更新で出現）' : '')
+        }</li>
+        <li class="${stepClass(2)}">動かざる磐石・ボルダロスを撃破する</li>
+      </ul>
+
+      <div class="quest-reward">
+        🌟 報酬: レベル上限が <b>Lv 10 → Lv ${MAX_LEVEL}</b> へ解放
+      </div>
+    </div>
+  `;
+}
+
+// マップ HUD の右肩に出る小さなクエストチップ（クリックでメニュー → クエストへ）。
+// 状態:
+//   - 進行中（クリア数 < 3）  : 「📜 ダンジョン X/3」
+//   - 出現中（ピンあり未撃破） : 「💎 ボルダロス挑戦中」 + パルス
+//   - 撃破済み              : 「✅ Lv 解放済み」（薄緑、5 秒後にフェード）
+// マップ画面以外でも HUD は隠れるので、CSS の hidden 制御だけで足りる。
+function _refreshQuestChip() {
+  const chip = document.getElementById('map-quest-chip');
+  if (!chip) return;
+  const s = _questBolderothState();
+  chip.classList.remove('ready', 'done');
+  if (s.phase === 'done') {
+    chip.classList.remove('hidden');
+    chip.classList.add('done');
+    chip.innerHTML = `<span class="qc-emoji">✅</span><span>Lv 解放済み</span>`;
+    return;
+  }
+  if (s.phase === 'engage' || s.phase === 'spawning') {
+    chip.classList.remove('hidden');
+    chip.classList.add('ready');
+    chip.innerHTML = `<span class="qc-emoji">💎</span><span>ボルダロス挑戦中</span>`;
+    return;
+  }
+  // collecting
+  chip.classList.remove('hidden');
+  chip.innerHTML = `<span class="qc-emoji">📜</span><span>クエスト ${Math.min(s.clears, s.target)}/${s.target}</span>`;
+}
+
+// チップタップでクエスト画面を直接開く。
+document.getElementById('map-quest-chip')?.addEventListener('click', () => {
+  playSfx('click');
+  openMenu();
+  _setMenuStage('quest');
+});
 
 // ─────────────────────────────────────────────
 // 持ち物タブ（all / weapon / armor / scroll / cons）
@@ -4407,6 +4541,8 @@ function refreshHUD() {
   _refreshStatusOverlay();
   // バフ chip 表示
   _refreshBuffChips();
+  // クエスト進捗チップ（マップ HUD）
+  _refreshQuestChip();
 }
 
 // プレイヤーに掛かっているバフ status を chip にして dungeon-right-hud に並べる。
@@ -6354,6 +6490,13 @@ function dungeonClear() {
     bolderothQuest = null;
     try { removeBolderothPin(); } catch {}
     showAlert('🌟 動かざる磐石・ボルダロスを撃破！\nレベル 10 の壁が砕け、これ以上のレベル上昇が解放された。');
+  }
+  // クエスト進捗チップ／メニューパネルを即時反映
+  try { _refreshQuestChip(); } catch {}
+  if (document.getElementById('menu-modal') &&
+      !document.getElementById('menu-modal').classList.contains('hidden') &&
+      document.getElementById('menu-modal').dataset.stage === 'quest') {
+    try { _refreshQuestPanel(); } catch {}
   }
   // 地図エンカウント由来の 1 ルーム戦闘なら、エンカウントを消費して
   // 同じ場所のピンを今後出さない。dungeonData.encounterSeed に元の seed を載せている。
