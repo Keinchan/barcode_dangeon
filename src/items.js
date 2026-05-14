@@ -288,10 +288,11 @@ function _pickSkill(table, rarity, rng) {
   return list[Math.floor(rng() * list.length)];
 }
 
-function _buildWeapon(barcode, rng, rarity, element, level) {
+function _buildWeapon(barcode, rng, rarity, element, _level) {
+  // 武器のレベルシステムは撤廃。ステータスはレアリティ × ベース武器 × 個体差のみで決定。
   const base   = WEAPONS[Math.floor(rng() * WEAPONS.length)];
   const bonus  = Math.max(1, Math.floor(
-    base.atkBonus * rarity.mult * _levelMult(level) * (0.8 + rng() * 0.4),
+    base.atkBonus * rarity.mult * (0.8 + rng() * 0.4),
   ));
   const skill  = _pickSkill(WEAPON_SKILLS, rarity, rng);
   const prefix = _pickPrefix(rarity, rng);
@@ -304,17 +305,18 @@ function _buildWeapon(barcode, rng, rarity, element, level) {
   return {
     type: 'weapon', barcode,
     name, emoji: base.emoji,
-    rarity: rarity.name, rarityColor: rarity.color, element, level,
+    rarity: rarity.name, rarityColor: rarity.color, element,
     atkBonus: bonus, defBonus: 0,
     skill,
     desc,
   };
 }
 
-function _buildArmor(barcode, rng, rarity, element, level) {
+function _buildArmor(barcode, rng, rarity, element, _level) {
+  // 防具のレベルシステムも撤廃。
   const base   = ARMORS[Math.floor(rng() * ARMORS.length)];
   const bonus  = Math.max(1, Math.floor(
-    base.defBonus * rarity.mult * _levelMult(level) * (0.8 + rng() * 0.4),
+    base.defBonus * rarity.mult * (0.8 + rng() * 0.4),
   ));
   const skill  = _pickSkill(ARMOR_SKILLS, rarity, rng);
   const prefix = _pickPrefix(rarity, rng);
@@ -327,7 +329,7 @@ function _buildArmor(barcode, rng, rarity, element, level) {
   return {
     type: 'armor', barcode,
     name, emoji: base.emoji,
-    rarity: rarity.name, rarityColor: rarity.color, element, level,
+    rarity: rarity.name, rarityColor: rarity.color, element,
     atkBonus: 0, defBonus: bonus,
     skill,
     desc,
