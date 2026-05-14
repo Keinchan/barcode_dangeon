@@ -3509,6 +3509,180 @@ input, textarea {
   box-shadow: 0 0 14px #b388ff, 0 4px 10px rgba(0,0,0,0.55);
   animation: bolderothPulse 2.4s ease-in-out infinite;
 }
+/* マップ HUD に小さく表示するクエスト進捗チップ。クリックでメニュー → クエストへ。
+   未進行（dungeonClearCount=0）の時は表示しない（hidden を JS で制御）。 */
+.hud-quest-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  margin-top: 6px;
+  background: rgba(124,77,255,0.18);
+  border: 1px solid rgba(179,136,255,0.7);
+  border-radius: 12px;
+  color: #ddd;
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 120ms ease-out;
+}
+.hud-quest-chip:hover { background: rgba(124,77,255,0.32); }
+.hud-quest-chip .qc-emoji { font-size: 13px; }
+.hud-quest-chip.ready {
+  background: rgba(179,136,255,0.35);
+  border-color: #b388ff;
+  color: #fff;
+  animation: questChipPulse 1.8s ease-in-out infinite;
+}
+.hud-quest-chip.done {
+  background: rgba(76,175,80,0.25);
+  border-color: #66bb6a;
+  color: #c8e6c9;
+}
+@keyframes questChipPulse {
+  0%   { box-shadow: 0 0 0   rgba(179,136,255,0.0); }
+  50%  { box-shadow: 0 0 12px rgba(179,136,255,0.85); }
+  100% { box-shadow: 0 0 0   rgba(179,136,255,0.0); }
+}
+
+/* メニュー「📜 クエスト」セクションの中身。クエスト 1 件あたりに 1 つの
+   .quest-card を並べる。現状はボルダロスのみ。 */
+.quest-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 0;
+}
+.quest-card {
+  background: linear-gradient(160deg, rgba(124,77,255,0.12) 0%, rgba(0,0,0,0.45) 100%);
+  border: 1px solid rgba(179,136,255,0.5);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.quest-card.done {
+  border-color: rgba(102,187,106,0.55);
+  background: linear-gradient(160deg, rgba(76,175,80,0.18) 0%, rgba(0,0,0,0.45) 100%);
+}
+.quest-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 2px;
+}
+.quest-card-status {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: bold;
+  border-radius: 10px;
+  margin-left: auto;
+  background: rgba(255,255,255,0.1);
+  color: #ddd;
+}
+.quest-card-status.active   { background: rgba(255,213,79,0.25); color: #ffe082; }
+.quest-card-status.ready    { background: rgba(179,136,255,0.35); color: #fff; }
+.quest-card-status.done     { background: rgba(102,187,106,0.30); color: #c8e6c9; }
+.quest-card-sub {
+  font-size: 12px;
+  color: #aaa;
+  margin-bottom: 8px;
+}
+.quest-card-desc {
+  font-size: 13px;
+  color: #ddd;
+  line-height: 1.45;
+  margin-bottom: 10px;
+}
+.quest-card-section-label {
+  font-size: 11px;
+  color: #888;
+  margin: 6px 0 4px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.quest-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 6px;
+}
+.quest-progress-bar {
+  flex: 1;
+  height: 10px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 6px;
+  overflow: hidden;
+  position: relative;
+}
+.quest-progress-bar .fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: linear-gradient(90deg, #b388ff 0%, #ffd54f 100%);
+  border-radius: 6px;
+  transition: width 0.4s ease-out;
+}
+.quest-progress-text {
+  font-size: 12px;
+  color: #fff;
+  font-weight: bold;
+  min-width: 40px;
+  text-align: right;
+}
+.quest-step-list {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.quest-step-list li {
+  position: relative;
+  padding: 6px 6px 6px 28px;
+  font-size: 13px;
+  color: #ddd;
+  border-radius: 6px;
+}
+.quest-step-list li::before {
+  position: absolute;
+  left: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 14px;
+  width: 16px;
+  text-align: center;
+}
+.quest-step-list li.step-done {
+  color: #aaa;
+  text-decoration: line-through;
+}
+.quest-step-list li.step-done::before { content: '✅'; }
+.quest-step-list li.step-active {
+  background: rgba(255,213,79,0.15);
+  color: #fff;
+  font-weight: 600;
+}
+.quest-step-list li.step-active::before { content: '➤'; color: #ffd54f; }
+.quest-step-list li.step-locked {
+  color: #777;
+}
+.quest-step-list li.step-locked::before { content: '🔒'; }
+.quest-reward {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #ffc107;
+  padding: 6px 10px;
+  background: rgba(255,193,7,0.10);
+  border-radius: 6px;
+  border-left: 3px solid #ffc107;
+}
+.quest-empty {
+  text-align: center;
+  color: #888;
+  font-size: 13px;
+  padding: 24px 0;
+}
+
 .bolderoth-map-icon .bolderoth-core {
   font-size: 22px; font-weight: 900;
   text-shadow: 0 1px 2px rgba(0,0,0,0.9), 0 0 8px rgba(0,0,0,0.7);
