@@ -2843,6 +2843,21 @@ async function _executeSkillImpl(skill) {
     return;
   }
 
+  // ── 技発動確定。ここから先は「逐次処理」を保証する ──
+  // _turnBusy を **同期で** 立てて、後段の setTimeout(_runEnemyTurn) が走るまでの
+  // 数百 ms の隙間でも追加入力（技スパム / D-pad）が一切走らないようにする。
+  // _runEnemyTurn 側でも改めて _turnBusy=true にして安全タイマーを張るので、
+  // 二重設定でも問題なし（アニメ完了時に _clearBusy が解放）。
+  // 想定外で _runEnemyTurn まで到達しなかった場合のロック残留を防ぐ failsafe も併設。
+  _turnBusy = true;
+  const _skillFailsafe = setTimeout(() => {
+    if (_turnBusy) _turnBusy = false;
+  }, 12000);
+  // _runEnemyTurn 内の _clearBusy 直後にこの failsafe も解除したいが、依存方向が
+  // 逆になるので「12 秒経って残ってたら剥がす」最終手段にしておく。
+  // 通常パスでは _clearBusy で 12 秒より遥かに早く _turnBusy=false になり、
+  // この failsafe が走った時点では既に false なので何もしない（idempotent）。
+
   player.mp = Math.max(0, (player.mp ?? 0) - mpNeeded);
   // 骨折で行動時に自傷判定
   _maybeFractureSelfHurt();
