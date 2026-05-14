@@ -1167,11 +1167,16 @@ const _QUEST_CHIP_VISIBLE_SCREENS = new Set([
 ]);
 
 function _refreshQuestChip() {
-  const chip  = document.getElementById('quest-floating-chip');
-  const icon  = document.getElementById('quest-floating-icon');
-  const label = document.getElementById('quest-floating-label');
-  const btn   = document.getElementById('quest-floating-toggle');
-  if (!chip || !icon || !label || !btn) return;
+  const chip   = document.getElementById('quest-floating-chip');
+  const icon   = document.getElementById('quest-floating-icon');
+  const title  = document.getElementById('quest-floating-title');
+  const status = document.getElementById('quest-floating-status');
+  const fill   = document.getElementById('quest-floating-fill');
+  const pText  = document.getElementById('quest-floating-progress-text');
+  const steps  = document.getElementById('quest-floating-steps');
+  const hint   = document.getElementById('quest-floating-hint');
+  const toggle = document.getElementById('quest-floating-toggle');
+  if (!chip) return;
 
   // 表示画面以外は完全に隠す。
   if (!_QUEST_CHIP_VISIBLE_SCREENS.has(screen)) {
@@ -1179,44 +1184,83 @@ function _refreshQuestChip() {
     return;
   }
   const s = _questBolderothState();
-  // 状態リセット
   chip.classList.remove('ready', 'done', 'on-dungeon', 'on-scanner');
-  // 画面別の位置調整（CSS）
   if (screen === 'dungeon') chip.classList.add('on-dungeon');
   if (screen === 'scanner') chip.classList.add('on-scanner');
 
-  // 状態ごとに見た目をセット
+  // ヘッダー（タイトル + 状態ラベル）
+  let statusLabel;
   if (s.phase === 'done') {
     chip.classList.add('done');
     icon.textContent  = '✅';
-    label.textContent = 'Lv 解放済み';
-  } else if (s.phase === 'engage' || s.phase === 'spawning') {
+    statusLabel = '撃破済み';
+    if (hint) hint.textContent = 'Lv 上限が Lv 100 まで解放されました。';
+  } else if (s.phase === 'engage') {
     chip.classList.add('ready');
     icon.textContent  = '💎';
-    label.textContent = 'ボルダロス挑戦中';
+    statusLabel = '挑戦待ち';
+    if (hint) hint.textContent = 'マップに「動かざる磐石」が出現中。倒すと Lv10 解放。';
+  } else if (s.phase === 'spawning') {
+    chip.classList.add('ready');
+    icon.textContent  = '💎';
+    statusLabel = '出現直前';
+    if (hint) hint.textContent = '次のマップ更新でボルダロスが現れる。';
   } else {
     icon.textContent  = '📜';
-    label.textContent = `クエスト ${Math.min(s.clears, s.target)}/${s.target}`;
+    statusLabel = '進行中';
+    const remain = Math.max(0, s.target - s.clears);
+    if (hint) hint.textContent = `あと ${remain} 回ダンジョンを攻略するとボルダロスが出現。`;
   }
-  chip.classList.remove('hidden');
-  // 最小化状態の反映
+  if (title)  title.textContent  = '動かざる磐石';
+  if (status) status.textContent = statusLabel;
+
+  // 進捗バー
+  const pct = Math.min(100, Math.floor((s.clears / s.target) * 100));
+  if (fill)  fill.style.width = pct + '%';
+  if (pText) pText.textContent = `${Math.min(s.clears, s.target)}/${s.target}`;
+
+  // ステップアイコン（3 段階）
+  if (steps) {
+    const stepDef = [
+      { emoji: '🗡', label: '攻略' },
+      { emoji: '💎', label: '挑む' },
+      { emoji: '🏆', label: '撃破' },
+    ];
+    const stateForStep = (i) => {
+      if (s.phase === 'done') return 'done';
+      if (i === 0) return s.clears >= s.target ? 'done' : 'active';
+      if (i === 1) return s.spawned || s.clears >= s.target ? 'active' : 'locked';
+      if (i === 2) return s.spawned ? 'active' : 'locked';
+      return '';
+    };
+    steps.innerHTML = stepDef.map((st, i) => {
+      const cls = stateForStep(i);
+      return `<span class="qf-step ${cls}" title="${st.label}">${st.emoji}</span>`;
+    }).join('');
+  }
+
+  // 最小化／展開トグル
   chip.classList.toggle('minimized', _questChipMinimized);
-  btn.textContent = _questChipMinimized ? '+' : '−';
+  if (toggle) toggle.textContent = _questChipMinimized ? '+' : '−';
+  chip.classList.remove('hidden');
 }
 
-// チップ本体タップ: クエスト画面を直接開く。最小化中はまず展開してから開く。
-// −/+ ボタンは別ハンドラで stopPropagation してチップ全体クリックと分ける。
+// チップ本体のクリック処理: 別画面に遷移せず「最小化↔展開」をその場で切り替える。
+//   - 最小化中（アイコンのみ）: タップで展開
+//   - 展開中: ヘッダー外のクリックでは何もしない（インラインで全情報が見える）
+//   - −/+ ボタン: トグル
+// メニューのクエスト画面（より詳細）に行きたい場合は、メニュー → 📜 タイルから。
 document.getElementById('quest-floating-chip')?.addEventListener('click', (e) => {
-  // toggle ボタンが押された時は別ハンドラに任せる
+  // toggle ボタンは別ハンドラ
   if (e.target?.id === 'quest-floating-toggle') return;
-  playSfx('click');
-  // 最小化中にアイコンをタップ → ラベルが見えないので「先に展開してから次のタップで開く」
-  // ようにしたい場合もあるが、UX を最小化したい人の意図を尊重して
-  // 「最小化中でもタップ＝そのままクエスト画面を開く」挙動にする。
-  openMenu();
-  _setMenuStage('quest');
+  // 最小化中の本体タップ → 展開
+  if (_questChipMinimized) {
+    _questChipMinimized = false;
+    try { localStorage.setItem(_QUEST_CHIP_KEY, 'max'); } catch {}
+    playSfx('click');
+    _refreshQuestChip();
+  }
 });
-
 document.getElementById('quest-floating-toggle')?.addEventListener('click', (e) => {
   e.stopPropagation();
   _questChipMinimized = !_questChipMinimized;

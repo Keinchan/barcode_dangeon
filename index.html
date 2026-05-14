@@ -605,16 +605,26 @@
     </div>
   </div>
 
-  <!-- クエスト進捗チップ（全画面共通のフローティング表示）。
-       マップ／ダンジョン／スキャン／リザルト画面の右上に薄く出る。
-       ・タップ           → メニュー → クエスト画面を開く
-       ・最小化ボタン (-) → アイコンだけにしてジャマにならないサイズへ
-       ・再展開          → アイコンを長押し or タップでまた広がる
-       状態（minimized）は localStorage に永続化。 -->
-  <div id="quest-floating-chip" class="quest-floating hidden" role="button" aria-label="クエスト進捗">
-    <div class="qf-icon" id="quest-floating-icon">📜</div>
-    <div class="qf-label" id="quest-floating-label">クエスト</div>
-    <button id="quest-floating-toggle" class="qf-toggle" type="button" title="最小化／展開">−</button>
+  <!-- クエスト進捗パネル（マップ上ミニマップ的に常駐する小さなカード）。
+       マップ／ダンジョン／スキャン／リザルト 画面に右上で居座る。
+       展開時は: タイトル + 進捗バー + ステップアイコン + ヒント文
+       最小化時は: アイコン 1 個だけ（タップで展開）
+       状態は localStorage に永続化。 別画面に遷移しないので操作が途切れない。 -->
+  <div id="quest-floating-chip" class="quest-floating hidden" aria-label="クエスト進捗">
+    <div class="qf-header">
+      <span class="qf-icon" id="quest-floating-icon">📜</span>
+      <span class="qf-title" id="quest-floating-title">動かざる磐石</span>
+      <span class="qf-status" id="quest-floating-status">進行中</span>
+      <button id="quest-floating-toggle" class="qf-toggle" type="button" title="最小化／展開">−</button>
+    </div>
+    <div class="qf-body" id="quest-floating-body">
+      <div class="qf-progress">
+        <div class="qf-progress-bar"><div id="quest-floating-fill" class="qf-progress-fill"></div></div>
+        <span id="quest-floating-progress-text" class="qf-progress-text">0/3</span>
+      </div>
+      <div id="quest-floating-steps" class="qf-steps"></div>
+      <div id="quest-floating-hint" class="qf-hint"></div>
+    </div>
   </div>
 
   <!-- デバッグパネル（?debug=1 で表示） -->
