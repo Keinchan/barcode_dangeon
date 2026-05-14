@@ -46,7 +46,6 @@
       <div class="hud-title">⚔️ バーコードダンジョン</div>
       <div id="map-gold-display" class="hud-gold">🪙 0</div>
       <div id="map-scan-status" class="hud-scan-status">📷 0/5　💎 0</div>
-      <div id="map-quest-chip" class="hud-quest-chip hidden" title="クエスト進捗"></div>
       <div class="hud-button-row">
         <button id="btn-scan" class="btn-primary">📷 スキャン</button>
         <button id="btn-menu" class="btn-secondary">🎒 メニュー</button>
@@ -604,6 +603,18 @@
       <div id="result-body"></div>
       <button id="btn-result-back" class="btn-primary">マップに戻る</button>
     </div>
+  </div>
+
+  <!-- クエスト進捗チップ（全画面共通のフローティング表示）。
+       マップ／ダンジョン／スキャン／リザルト画面の右上に薄く出る。
+       ・タップ           → メニュー → クエスト画面を開く
+       ・最小化ボタン (-) → アイコンだけにしてジャマにならないサイズへ
+       ・再展開          → アイコンを長押し or タップでまた広がる
+       状態（minimized）は localStorage に永続化。 -->
+  <div id="quest-floating-chip" class="quest-floating hidden" role="button" aria-label="クエスト進捗">
+    <div class="qf-icon" id="quest-floating-icon">📜</div>
+    <div class="qf-label" id="quest-floating-label">クエスト</div>
+    <button id="quest-floating-toggle" class="qf-toggle" type="button" title="最小化／展開">−</button>
   </div>
 
   <!-- デバッグパネル（?debug=1 で表示） -->

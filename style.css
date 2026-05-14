@@ -3509,40 +3509,110 @@ input, textarea {
   box-shadow: 0 0 14px #b388ff, 0 4px 10px rgba(0,0,0,0.55);
   animation: bolderothPulse 2.4s ease-in-out infinite;
 }
-/* マップ HUD に小さく表示するクエスト進捗チップ。クリックでメニュー → クエストへ。
-   未進行（dungeonClearCount=0）の時は表示しない（hidden を JS で制御）。 */
-.hud-quest-chip {
+/* ─── クエスト進捗のフローティングチップ（全画面共通） ───
+   body 直下に常駐する小さなパネル。マップ／ダンジョン／スキャン／リザルト画面で
+   右上に出現し、進捗状況を一目で把握できる。
+   最小化モード（.minimized）ではアイコン 1 個だけになり、邪魔にならない。
+   z-index は modal 群（>=5000）より下、HUD より上の 4500 に設定。 */
+.quest-floating {
+  position: fixed;
+  top: 64px;
+  right: 8px;
+  z-index: 4500;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  margin-top: 6px;
-  background: rgba(124,77,255,0.18);
-  border: 1px solid rgba(179,136,255,0.7);
-  border-radius: 12px;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(28,20,56,0.92);
+  border: 1.5px solid rgba(179,136,255,0.85);
+  border-radius: 18px;
   color: #ddd;
-  font-size: 11px;
+  font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
   user-select: none;
-  transition: background 120ms ease-out;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.45);
+  transition: padding 180ms ease-out, gap 180ms ease-out, background 120ms ease-out;
 }
-.hud-quest-chip:hover { background: rgba(124,77,255,0.32); }
-.hud-quest-chip .qc-emoji { font-size: 13px; }
-.hud-quest-chip.ready {
-  background: rgba(179,136,255,0.35);
+.quest-floating:hover { background: rgba(38,30,72,0.96); }
+.quest-floating .qf-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+.quest-floating .qf-label {
+  white-space: nowrap;
+  opacity: 1;
+  max-width: 200px;
+  overflow: hidden;
+  transition: max-width 180ms ease-out, opacity 140ms ease-out;
+}
+.quest-floating .qf-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 2px;
+  padding: 0;
+  background: rgba(255,255,255,0.10);
+  color: #ddd;
+  border: 1px solid rgba(255,255,255,0.3);
+  border-radius: 9px;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.quest-floating .qf-toggle:hover { background: rgba(255,255,255,0.20); }
+
+/* 最小化モード: ラベルとボタンを畳んでアイコンだけにする */
+.quest-floating.minimized {
+  padding: 6px;
+  gap: 0;
+}
+.quest-floating.minimized .qf-label {
+  max-width: 0;
+  opacity: 0;
+  margin: 0;
+  padding: 0;
+}
+.quest-floating.minimized .qf-toggle {
+  width: 0;
+  height: 0;
+  margin: 0;
+  border-width: 0;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+/* 状態別カラー */
+.quest-floating.ready {
   border-color: #b388ff;
-  color: #fff;
-  animation: questChipPulse 1.8s ease-in-out infinite;
+  background: rgba(60,40,110,0.95);
+  animation: questFloatPulse 1.8s ease-in-out infinite;
 }
-.hud-quest-chip.done {
-  background: rgba(76,175,80,0.25);
-  border-color: #66bb6a;
+.quest-floating.done {
+  border-color: rgba(102,187,106,0.85);
+  background: rgba(36,68,40,0.95);
   color: #c8e6c9;
 }
-@keyframes questChipPulse {
-  0%   { box-shadow: 0 0 0   rgba(179,136,255,0.0); }
-  50%  { box-shadow: 0 0 12px rgba(179,136,255,0.85); }
-  100% { box-shadow: 0 0 0   rgba(179,136,255,0.0); }
+@keyframes questFloatPulse {
+  0%   { box-shadow: 0 4px 14px rgba(0,0,0,0.45), 0 0 0   rgba(179,136,255,0.0); }
+  50%  { box-shadow: 0 4px 14px rgba(0,0,0,0.45), 0 0 16px rgba(179,136,255,0.85); }
+  100% { box-shadow: 0 4px 14px rgba(0,0,0,0.45), 0 0 0   rgba(179,136,255,0.0); }
+}
+
+/* ダンジョン画面ではヘッダー（メニュー🎒ボタン）と被らないように位置を下げる。
+   ヘッダー高さ ≒ 56px + 余白で 74px。スキャン／リザルトでも安全。 */
+#screen-dungeon.active ~ .quest-floating,
+.quest-floating.on-dungeon {
+  top: 88px;
+  right: 8px;
+}
+/* スキャナー画面はヘッダーが小さい */
+#screen-scanner.active ~ .quest-floating,
+.quest-floating.on-scanner {
+  top: 56px;
 }
 
 /* メニュー「📜 クエスト」セクションの中身。クエスト 1 件あたりに 1 つの
