@@ -302,6 +302,8 @@ function show(name) {
     });
   }
   _bgmForScreen(name);
+  // 画面遷移直後に必ずクエストチップを再判定（表示／非表示 + 画面別位置クラス）
+  try { _refreshQuestChip(); } catch {}
 }
 
 // 画面 → BGM のマッピング
@@ -1141,39 +1143,86 @@ function _refreshQuestPanel() {
   `;
 }
 
-// マップ HUD の右肩に出る小さなクエストチップ（クリックでメニュー → クエストへ）。
-// 状態:
-//   - 進行中（クリア数 < 3）  : 「📜 ダンジョン X/3」
-//   - 出現中（ピンあり未撃破） : 「💎 ボルダロス挑戦中」 + パルス
-//   - 撃破済み              : 「✅ Lv 解放済み」（薄緑、5 秒後にフェード）
-// マップ画面以外でも HUD は隠れるので、CSS の hidden 制御だけで足りる。
+// クエスト進捗フローティングチップ（全画面共通）。
+//   body 直下に常駐し、表示すべき画面（map / dungeon / scanner / result）でだけ
+//   show する。非表示にすべき画面（title / pvp-lobby / pvp-battle）では hidden。
+//
+// 状態（_questBolderothState から取得）:
+//   - 進行中（clears < 3）   : 「📜 クエスト X/3」
+//   - 出現中／出現直前       : 「💎 ボルダロス挑戦中」 + パルス
+//   - 撃破済み              : 「✅ Lv 解放済み」（緑）
+//
+// 最小化（minimized）: ラベルと −/＋ ボタンが畳まれ、アイコン 1 個だけになる。
+// 状態は localStorage:'real_hide:quest-chip:v1' に永続化。
+// マップ／ダンジョン／スキャン／リザルト等 ヘッダー上に出ても被らないよう
+// CSS の on-dungeon / on-scanner クラスで top 位置を調整。
+
+const _QUEST_CHIP_KEY = 'real_hide:quest-chip:v1';
+let _questChipMinimized = false;
+try { _questChipMinimized = localStorage.getItem(_QUEST_CHIP_KEY) === 'min'; } catch {}
+
+// チップを出していい画面の集合。それ以外は hidden で隠す。
+const _QUEST_CHIP_VISIBLE_SCREENS = new Set([
+  'map', 'dungeon', 'scanner', 'result',
+]);
+
 function _refreshQuestChip() {
-  const chip = document.getElementById('map-quest-chip');
-  if (!chip) return;
+  const chip  = document.getElementById('quest-floating-chip');
+  const icon  = document.getElementById('quest-floating-icon');
+  const label = document.getElementById('quest-floating-label');
+  const btn   = document.getElementById('quest-floating-toggle');
+  if (!chip || !icon || !label || !btn) return;
+
+  // 表示画面以外は完全に隠す。
+  if (!_QUEST_CHIP_VISIBLE_SCREENS.has(screen)) {
+    chip.classList.add('hidden');
+    return;
+  }
   const s = _questBolderothState();
-  chip.classList.remove('ready', 'done');
+  // 状態リセット
+  chip.classList.remove('ready', 'done', 'on-dungeon', 'on-scanner');
+  // 画面別の位置調整（CSS）
+  if (screen === 'dungeon') chip.classList.add('on-dungeon');
+  if (screen === 'scanner') chip.classList.add('on-scanner');
+
+  // 状態ごとに見た目をセット
   if (s.phase === 'done') {
-    chip.classList.remove('hidden');
     chip.classList.add('done');
-    chip.innerHTML = `<span class="qc-emoji">✅</span><span>Lv 解放済み</span>`;
-    return;
-  }
-  if (s.phase === 'engage' || s.phase === 'spawning') {
-    chip.classList.remove('hidden');
+    icon.textContent  = '✅';
+    label.textContent = 'Lv 解放済み';
+  } else if (s.phase === 'engage' || s.phase === 'spawning') {
     chip.classList.add('ready');
-    chip.innerHTML = `<span class="qc-emoji">💎</span><span>ボルダロス挑戦中</span>`;
-    return;
+    icon.textContent  = '💎';
+    label.textContent = 'ボルダロス挑戦中';
+  } else {
+    icon.textContent  = '📜';
+    label.textContent = `クエスト ${Math.min(s.clears, s.target)}/${s.target}`;
   }
-  // collecting
   chip.classList.remove('hidden');
-  chip.innerHTML = `<span class="qc-emoji">📜</span><span>クエスト ${Math.min(s.clears, s.target)}/${s.target}</span>`;
+  // 最小化状態の反映
+  chip.classList.toggle('minimized', _questChipMinimized);
+  btn.textContent = _questChipMinimized ? '+' : '−';
 }
 
-// チップタップでクエスト画面を直接開く。
-document.getElementById('map-quest-chip')?.addEventListener('click', () => {
+// チップ本体タップ: クエスト画面を直接開く。最小化中はまず展開してから開く。
+// −/+ ボタンは別ハンドラで stopPropagation してチップ全体クリックと分ける。
+document.getElementById('quest-floating-chip')?.addEventListener('click', (e) => {
+  // toggle ボタンが押された時は別ハンドラに任せる
+  if (e.target?.id === 'quest-floating-toggle') return;
   playSfx('click');
+  // 最小化中にアイコンをタップ → ラベルが見えないので「先に展開してから次のタップで開く」
+  // ようにしたい場合もあるが、UX を最小化したい人の意図を尊重して
+  // 「最小化中でもタップ＝そのままクエスト画面を開く」挙動にする。
   openMenu();
   _setMenuStage('quest');
+});
+
+document.getElementById('quest-floating-toggle')?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  _questChipMinimized = !_questChipMinimized;
+  try { localStorage.setItem(_QUEST_CHIP_KEY, _questChipMinimized ? 'min' : 'max'); } catch {}
+  playSfx('click');
+  _refreshQuestChip();
 });
 
 // ─────────────────────────────────────────────
