@@ -2849,9 +2849,9 @@ async function _executeSkillImpl(skill) {
   // _runEnemyTurn 側でも改めて _turnBusy=true にして安全タイマーを張るので、
   // 二重設定でも問題なし（アニメ完了時に _clearBusy が解放）。
   // 想定外で _runEnemyTurn まで到達しなかった場合のロック残留を防ぐ failsafe も併設。
-  _turnBusy = true;
+  _setTurnBusy(true);
   const _skillFailsafe = setTimeout(() => {
-    if (_turnBusy) _turnBusy = false;
+    if (_turnBusy) _setTurnBusy(false);
   }, 12000);
   // _runEnemyTurn 内の _clearBusy 直後にこの failsafe も解除したいが、依存方向が
   // 逆になるので「12 秒経って残ってたら剥がす」最終手段にしておく。
@@ -5198,10 +5198,23 @@ function _celebratePickup(item, action = '入手') {
 }
 
 // 敵 / ミニオンのアニメーション中はプレイヤーの新しい行動を遮断するためのフラグ。
-// move() の入口でチェックし、_runEnemyTurn の完了コールバックでクリアする。
+// move() / _executeSkill の入口でチェックし、_runEnemyTurn の完了コールバックでクリア。
 // 長押し（ArrowKey 自動リピート）で次のターンが「前のターンの最中」に始まり、
 // 攻撃演出が重なる/HP 表示がチカチカするバグを防ぐ。
+//
+// 物理的な遮断: _setTurnBusy(true) で body に is-turn-busy クラスを付け、CSS で
+//   - 技スロット 4 個（.waza-slot）
+//   - D-pad ボタン 9 個（.dpad-btn）
+// を pointer-events:none + grayscale + opacity 0.5 で「触れない・見ても触れない」
+// 状態にする。JS の早期 return は保険として残しつつ、ボタンレイヤーで物理ブロック
+// するので、async の隙間に DOM クリック event が積まれても発火しない。
 let _turnBusy = false;
+function _setTurnBusy(v) {
+  _turnBusy = !!v;
+  try {
+    document.body.classList.toggle('is-turn-busy', _turnBusy);
+  } catch {}
+}
 
 // 瞬発力（agility）バフで「1 ターンに複数回行動」を実現するためのカウンタ。
 // 各ターンの先頭でバフ status から actionsPerTurn を計算してセット。プレイヤーの
@@ -5366,7 +5379,7 @@ async function _pvpReapplyOwnEquip(mode, format) {
 // PvP アリーナ: 移動完了を Firestore に通知して相手側にターンを渡す。
 function _pvpSendMoveAction() {
   if (!_pvpCode || !_pvpRole || !_pvpData || !dungeon) return;
-  _turnBusy = true;     // 相手の応答が来るまで自分の入力を弾く
+  _setTurnBusy(true);     // 相手の応答が来るまで自分の入力を弾く
   pvpSubmitMove(_pvpCode, _pvpRole, {
     x:      dungeon.playerPos.x,
     y:      dungeon.playerPos.y,
@@ -5374,7 +5387,7 @@ function _pvpSendMoveAction() {
   }, _pvpData?.turnNo ?? 0)
     .catch(err => console.warn('PvP move sync failed:', err))
     .finally(() => {
-      _turnBusy = false;
+      _setTurnBusy(false);
       if (dungeon) dungeon.render(document.getElementById('dungeon-canvas'));
     });
 }
@@ -5401,7 +5414,7 @@ function _pvpSendSkillAction(args) {
     }
   }
   const opp = (dungeon?.monsters ?? []).find(m => m?.isPvpOpponent);
-  _turnBusy = true;
+  _setTurnBusy(true);
   pvpSubmitArenaAttack(_pvpCode, _pvpRole, {
     kind: 'skill',
     dmg: args.totalDmg ?? 0,
@@ -5416,7 +5429,7 @@ function _pvpSendSkillAction(args) {
   })
     .catch(err => console.warn('PvP skill sync failed:', err))
     .finally(() => {
-      _turnBusy = false;
+      _setTurnBusy(false);
       if (dungeon) dungeon.render(document.getElementById('dungeon-canvas'));
     });
 }
@@ -5425,7 +5438,7 @@ function _pvpSendSkillAction(args) {
 // ターン交代をまとめて Firestore に送る。submitOwnState の flipTurn で 1 行で済む。
 function _pvpSendSelfBuff() {
   if (!_pvpCode || !_pvpRole || !_pvpData) return;
-  _turnBusy = true;
+  _setTurnBusy(true);
   const otherRole = _pvpRole === 'host' ? 'guest' : 'host';
   pvpSubmitOwnState(_pvpCode, _pvpRole, {
     hp:       player.hp,
@@ -5439,7 +5452,7 @@ function _pvpSendSelfBuff() {
   })
     .catch(err => console.warn('PvP self-buff sync failed:', err))
     .finally(() => {
-      _turnBusy = false;
+      _setTurnBusy(false);
       if (dungeon) dungeon.render(document.getElementById('dungeon-canvas'));
     });
 }
@@ -5452,7 +5465,7 @@ function _pvpSendBossDamage(bossHpAfter, dmg) {
     // typo guard: _pvpCode 大文字小文字に注意
   }
   if (!_pvpCode || !_pvpRole || !_pvpData) return;
-  _turnBusy = true;
+  _setTurnBusy(true);
   const otherRole = _pvpRole === 'host' ? 'guest' : 'host';
   // ボスがまだ生きていれば反撃: boss.atk - 自分の def を最低 1 で適用。
   // 反撃命中演出（フローティングダメージ + ヒットフラッシュ + シェイク）を即時にローカルでも出す。
@@ -5484,7 +5497,7 @@ function _pvpSendBossDamage(bossHpAfter, dmg) {
   })
     .catch(err => console.warn('PvP boss update failed:', err))
     .finally(() => {
-      _turnBusy = false;
+      _setTurnBusy(false);
       if (dungeon) dungeon.render(document.getElementById('dungeon-canvas'));
     });
 }
@@ -5492,7 +5505,7 @@ function _pvpSendBossDamage(bossHpAfter, dmg) {
 // PvP アリーナ: バンプ攻撃で相手プレイヤーにダメージを与えた結果を通知。
 function _pvpSendAttackAction(dmg, targetHpAfter) {
   if (!_pvpCode || !_pvpRole || !_pvpData) return;
-  _turnBusy = true;
+  _setTurnBusy(true);
   pvpSubmitArenaAttack(_pvpCode, _pvpRole, {
     kind: 'attack',
     dmg,
@@ -5502,7 +5515,7 @@ function _pvpSendAttackAction(dmg, targetHpAfter) {
   })
     .catch(err => console.warn('PvP attack sync failed:', err))
     .finally(() => {
-      _turnBusy = false;
+      _setTurnBusy(false);
       if (dungeon) dungeon.render(document.getElementById('dungeon-canvas'));
     });
 }
@@ -5523,16 +5536,16 @@ function _runEnemyTurn() {
     }
     refreshHUD();
     if (dungeon) dungeon.render(document.getElementById('dungeon-canvas'));
-    _turnBusy = false;
+    _setTurnBusy(false);
     return;
   }
 
   // ターン進行: アニメーションが終わるまで move() の追加入力を弾く。
   // 完了パスが複数ある（即終了/death/最後の magic 後など）ため、ここで上限の
   // setTimeout も予防的に張って必ずクリアされるようにする。
-  _turnBusy = true;
+  _setTurnBusy(true);
   const _clearBusy = () => {
-    _turnBusy = false;
+    _setTurnBusy(false);
     // 敵ターン完了時点で次ターンの行動回数を再計算（バフ tick 反映後の値）
     _actionsLeftThisTurn = actionsPerTurn(player);
   };
