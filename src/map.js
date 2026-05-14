@@ -14,6 +14,8 @@ let playerMarker = null;
 let playerPos    = null;                 // { lat, lng }
 const renderedPins         = new Map();  // seed -> { marker, dungeon } 既存ダンジョン
 const renderedEncounters   = new Map();  // seed -> { marker, encounter } 道端遭遇
+let bolderothMarker        = null;       // 動かざる磐石・ボルダロス（クエストピン）
+let bolderothData          = null;       // 現在表示中のボルダロスダンジョン data
 let onEnterCb         = null;
 let isClearedCb       = null;
 let difficultyCb      = null;
@@ -23,6 +25,8 @@ let onEncounterCb         = null;
 let isEncounterConsumedCb = null;
 let getPlayerLevelCb      = null;
 let onPositionUpdateCb    = null;   // GPS 更新ごとに lat,lng を渡す（商人距離キャンセル等）
+// ダンジョンのマルチプレイ攻略ボタンが押された時に呼ぶ。
+let onCoopDungeonCb       = null;
 // ユーザーが手動でドラッグ／ピンチした最後の時刻。直後 N 秒は GPS 更新で
 // 自動再センタリングしない（離れた場所のピンを見たい時用）。それ以外は
 // 常にプレイヤーが地図の中心に来るよう追従する。
@@ -175,10 +179,27 @@ function _refreshEncounters(lat, lng) {
   }
 }
 
+// ダンジョンの属性絵文字（小バッジ表示用）
+const _ELEMENT_BADGE = {
+  '火': '🔥', '水': '💧', '草': '🌿', '雷': '⚡', '光': '✨', '闇': '🌑',
+};
+
 function _pinHtml(dungeon, cleared) {
-  return `<div class="dungeon-map-icon${cleared ? ' cleared' : ''}" `
-       + `style="background:${cleared ? '#555' : dungeon.rarityBase.color}">`
-       + `${dungeon.theme.name[0]}</div>`;
+  const badge = _ELEMENT_BADGE[dungeon.element] ?? '';
+  const stars = '★'.repeat(Math.min(3, dungeon.difficulty));
+  const themeChar = dungeon.theme?.name?.[0] ?? '◆';
+  const rarityCls = ({
+    'コモン':     'common',
+    'レア':       'rare',
+    'エピック':   'epic',
+    'レジェンド': 'legendary',
+  })[dungeon.rarityBase?.name] ?? 'common';
+  return `<div class="dungeon-map-icon rarity-${rarityCls}${cleared ? ' cleared' : ''}" `
+       + `style="--dpin-color:${cleared ? '#555' : dungeon.rarityBase.color}">`
+       + `  <div class="dpin-core">${themeChar}</div>`
+       + `  <div class="dpin-element">${badge}</div>`
+       + `  <div class="dpin-stars">${stars}</div>`
+       + `</div>`;
 }
 
 function _buildPopupHtml(dungeon) {
@@ -199,6 +220,13 @@ function _buildPopupHtml(dungeon) {
       + `</div>`
     : '';
 
+  // 「マルチプレイで攻略」ボタンは登録があれば表示。範囲内でなくても出して、
+  // 仲間を集めてから一緒に潜るフローを成立させる（部屋作成は距離無関係）。
+  const coopBtn = onCoopDungeonCb
+    ? `<button class="popup-coop-btn" data-seed="${dungeon.seed}" `
+      + `style="margin-top:6px;padding:6px 14px;background:#26a69a;color:#fff;`
+      + `border:none;border-radius:6px;cursor:pointer;font-weight:bold">🤝 マルチプレイで攻略</button>`
+    : '';
   return (
     `<div><b>${dungeon.name}</b></div>` +
     `<div>難易度: ${'⭐'.repeat(dungeon.difficulty)} / B${dungeon.floors}F</div>` +
@@ -211,7 +239,8 @@ function _buildPopupHtml(dungeon) {
         + `style="margin-top:8px;padding:6px 14px;background:#7c4dff;color:#fff;`
         + `border:none;border-radius:6px;cursor:pointer;font-weight:bold">入場する</button>`
       : `<div style="margin-top:6px;color:#888">🚶 距離 ${dist}m`
-        + `（${ENTER_RADIUS}m以内で入場可）</div>`)
+        + `（${ENTER_RADIUS}m以内で入場可）</div>`) +
+    coopBtn
   );
 }
 
@@ -228,17 +257,26 @@ function _addDungeonPin(dungeon) {
   // Leafletの標準トグル動作を使う：クリック毎にコンテンツ関数で最新HTMLを生成
   marker.bindPopup(() => _buildPopupHtml(dungeon));
 
-  // ポップアップが開かれた直後に「入場する」ボタンへハンドラを付ける
+  // ポップアップが開かれた直後に「入場する」「マルチプレイで攻略」ボタンへハンドラを付ける
   marker.on('popupopen', () => {
-    if (!onEnterCb) return;
-    const btn = document.querySelector(
+    const enterBtn = document.querySelector(
       `button.popup-enter-btn[data-seed="${dungeon.seed}"]`,
     );
-    if (!btn) return;
-    btn.addEventListener('click', () => {
-      marker.closePopup();
-      onEnterCb(dungeon);
-    }, { once: true });
+    if (enterBtn && onEnterCb) {
+      enterBtn.addEventListener('click', () => {
+        marker.closePopup();
+        onEnterCb(dungeon);
+      }, { once: true });
+    }
+    const coopBtn = document.querySelector(
+      `button.popup-coop-btn[data-seed="${dungeon.seed}"]`,
+    );
+    if (coopBtn && onCoopDungeonCb) {
+      coopBtn.addEventListener('click', () => {
+        marker.closePopup();
+        onCoopDungeonCb(dungeon);
+      }, { once: true });
+    }
   });
 
   renderedPins.set(dungeon.seed, { marker, dungeon });
@@ -304,17 +342,10 @@ function _addEncounterPin(encounter) {
     className: '',
   });
   const marker = L.marker([encounter.lat, encounter.lng], { icon }).addTo(map);
-  marker.bindPopup(() => _encounterPopupHtml(encounter));
-  marker.on('popupopen', () => {
-    if (!onEncounterCb) return;
-    const btn = document.querySelector(
-      `button.popup-encounter-btn[data-seed="${encounter.seed}"]`,
-    );
-    if (!btn) return;
-    btn.addEventListener('click', () => {
-      marker.closePopup();
-      onEncounterCb(encounter);
-    }, { once: true });
+  // エンカウントピンは「タップ＝即アクション」に変更（ダンジョンと違って吹き出しを出さない）。
+  // 80m 圏内に来た瞬間に出現する仕様なので、押した時点で接触可能と見なす。
+  marker.on('click', () => {
+    if (onEncounterCb) onEncounterCb(encounter);
   });
   renderedEncounters.set(encounter.seed, { marker, encounter });
 }
@@ -334,6 +365,71 @@ export function debugSpawnEncounter(kind) {
   return true;
 }
 
+// ──────────────────────────────────────────
+// 動かざる磐石・ボルダロス（クエストピン）
+// ──────────────────────────────────────────
+//   通常のグリッド固定湧きとは独立して、プレイヤーの GPS 位置から少し離れた
+//   場所に専用ピンを置く。条件:
+//     - プレイヤーがダンジョンを 3 回以上クリア
+//     - まだボルダロスを撃破していない（player.bolderothCleared が false）
+//   ピンの座標は main.js 側で「最初に出現させた時の位置」を保持し、以後固定。
+//   撃破済みになったら removeBolderothPin で消す。
+function _bolderothPinHtml() {
+  return `<div class="bolderoth-map-icon" title="動かざる磐石・ボルダロス">`
+       + `  <div class="bolderoth-core">磐</div>`
+       + `  <div class="bolderoth-glow"></div>`
+       + `</div>`;
+}
+
+// 表示 / 位置更新。data は { lat, lng, dungeonData } を最低限持つ。
+export function showBolderothPin(data) {
+  if (!map) return;
+  if (!data) return;
+  bolderothData = data;
+  if (bolderothMarker) {
+    try { bolderothMarker.setLatLng([data.lat, data.lng]); } catch {}
+    return;
+  }
+  const icon = L.divIcon({
+    html: _bolderothPinHtml(),
+    iconSize: [54, 54],
+    iconAnchor: [27, 27],
+    className: '',
+  });
+  bolderothMarker = L.marker([data.lat, data.lng], { icon, zIndexOffset: 500 }).addTo(map);
+  bolderothMarker.bindPopup(() => {
+    return (
+      `<div><b>💎 動かざる磐石・ボルダロス</b></div>` +
+      `<div style="font-size:11px;color:#888;margin-top:4px">レベル10 解放クエスト</div>` +
+      `<div style="font-size:12px;margin-top:4px">古き磐の主を倒すと Lv10 の壁が砕け、Lv11 以上に成長できるようになる</div>` +
+      `<button class="popup-bolderoth-btn" `
+      + `style="margin-top:8px;padding:6px 14px;background:#b388ff;color:#fff;`
+      + `border:none;border-radius:6px;cursor:pointer;font-weight:bold">挑む</button>`
+    );
+  });
+  bolderothMarker.on('popupopen', () => {
+    if (!onEnterCb) return;
+    const btn = document.querySelector('button.popup-bolderoth-btn');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      bolderothMarker?.closePopup();
+      onEnterCb(bolderothData.dungeonData);
+    }, { once: true });
+  });
+}
+
+export function removeBolderothPin() {
+  if (bolderothMarker) {
+    try { bolderothMarker.remove(); } catch {}
+    bolderothMarker = null;
+  }
+  bolderothData = null;
+}
+
+export function getBolderothPos() {
+  return bolderothData ? { lat: bolderothData.lat, lng: bolderothData.lng } : null;
+}
+
 // main.js から消費済みエンカウントのフラグや画面状態の変化に応じて
 // 該当ピンを地図から消すための公開 API（拾った宝箱など）。
 export function removeEncounterPin(seed) {
@@ -346,11 +442,12 @@ export function removeEncounterPin(seed) {
 // main.js が後付けでコールバックを差し替えるための setter。
 // initMap の引数で渡しても良いが、登録順序が main.js の構造に依存してしまうため
 // 別関数で受けるようにした（Phase C で追加）。
-export function setEncounterCallbacks({ onEncounter, isConsumed, playerLevel, onPositionUpdate } = {}) {
+export function setEncounterCallbacks({ onEncounter, isConsumed, playerLevel, onPositionUpdate, onCoopDungeon } = {}) {
   if (onEncounter)        onEncounterCb         = onEncounter;
   if (isConsumed)         isEncounterConsumedCb = isConsumed;
   if (playerLevel)        getPlayerLevelCb      = playerLevel;
   if (onPositionUpdate)   onPositionUpdateCb    = onPositionUpdate;
+  if (onCoopDungeon)      onCoopDungeonCb       = onCoopDungeon;
   // 既に GPS が来ている場合は即時再描画（コールバック切替の反映）
   if (playerPos) _refreshEncounters(playerPos.lat, playerPos.lng);
 }

@@ -155,10 +155,14 @@ function _bossSpecById(id) {
 
 // 協力モード用のボス NPC 初期スペック。Lobby でホストが選んだ id から組み立てる。
 // id 未指定なら先頭のボス（火竜）。アリーナ中央上方に配置。
-function _buildInitialCoopBoss(bossId) {
-  const spec = _bossSpecById(bossId);
+//
+// 第 2 引数の customSpec が指定されている場合、ID マッチではなく完全カスタム
+// （ダンジョン由来のボス）として組み立てる。これにより「マップ上の任意ダンジョン
+// のボスをマルチ協力で討伐する」フローが、既存の協力ボス機構の上に乗っかる。
+function _buildInitialCoopBoss(bossId, customSpec = null) {
+  const spec = customSpec ?? _bossSpecById(bossId);
   return {
-    bossId:  spec.id,
+    bossId:  spec.id ?? bossId ?? 'custom',
     name:    spec.name,
     emoji:   spec.emoji,
     element: spec.element,
@@ -168,6 +172,9 @@ function _buildInitialCoopBoss(bossId) {
     def:     spec.def,
     x:       Math.floor(ARENA_W / 2),
     y:       9,
+    // 任意の出自タグ（ダンジョン由来なら 'dungeon-coop'）。再戦時のリセット用。
+    source:  spec.source ?? null,
+    dungeonName: spec.dungeonName ?? null,
   };
 }
 
@@ -239,11 +246,16 @@ export async function setRoomBoss(code, bossId) {
 //   opts.mode       = 'pvp' | 'coop'   デフォルト 'pvp'
 //   opts.pvpFormat  = 'current' | 'set' （pvp 時のみ。デフォルト 'current'）
 //   opts.bossId     = COOP_BOSSES[i].id （coop 時のみ。デフォルト先頭）
+//   opts.customBoss = { name, emoji, element, hp, maxHp, atk, def, dungeonName? }
+//                     （coop 時、ダンジョン由来の動的ボスを直接指定する場合）
 export async function createRoom(profile, opts = {}) {
   const db = _getDb();
   if (!db) throw new Error('Firestore 未初期化');
   const mode       = opts.mode === 'coop' ? 'coop' : 'pvp';
   const pvpFormat  = opts.pvpFormat === 'set' ? 'set' : 'current';
+  const initialBoss = mode === 'coop'
+    ? _buildInitialCoopBoss(opts.bossId, opts.customBoss ?? null)
+    : null;
   for (let attempt = 0; attempt < 5; attempt++) {
     const code = _genCode();
     const ref  = doc(db, ROOMS, code);
@@ -260,7 +272,7 @@ export async function createRoom(profile, opts = {}) {
       actions:   [],
       winnerUid: null,
       cause:     null,                    // 'bossKilled' | 'playerDied' | null
-      boss:      mode === 'coop' ? _buildInitialCoopBoss(opts.bossId) : null,
+      boss:      initialBoss,
       createdAt: serverTimestamp(),
     });
     return code;

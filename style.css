@@ -40,7 +40,17 @@ input, textarea {
   inset: 0;
   flex-direction: column;
 }
-.screen.active { display: flex; }
+/* 画面切替を滑らかに: active 化された瞬間に短いフェードイン＋微スケールで
+   ハードカットの違和感を消す。display:flex は維持しないとレイアウト計算が
+   動かないので、CSS アニメーションで重ねがけする。 */
+.screen.active {
+  display: flex;
+  animation: screenFadeIn 280ms ease-out;
+}
+@keyframes screenFadeIn {
+  from { opacity: 0; transform: scale(0.985); }
+  to   { opacity: 1; transform: scale(1.0);   }
+}
 
 /* ── タイトル画面（ログイン） ── */
 #screen-title {
@@ -2563,6 +2573,27 @@ input, textarea {
   filter: drop-shadow(0 4px 12px rgba(0,0,0,0.55));
   animation: chestShakeOpen 1.4s ease-in-out forwards;
 }
+/* 3 コマアニメーション用。frame ごとに 1 つだけ display:block にして、JS 側で
+   class を切り替えて表示する。frame 番号が現在のコマ。 */
+.chest-open-anim .chest-anim-frame {
+  position: absolute;
+  font-size: 96px;
+  line-height: 1;
+  opacity: 0;
+  transform: scale(0.7);
+  transition: opacity 120ms ease-out, transform 200ms ease-out;
+  filter: drop-shadow(0 4px 12px rgba(0,0,0,0.55));
+}
+.chest-open-anim .chest-anim-frame.active {
+  opacity: 1;
+  transform: scale(1.0);
+}
+.chest-open-anim .chest-anim-frame.f3 {
+  filter: drop-shadow(0 0 18px var(--c, #ffd54f));
+}
+.chest-open-anim .chest-anim-frame.f3.active {
+  transform: scale(1.15);
+}
 .chest-open-anim .chest-anim-burst {
   position: absolute;
   font-size: 30px;
@@ -3393,17 +3424,112 @@ input, textarea {
 }
 .map-recenter-btn:active { background: var(--primary); }
 .dungeon-map-icon {
-  width: 40px; height: 40px;
-  background: var(--primary);
-  border-radius: 50%;
+  position: relative;
+  width: 48px; height: 48px;
+  border-radius: 16px;
   display: flex; align-items: center; justify-content: center;
-  font-size: 18px; font-weight: bold; color: #fff;
-  box-shadow: 0 0 14px var(--primary-glow);
-  border: 2px solid rgba(255,255,255,0.3);
+  color: #fff;
+  background:
+    radial-gradient(circle at 35% 30%, rgba(255,255,255,0.45) 0%, transparent 45%),
+    linear-gradient(160deg, var(--dpin-color, #7c4dff) 0%, rgba(0,0,0,0.4) 110%);
+  box-shadow:
+    0 0 12px var(--dpin-color, #7c4dff),
+    0 4px 10px rgba(0,0,0,0.55),
+    inset 0 0 6px rgba(0,0,0,0.35);
+  border: 2px solid rgba(255,255,255,0.55);
+  animation: dpinFloat 3.4s ease-in-out infinite;
+}
+.dungeon-map-icon .dpin-core {
+  font-size: 18px; font-weight: 900;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.85), 0 0 6px rgba(0,0,0,0.7);
+  letter-spacing: 0;
+}
+.dungeon-map-icon .dpin-element {
+  position: absolute;
+  top: -8px; right: -8px;
+  width: 20px; height: 20px;
+  background: rgba(20,20,30,0.92);
+  border: 1.5px solid rgba(255,255,255,0.65);
+  border-radius: 50%;
+  font-size: 13px; line-height: 18px;
+  text-align: center;
+  box-shadow: 0 0 6px rgba(0,0,0,0.7);
+}
+.dungeon-map-icon .dpin-stars {
+  position: absolute;
+  left: 0; right: 0;
+  bottom: -12px;
+  text-align: center;
+  font-size: 10px;
+  color: #ffd54f;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.9);
+  letter-spacing: 1px;
+}
+/* レアリティで境界線の輝度を変えて高ランクほど目立たせる */
+.dungeon-map-icon.rarity-legendary {
+  border-color: #ffe082;
+  box-shadow:
+    0 0 18px #ffd54f,
+    0 0 28px rgba(255,213,79,0.45),
+    0 4px 10px rgba(0,0,0,0.55),
+    inset 0 0 6px rgba(0,0,0,0.35);
+}
+.dungeon-map-icon.rarity-epic {
+  border-color: #e1bee7;
+  box-shadow:
+    0 0 14px #b070dd,
+    0 4px 10px rgba(0,0,0,0.55),
+    inset 0 0 6px rgba(0,0,0,0.35);
 }
 .dungeon-map-icon.cleared {
-  background: #555;
-  box-shadow: none;
+  background: linear-gradient(160deg, #555 0%, #222 100%);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.55);
+  filter: grayscale(0.7);
+  animation: none;
+}
+.dungeon-map-icon.cleared .dpin-stars { color: #999; }
+@keyframes dpinFloat {
+  0%   { transform: translateY(0) rotate(0deg); }
+  50%  { transform: translateY(-3px) rotate(0.5deg); }
+  100% { transform: translateY(0) rotate(0deg); }
+}
+
+/* 動かざる磐石・ボルダロス（クエストピン）。一目で「専用クエスト」と分かる
+   ように、紫の磐石を模した六角形枠 + ゆっくり脈動するグロウを当てる。 */
+.bolderoth-map-icon {
+  position: relative;
+  width: 54px; height: 54px;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff;
+  background:
+    radial-gradient(circle at 35% 30%, rgba(255,255,255,0.40) 0%, transparent 50%),
+    linear-gradient(160deg, #6a4ad6 0%, #2b1d5b 100%);
+  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+  border: 2px solid rgba(255,255,255,0.7);
+  box-shadow: 0 0 14px #b388ff, 0 4px 10px rgba(0,0,0,0.55);
+  animation: bolderothPulse 2.4s ease-in-out infinite;
+}
+.bolderoth-map-icon .bolderoth-core {
+  font-size: 22px; font-weight: 900;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.9), 0 0 8px rgba(0,0,0,0.7);
+}
+.bolderoth-map-icon .bolderoth-glow {
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(179,136,255,0.6) 0%, transparent 60%);
+  z-index: -1;
+  animation: bolderothGlow 2.4s ease-in-out infinite;
+}
+@keyframes bolderothPulse {
+  0%   { transform: scale(1.0); }
+  50%  { transform: scale(1.06); }
+  100% { transform: scale(1.0); }
+}
+@keyframes bolderothGlow {
+  0%   { opacity: 0.55; transform: scale(1.0); }
+  50%  { opacity: 0.95; transform: scale(1.15); }
+  100% { opacity: 0.55; transform: scale(1.0); }
 }
 
 /* 道端エンカウント（モンスター / 強敵 / 宝箱 / 商人）。

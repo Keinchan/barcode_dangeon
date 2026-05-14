@@ -1,4 +1,4 @@
-import { initMap, refreshPin, setPlayerPosition, invalidateMapSize, recenterOnPlayer, resumeGeolocation, setEncounterCallbacks, removeEncounterPin, debugSpawnEncounter } from './map.js';
+import { initMap, refreshPin, setPlayerPosition, invalidateMapSize, recenterOnPlayer, resumeGeolocation, setEncounterCallbacks, removeEncounterPin, debugSpawnEncounter, showBolderothPin, removeBolderothPin, getBolderothPos } from './map.js';
 import { startScanner, stopScanner, getPosition, categoryOfFormat } from './scanner.js';
 import {
   createPlayer,
@@ -240,6 +240,27 @@ function iconImg(item, size = 38) {
   return `<img class="item-icon" width="${size}" height="${size}" src="${url}" alt="${item.name}" />`;
 }
 
+// ─────────────────────────────────────────────
+// 自動 MP 回復薬使用の ON/OFF 設定
+// ─────────────────────────────────────────────
+//   ON: 技発動時に MP が足りないと、所持している MP 回復薬から「不足分を満たす最小」
+//       を選んで確認ダイアログを出し、使うかどうか聞く（既存挙動）。
+//   OFF: 自動提案せず、単に「MP 足りない」アラートで止める。
+//
+// 値は localStorage（'real_hide:auto-mp:v1'）に永続化。読み書きヘルパを export
+// しなくても main.js 内クローズドで使うだけで十分なため、ここで完結させる。
+const _AUTO_MP_KEY = 'real_hide:auto-mp:v1';
+let _autoMpUseEnabled = true;
+try {
+  const raw = localStorage.getItem(_AUTO_MP_KEY);
+  if (raw !== null) _autoMpUseEnabled = raw === '1';
+} catch {}
+function getAutoMpUse() { return _autoMpUseEnabled; }
+function setAutoMpUse(v) {
+  _autoMpUseEnabled = !!v;
+  try { localStorage.setItem(_AUTO_MP_KEY, _autoMpUseEnabled ? '1' : '0'); } catch {}
+}
+
 // ── 状態 ──
 let screen       = 'title';
 let player       = createPlayer();      // セッション通して維持
@@ -247,6 +268,9 @@ let dungeonData  = null;
 let dungeon      = null;
 let currentFloor = 1;
 const clearedSet = new Set();
+// ボルダロスクエスト用: マップ上に表示中のボルダロスダンジョン data。
+// 攻略完了後は null にしてピンを消す。
+let bolderothQuest = null;
 
 // ダンジョン入場時のスナップショット（敗北時ロールバック用）
 let entrySnapshot = null;
@@ -271,6 +295,8 @@ function show(name) {
       // 必ず再起動して即時 getCurrentPosition も叩く。死亡→マップ復帰直後に
       // ワンタップしないと現在地が動かない UX バグの根治。
       resumeGeolocation();
+      // ボルダロスピンの再確認（マップに戻る毎に条件を見直す）
+      try { _ensureBolderothPin(); } catch {}
     });
   }
   _bgmForScreen(name);
@@ -328,6 +354,7 @@ setEncounterCallbacks({
   isConsumed:   seed => consumedEncounters.has(seed),
   playerLevel:  () => player?.level ?? 1,
   onPositionUpdate: (lat, lng) => _onPlayerPositionUpdate(lat, lng),
+  onCoopDungeon: d => _startCoopDungeonRoom(d),
 });
 
 // プレイヤーvsダンジョンの難易度評価
@@ -361,6 +388,74 @@ export function recommendedLevel(d) {
     if (diff.label !== '危険' && diff.label !== '無謀') return L;
   }
   return MAX_LEVEL;
+}
+
+// ─────────────────────────────────────────────
+// 動かざる磐石・ボルダロスのクエスト
+// ─────────────────────────────────────────────
+//   通常ダンジョンを 3 回攻略すると、マップ上にボルダロスの専用ピンが現れる。
+//   攻略するまでプレイヤーの Lv は 10 で頭打ち（gainXp 側で制御）。撃破すれば
+//   Lv 上限が MAX_LEVEL（100）まで解放される。
+//   ボルダロスダンジョンは固定スペック（B5F / レジェンド / 専用ボス）。
+const _BOLDEROTH_THEME = {
+  name: '動かざる磐石',
+  wallColor: '#3a2a55',
+  floorColor: '#120a22',
+};
+function _buildBolderothDungeon() {
+  const seed = `bolderoth:${player.bolderothQuestId ?? Date.now()}`;
+  return {
+    seed,
+    barcode:     '9999999999999',
+    name:        '🪨 動かざる磐石・ボルダロス',
+    theme:       _BOLDEROTH_THEME,
+    floors:      5,
+    difficulty:  3,
+    monsterTypeIdx: 0,
+    elementIdx:  5,        // 闇
+    element:     '闇',
+    rarityBase:  RARITIES[3],   // レジェンド
+    isBolderoth: true,
+    bossOverride: {
+      name:    '👑 動かざる磐石・ボルダロス',
+      base:    'ボルダロス',
+      emoji:   '🪨',
+      element: '闇',
+      hpMul:   1.6,
+      atkMul:  1.2,
+      defMul:  1.4,
+    },
+  };
+}
+
+// ボルダロスダンジョンをマップ上に出現させる（条件を満たしていれば）。
+// 既に表示中／撃破済みなら何もしない。位置はプレイヤーの GPS から北東 60m。
+function _ensureBolderothPin() {
+  if (player.bolderothCleared) return;
+  if ((player.dungeonClearCount ?? 0) < 3) return;
+  if (bolderothQuest) {
+    try { showBolderothPin(bolderothQuest); } catch {}
+    return;
+  }
+  // プレイヤーから北東 60m に配置。緯度 1° ≒ 111,320m。
+  const cur = getCurrentPlayerLatLng();
+  if (!cur) return;
+  const dLat = 60 / 111320;
+  const dLng = 60 / (111320 * Math.cos(cur.lat * Math.PI / 180));
+  const data = _buildBolderothDungeon();
+  bolderothQuest = {
+    lat: cur.lat + dLat,
+    lng: cur.lng + dLng,
+    dungeonData: data,
+  };
+  try { showBolderothPin(bolderothQuest); } catch {}
+}
+
+// プレイヤーの現在 GPS 位置を取得。map.js の playerPos を直接取れないため
+// onPositionUpdate コールバックで最新の値をキャッシュする。
+let _lastKnownPlayerLatLng = null;
+function getCurrentPlayerLatLng() {
+  return _lastKnownPlayerLatLng;
 }
 
 // 入場前モーダル
@@ -534,6 +629,10 @@ function _openMapMerchant(e) {
 // 離れすぎていればモーダルを閉じてアラート。戦闘中（dungeon.tickEnemies 中など）の
 // shop モーダルは存在しないので地図商人だけが対象。
 function _onPlayerPositionUpdate(lat, lng) {
+  // ボルダロスピン用に最新の GPS を保持。
+  _lastKnownPlayerLatLng = { lat, lng };
+  // 条件を満たしていればピンを描画／再表示（既に表示中なら何もしない）。
+  _ensureBolderothPin();
   if (!_mapMerchantPos) return;
   const shop = document.getElementById('shop-modal');
   if (!shop || shop.classList.contains('hidden')) return;
@@ -1793,6 +1892,10 @@ function _refreshAudioMenu() {
   // 戦闘速度セグメント描画（毎回 active を更新する必要があるので毎回再描画）
   _refreshCombatSpeedUI();
 
+  // マナ自動使用トグル
+  const autoMp = document.getElementById('menu-auto-mp-toggle');
+  if (autoMp) autoMp.checked = getAutoMpUse();
+
   if (_audioMenuBound) return;
   _audioMenuBound = true;
   bgmChk.addEventListener('change', e => {
@@ -1806,6 +1909,12 @@ function _refreshAudioMenu() {
   bgmVol.addEventListener('input', e => setBgmVolume(parseFloat(e.target.value)));
   sfxVol.addEventListener('input', e => setSfxVolume(parseFloat(e.target.value)));
   sfxVol.addEventListener('change', () => playSfx('click'));
+  if (autoMp) {
+    autoMp.addEventListener('change', e => {
+      setAutoMpUse(e.target.checked);
+      playSfx('click');
+    });
+  }
 }
 
 // 戦闘速度セグメント（高速 / 低速）。クリックで即時切替・active 表示更新。
@@ -2457,8 +2566,13 @@ async function _executeSkill(skill) {
   const burnExtra = hasStatus(player, 'burn') ? 1 : 0;
   const mpNeeded  = skill.mpCost + burnExtra;
   if ((player.mp ?? 0) < mpNeeded) {
-    // MP 切れの時は持っている MP 回復薬から自動で 1 本使えるか提案する。
-    // 使ったら今のターンを消費せずに技発動の再判定へ進む（ターン外行動扱い）。
+    // 「マナの自動使用」設定が OFF なら自動消費提案をしない。素直にアラートだけ
+    // 出して何もせず戻す（持ち物画面から手動で MP 回復薬を飲んでもらう）。
+    if (!getAutoMpUse()) {
+      showAlert(`MP が足りません（必要 ${mpNeeded}${burnExtra ? ' / 熱傷で+1' : ''}）\n設定で「マナの自動使用」を OFF にしているため、自動で MP 回復薬は使われません。`);
+      return;
+    }
+    // ON: 自動使用提案。使ったら今のターンを消費せずに技発動の再判定へ進む。
     const recovered = await _tryQuickMpRecover(mpNeeded);
     if (!recovered) {
       showAlert(`MP が足りません（必要 ${mpNeeded}${burnExtra ? ' / 熱傷で+1' : ''}）\nMP 回復薬を持っていません。`);
@@ -4312,18 +4426,31 @@ function _refreshBuffChips() {
 }
 
 // XP獲得＆レベルアップ
+// ボルダロス未討伐の間はレベル 10 を超えられない（XP は貯まるが Lv は止まる）。
+// 撃破後にこの上限が外れ、貯めていた XP で一気に成長できる。
+const BOLDEROTH_LEVEL_CAP = 10;
+function effectiveLevelCap() {
+  return player.bolderothCleared ? MAX_LEVEL : BOLDEROTH_LEVEL_CAP;
+}
+
 function gainXp(amount) {
   if (amount <= 0) return;
   player.xp += amount;
   const startLevel = player.level;
   let leveledUp = false;
-  while (player.level < MAX_LEVEL && player.xp >= xpRequiredForLevel(player.level)) {
+  const cap = effectiveLevelCap();
+  while (player.level < cap && player.xp >= xpRequiredForLevel(player.level)) {
     player.xp -= xpRequiredForLevel(player.level);
     player.level += 1;
     leveledUp = true;
   }
-  if (player.level >= MAX_LEVEL) {
-    player.xp = 0; // 上限到達でXP溢れは捨てる
+  if (player.level >= cap) {
+    // ボルダロス未撃破でキャップに当たった時は XP を抱えたまま保留
+    if (cap < MAX_LEVEL) {
+      player.xp = Math.min(player.xp, xpRequiredForLevel(player.level) - 1);
+    } else {
+      player.xp = 0;
+    }
   }
   if (leveledUp) {
     applyLevelStats(player);
@@ -6005,9 +6132,12 @@ document.getElementById('chest-result-modal')?.addEventListener('click', (e) => 
   }
 });
 
-// 宝箱を開ける CSS アニメーション（揺れ → 蓋オープン → 中身がはじける）。
-// _celebrateChestOpen 直前に 1.4 秒だけ走らせて「開ける瞬間」を演出する。
-// レアリティに応じてグロー色を変える。
+// 宝箱を開ける 3 コマアニメーション。
+//   コマ1: 🎁 閉じた宝箱（揺れる予兆）
+//   コマ2: 📦 蓋が浮き始める瞬間
+//   コマ3: 🎉 蓋が外れて中身が解放（光が漏れる）
+// 各コマ約 400ms ずつ、合計 1.4 秒。間にクリック SFX を 3 拍刻んで
+// 「カチ → カチ → カチャッ」というリズム感を出す。レア度でグロー色を変える。
 function _playChestOpenAnimation(inner) {
   return new Promise(resolve => {
     const rarity = inner?.rarity ?? 'コモン';
@@ -6021,7 +6151,9 @@ function _playChestOpenAnimation(inner) {
     wrap.innerHTML = `
       <div class="chest-anim-box" style="--c:${glow}">
         <div class="chest-anim-glow"></div>
-        <div class="chest-anim-emoji">🎁</div>
+        <div class="chest-anim-frame f1">🎁</div>
+        <div class="chest-anim-frame f2">📦</div>
+        <div class="chest-anim-frame f3">🎉</div>
         <div class="chest-anim-burst b1">✨</div>
         <div class="chest-anim-burst b2">⭐</div>
         <div class="chest-anim-burst b3">✨</div>
@@ -6029,7 +6161,25 @@ function _playChestOpenAnimation(inner) {
       </div>
     `;
     document.body.appendChild(wrap);
+    const f1 = wrap.querySelector('.chest-anim-frame.f1');
+    const f2 = wrap.querySelector('.chest-anim-frame.f2');
+    const f3 = wrap.querySelector('.chest-anim-frame.f3');
+    // フレーム 1: 即座にアクティブ
+    f1?.classList.add('active');
     playSfx('click');
+    // フレーム 2: 420ms 後（蓋が浮く瞬間）
+    setTimeout(() => {
+      f1?.classList.remove('active');
+      f2?.classList.add('active');
+      playSfx('click');
+    }, 420);
+    // フレーム 3: 840ms 後（パッと開いて光がはじける）
+    setTimeout(() => {
+      f2?.classList.remove('active');
+      f3?.classList.add('active');
+      playSfx('click');
+    }, 840);
+    // 1.4s 後にクリーンアップして次へ
     setTimeout(() => {
       try { wrap.remove(); } catch {}
       resolve();
@@ -6192,6 +6342,19 @@ function _rollMonsterDrop(mob) {
 function dungeonClear() {
   clearedSet.add(dungeonData.seed);
   refreshPin(dungeonData.seed);
+  // 通常ダンジョン（地図エンカウント・特殊試練・ボルダロス以外）の踏破カウント。
+  // 3 回到達でマップ上にボルダロスのクエストピンを出現させる。
+  const isCountable = !dungeonData?.isMapBattle && !dungeonData?.isSpecial && !dungeonData?.isBolderoth;
+  if (isCountable) {
+    player.dungeonClearCount = (player.dungeonClearCount ?? 0) + 1;
+  }
+  // ボルダロス撃破: レベル 10 の壁が砕け、Lv 上限が MAX_LEVEL まで広がる。
+  if (dungeonData?.isBolderoth) {
+    player.bolderothCleared = true;
+    bolderothQuest = null;
+    try { removeBolderothPin(); } catch {}
+    showAlert('🌟 動かざる磐石・ボルダロスを撃破！\nレベル 10 の壁が砕け、これ以上のレベル上昇が解放された。');
+  }
   // 地図エンカウント由来の 1 ルーム戦闘なら、エンカウントを消費して
   // 同じ場所のピンを今後出さない。dungeonData.encounterSeed に元の seed を載せている。
   if (dungeonData?.isMapBattle && dungeonData.encounterSeed) {
@@ -6280,8 +6443,15 @@ function autoSave() {
       skills:        player.learnedSkills ?? [],
       // ミニオンは座標 x,y を持つ場合があるが永続データには不要なので落とす
       minions:    (player.minions ?? []).map(({ x, y, ...rest }) => rest),
+      // ボルダロスクエスト進捗（撃破フラグ + 通常ダンジョン累計クリア数）
+      dungeonClearCount: player.dungeonClearCount ?? 0,
+      bolderothCleared:  !!player.bolderothCleared,
     },
     clearedSeeds: Array.from(clearedSet),
+    // ボルダロスピンの位置（緯度経度）も保存して、再ログイン後に同じ場所に再表示する
+    bolderothPin: bolderothQuest
+      ? { lat: bolderothQuest.lat, lng: bolderothQuest.lng }
+      : null,
     savedAt: Date.now(),
   });
   _updateDebugSaveStatus();
@@ -6327,6 +6497,17 @@ function _applySave(data) {
   // タイプが設定されていれば現在レベルまでのプライマリ属性技を一括習得する。
   // バナーは出さず（ロード時に大量通知が出ないように）静かに揃える。
   _autoLearnWizardSkills({ silent: true, slotAuto: false });
+  // ボルダロスクエスト関連フィールドのデフォルト埋め
+  if (typeof player.dungeonClearCount !== 'number') player.dungeonClearCount = 0;
+  if (typeof player.bolderothCleared !== 'boolean') player.bolderothCleared = false;
+  // ボルダロスピンの位置を復元（撃破済みなら復元しない）
+  if (!player.bolderothCleared && data.bolderothPin && typeof data.bolderothPin.lat === 'number') {
+    bolderothQuest = {
+      lat: data.bolderothPin.lat,
+      lng: data.bolderothPin.lng,
+      dungeonData: _buildBolderothDungeon(),
+    };
+  }
   refreshHUD();
 }
 
@@ -7108,6 +7289,55 @@ async function _pvpCreate() {
   }
 }
 
+// ダンジョンのポップアップから「マルチプレイで攻略」が押された時の入口。
+// 既存の協力モード機構の上に乗っかり、ボス NPC をそのダンジョン由来の
+// ボスに差し替えて 1 ルーム討伐戦として遊んでもらう。
+//
+// 1) ダンジョン data からボスのレベル相当ステータスを生成
+// 2) 「カスタム協力ボス」として createRoom し、招待コードを発行
+// 3) PvP ロビーに遷移して、ロビー UI が他のフローと同じく見えるようにする
+async function _startCoopDungeonRoom(d) {
+  const u = getCurrentAuthUser();
+  if (!u) {
+    showAlert('マルチプレイにはログインが必要です');
+    return;
+  }
+  if (!d) return;
+  // ボスのレベル相当（最終フロアのボスを基準）
+  const bossLv  = enemyLevel(d, d.floors, true);
+  const bossStats = statsForLevel(bossLv);
+  const job     = findJob(d.jobId) ?? jobForBarcode(d.barcode);
+  // 通常雑魚より若干硬めにして、対戦の手応えを出す（雑魚ベース×1.5）
+  const hp   = Math.max(60, Math.floor(bossStats.maxHp   * 1.5));
+  const atk  = Math.max(8,  Math.floor(bossStats.atkBase * 1.2));
+  const def  = Math.max(0,  Math.floor(bossStats.defBase * 1.2));
+  const customBoss = {
+    name:    `👑 ${d.name} の主`,
+    emoji:   job?.emoji ?? '👹',
+    element: d.element,
+    hp, maxHp: hp, atk, def,
+    source:      'dungeon-coop',
+    dungeonName: d.name,
+  };
+  const profile = buildPvpProfile(u.uid, u.displayName ?? u.email ?? 'プレイヤー', player, 'host', { mode: 'coop' });
+  try {
+    const code = await pvpCreateRoom(profile, { mode: 'coop', customBoss });
+    _pvpCode = code;
+    _pvpRole = 'host';
+    _pvpUnsub = pvpWatchRoom(code, _onPvpUpdate);
+    _enterPvpLobby();
+    document.getElementById('pvp-lobby-actions')?.classList.add('hidden');
+    document.getElementById('pvp-lobby-room')?.classList.remove('hidden');
+    const codeEl = document.getElementById('pvp-lobby-code');
+    if (codeEl) codeEl.textContent = code;
+    const sub = document.getElementById('pvp-lobby-sub');
+    if (sub) sub.textContent = `🤝 「${d.name}」のマルチプレイ部屋を作成しました。相手にコードを共有してください。`;
+    playSfx('confirm');
+  } catch (err) {
+    showAlert(err?.message ?? '部屋作成に失敗');
+  }
+}
+
 async function _pvpJoin() {
   const u = getCurrentAuthUser();
   if (!u) { _showPvpError('ログインが必要です'); return; }
@@ -7433,6 +7663,13 @@ function _refreshPvpTurnUI(data) {
 }
 
 function _renderPvpLobbyRoom(data) {
+  // 「部屋を作る／参加」セクションが部屋に入った後も残らないよう、
+  // ここで毎回明示的に非表示にする（過去に「参加直後にボタンが残る」報告があった
+  // ため、render 経路でも防御的に隠す）。
+  const actionsEl = document.getElementById('pvp-lobby-actions');
+  if (actionsEl) actionsEl.classList.add('hidden');
+  const roomEl = document.getElementById('pvp-lobby-room');
+  if (roomEl) roomEl.classList.remove('hidden');
   // ── モード切替ボタン群（host だけ操作可能、guest は disabled で表示のみ）──
   const modeRow = document.getElementById('pvp-room-mode-row');
   if (modeRow) {

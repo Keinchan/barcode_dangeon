@@ -450,19 +450,36 @@ export function generateMonster(dungeonData, floor, isBoss = false) {
   const rarity        = RARITIES[rarityIdx];
 
   // 属性 × 職業の動的命名: 例) 火属性 + 獣王 → 「フレイムビースト」
-  const displayName = isBoss
+  let displayName = isBoss
     ? monsterBossName(job, element)
     : monsterDisplayName(job, element);
+  let bossEmoji = job.emoji;
+  let bossBase  = job.baseName;
+
+  // ボルダロスダンジョン用のボス上書き。最終フロアのボスだけ専用名・絵文字・
+  // ステータス倍率を当てて「動かざる磐石」感を出す。雑魚は通常生成のまま。
+  let hpFinal  = hp;
+  let atkFinal = atk;
+  let defFinal = def;
+  if (isBoss && dungeonData.bossOverride) {
+    const o = dungeonData.bossOverride;
+    displayName = o.name ?? displayName;
+    bossEmoji   = o.emoji ?? bossEmoji;
+    bossBase    = o.base  ?? bossBase;
+    hpFinal  = Math.max(1, Math.floor(hpFinal  * (o.hpMul  ?? 1)));
+    atkFinal = Math.max(1, Math.floor(atkFinal * (o.atkMul ?? 1)));
+    defFinal = Math.max(0, Math.floor(defFinal * (o.defMul ?? 1)));
+  }
 
   return {
-    base: job.baseName, emoji: job.emoji,
+    base: bossBase, emoji: bossEmoji,
     isBoss,
     name: displayName,
     level: lvl,
     rarity: rarity.name, rarityColor: rarity.color,
     element, skill,
     skillCharge: 0,
-    hp, maxHp: hp, atk, def, floor,
+    hp: hpFinal, maxHp: hpFinal, atk: atkFinal, def: defFinal, floor,
     // 職業情報。tickEnemies が aiHint / preferredRange を見て行動を分岐
     job: {
       id: job.id,
